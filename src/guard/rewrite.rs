@@ -36,30 +36,34 @@ impl VisitorMut for Rewriter<'_> {
 
     fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<()> {
         match expr {
-            Expr::BinaryOp { left, op, right } if is_comparison(op) => {
-                self.translate_operand(left);
-                self.translate_operand(right);
+            Expr::BinaryOp { left, op, right } if is_equality(op) => {
+                self.translate_against_column(left, right);
             }
             Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
-                self.translate_operand(left);
-                self.translate_operand(right);
+                self.translate_against_column(left, right);
             }
             Expr::In {
+                expr,
                 target: InTarget::List(list),
                 ..
-            } => {
+            } if is_column(expr) => {
                 for item in list {
                     self.translate_operand(item);
                 }
             }
-            Expr::Between { low, high, .. } => {
-                self.translate_operand(low);
-                self.translate_operand(high);
+            Expr::Like { expr, pattern, .. }
+            | Expr::ILike { expr, pattern, .. }
+            | Expr::SimilarTo { expr, pattern, .. }
+                if is_column(expr) =>
+            {
+                self.translate_pattern(pattern)
             }
-            Expr::Like { pattern, .. }
-            | Expr::ILike { pattern, .. }
-            | Expr::SimilarTo { pattern, .. } => self.translate_pattern(pattern),
-            Expr::AnyOp { right, .. } | Expr::AllOp { right, .. } => self.translate_array(right),
+            Expr::AnyOp {
+                left,
+                compare_op,
+                right,
+                ..
+            } if is_equality(compare_op) && is_column(left) => self.translate_array(right),
             _ => {}
         }
         ControlFlow::Continue(())
@@ -74,7 +78,7 @@ impl VisitorMut for Rewriter<'_> {
             self.warnings.push(Warning::new(
                 "pseudonym_not_translated",
                 format!(
-                    "'{candidate}' is a pseudonym used outside a comparison; it is translated only when compared with a column (=, <>, IN, ANY, LIKE, BETWEEN)"
+                    "'{candidate}' is a pseudonym used outside a comparison with a column; it is translated only in column = value, column <> value, column IN (...), column = ANY(...) and column LIKE pattern"
                 ),
             ));
         } else if self.lookup.looks_like_pseudonym(candidate).is_some() {
@@ -90,6 +94,14 @@ impl VisitorMut for Rewriter<'_> {
 }
 
 impl Rewriter<'_> {
+    fn translate_against_column(&mut self, left: &mut Expr, right: &mut Expr) {
+        if is_column(left) {
+            self.translate_operand(right);
+        } else if is_column(right) {
+            self.translate_operand(left);
+        }
+    }
+
     fn translate_operand(&mut self, expr: &mut Expr) {
         let Some(value) = literal_slot(expr) else {
             return;
@@ -146,16 +158,22 @@ fn literal_slot(expr: &mut Expr) -> Option<&mut ValueWithSpan> {
     }
 }
 
-fn is_comparison(op: &BinaryOperator) -> bool {
-    matches!(
-        op,
-        BinaryOperator::Eq
-            | BinaryOperator::NotEq
-            | BinaryOperator::Lt
-            | BinaryOperator::LtEq
-            | BinaryOperator::Gt
-            | BinaryOperator::GtEq
-    )
+fn is_equality(op: &BinaryOperator) -> bool {
+    matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq)
+}
+
+fn is_column(expr: &Expr) -> bool {
+    match expr {
+        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => true,
+        Expr::Nested(inner) | Expr::Cast { expr: inner, .. } => is_column(inner),
+        Expr::JsonAccess { value, .. } => is_column(value),
+        Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Arrow | BinaryOperator::LongArrow,
+            ..
+        } => is_column(left),
+        _ => false,
+    }
 }
 
 fn literal_text(value: &Value) -> Option<String> {

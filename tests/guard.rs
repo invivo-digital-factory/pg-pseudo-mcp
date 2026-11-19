@@ -319,6 +319,11 @@ fn a_pseudonym_outside_a_comparison_is_not_translated() {
         "SELECT 'claire.martin@example.net' AS x",
         "SELECT substr('claire.martin@example.net', 1, 6)",
         "SELECT md5('claire.martin@example.net') FROM customers",
+        "SELECT CASE WHEN 'claire.martin@example.net' LIKE 'i%' THEN 1 END",
+        "SELECT 'claire.martin@example.net' = 'someone@else.fr'",
+        "SELECT id FROM customers WHERE email > 'claire.martin@example.net'",
+        "SELECT id FROM customers WHERE email BETWEEN 'claire.martin@example.net' AND 'z'",
+        "SELECT id FROM customers WHERE lower(email) = 'claire.martin@example.net'",
     ] {
         let guarded = prepare(sql, &store).unwrap();
         assert_eq!(guarded.translated_literals, 0, "{sql}");
@@ -327,6 +332,39 @@ fn a_pseudonym_outside_a_comparison_is_not_translated() {
             guarded.warnings[0].code, "pseudonym_not_translated",
             "{sql}"
         );
+    }
+}
+
+#[test]
+fn json_fields_compared_with_a_pseudonym_are_translated() {
+    let store = FakeStore::default().with(
+        Kind::Email,
+        "claire.martin@example.net",
+        "o.thaumassin@canary-mail.fr",
+    );
+    let guarded = prepare(
+        "SELECT id FROM customers WHERE profile->'contact'->>'mail' = 'claire.martin@example.net'",
+        &store,
+    )
+    .unwrap();
+    assert_eq!(guarded.translated_literals, 1, "{}", guarded.sql);
+}
+
+#[test]
+fn only_structural_information_schema_views_are_readable() {
+    assert!(
+        prepare(
+            "SELECT table_name FROM information_schema.tables",
+            &FakeStore::default()
+        )
+        .is_ok()
+    );
+    for sql in [
+        "SELECT * FROM information_schema._pg_user_mappings",
+        "SELECT * FROM information_schema.check_constraints",
+        "SELECT * FROM information_schema.foreign_server_options",
+    ] {
+        assert_eq!(refusal(sql), "relation_not_allowed", "{sql}");
     }
 }
 

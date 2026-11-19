@@ -55,12 +55,16 @@ const DENIED_FUNCTIONS: &[&str] = &[
     "pg_ident_file_mappings",
 ];
 
-const DENIED_INFORMATION_SCHEMA: &[&str] = &[
-    "user_mapping_options",
-    "user_mappings",
-    "foreign_server_options",
-    "foreign_data_wrapper_options",
-    "foreign_table_options",
+const ALLOWED_INFORMATION_SCHEMA: &[&str] = &[
+    "tables",
+    "columns",
+    "views",
+    "schemata",
+    "table_constraints",
+    "key_column_usage",
+    "constraint_column_usage",
+    "referential_constraints",
+    "element_types",
 ];
 
 const ALLOWED_CATALOG_RELATIONS: &[&str] = &[
@@ -236,7 +240,7 @@ fn check_function(name: &str) -> Option<ToolError> {
 fn check_relation(schema: Option<&str>, name: &str) -> Option<ToolError> {
     let refused_relation = match schema {
         Some("pg_catalog") => !ALLOWED_CATALOG_RELATIONS.contains(&name),
-        Some("information_schema") => DENIED_INFORMATION_SCHEMA.contains(&name),
+        Some("information_schema") => !ALLOWED_INFORMATION_SCHEMA.contains(&name),
         Some(_) => false,
         None => name.starts_with("pg_") && !ALLOWED_CATALOG_RELATIONS.contains(&name),
     };
