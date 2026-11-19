@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn ascii_slug_folds_accents_and_ligatures() {
-        assert_eq!(ascii_slug("Maëlys"), "maelys");
+        assert_eq!(ascii_slug("Maëlouz"), "maelouz");
         assert_eq!(ascii_slug("Jean-Baptiste"), "jean-baptiste");
         assert_eq!(ascii_slug("Œdipe d'Anjou"), "oedipe-d-anjou");
     }

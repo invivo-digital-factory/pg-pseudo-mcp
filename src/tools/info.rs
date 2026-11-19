@@ -85,6 +85,8 @@ pub const KNOWN_LIMITS: &[&str] = &[
     "character-by-character probing through SQL predicates is not prevented",
     "names absent from the built-in lists inside long free text may pass",
     "intervals computed from birth dates (age(), date differences) are exact and reveal the real birth date",
+    "free text cut by SQL string functions (left, substr) can return fragments of personal values that no detector recognises",
+    "date parts extracted from birth dates (to_char, extract) are returned in clear",
 ];
 
 #[cfg(test)]

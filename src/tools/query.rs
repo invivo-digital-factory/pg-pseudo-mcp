@@ -106,7 +106,11 @@ async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolErr
             format!("every text cell starts at character {cell_offset}; shorter values are empty"),
         ));
     }
-    let anonymized = anonymizer.rows(&output.columns, output.rows);
+    let anonymized = anonymizer.rows(
+        &output.columns,
+        output.rows,
+        guarded.derived_lineage.as_deref(),
+    );
     let columns: Vec<ColumnOut> = output
         .columns
         .iter()

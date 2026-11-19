@@ -88,12 +88,12 @@ fn pseudonymizer_can_be_shared_between_threads() {
 #[test]
 fn the_same_email_keeps_its_pseudonym_across_instances() {
     let dir = tempfile::tempdir().unwrap();
-    let first = open(dir.path()).pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
-    let second = open(dir.path()).pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    let first = open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
+    let second = open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     assert_eq!(first, second);
     assert!(first.reversible);
     assert!(!first.exhausted);
-    assert_ne!(first.text, "ilona.kervadec@canary-mail.fr");
+    assert_ne!(first.text, "ylwenna.kervadec@canary-mail.fr");
 }
 
 #[test]
@@ -115,9 +115,9 @@ fn email_pseudonyms_live_in_reserved_domains() {
     let dir = tempfile::tempdir().unwrap();
     let pseudonymizer = open(dir.path());
     for value in [
-        "ilona.kervadec@canary-mail.fr",
-        "Maëlys.Brizolier@Canary-Mail.fr",
-        "ik.pro@canary-mail.fr",
+        "ylwenna.kervadec@canary-mail.fr",
+        "Maëlouz.Brizolier@Canary-Mail.fr",
+        "yk.pro@canary-mail.fr",
     ] {
         let text = pseudonymizer.pseudonymize(Kind::Email, value).text;
         let (local, domain) = text.split_once('@').expect("an email");
@@ -260,13 +260,13 @@ fn reverse_translates_known_pseudonyms_back() {
     let dir = tempfile::tempdir().unwrap();
     let pseudonymizer = open(dir.path());
     let cases = [
-        (Kind::Email, "ilona.kervadec@canary-mail.fr"),
+        (Kind::Email, "ylwenna.kervadec@canary-mail.fr"),
         (Kind::Phone, "06 41 27 83 95"),
         (Kind::Iban, "FR76 3000 4000 0312 3456 7890 143"),
         (Kind::Siren, "418273652"),
         (Kind::Nir, "2851175123456 22"),
-        (Kind::PersonName, "Ilona Kervadec"),
-        (Kind::LastName, "Thaumassin"),
+        (Kind::PersonName, "Ylwenna Kervadec"),
+        (Kind::LastName, "Hazvekmor"),
         (Kind::IpAddress, "82.64.12.7"),
     ];
     for (kind, value) in cases {
@@ -279,13 +279,16 @@ fn reverse_translates_known_pseudonyms_back() {
         );
     }
     let reopened = open(dir.path());
-    let pseudonym = reopened.pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    let pseudonym = reopened.pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     assert_eq!(
         reopened.reverse(&pseudonym.text),
-        Some((Kind::Email, "ilona.kervadec@canary-mail.fr".to_string()))
+        Some((Kind::Email, "ylwenna.kervadec@canary-mail.fr".to_string()))
     );
     assert_eq!(pseudonymizer.reverse("nobody.seen@example.net"), None);
-    assert_eq!(pseudonymizer.reverse("ilona.kervadec@canary-mail.fr"), None);
+    assert_eq!(
+        pseudonymizer.reverse("ylwenna.kervadec@canary-mail.fr"),
+        None
+    );
 }
 
 #[test]
@@ -294,7 +297,7 @@ fn non_reversible_kinds_are_stable_but_never_translated_back() {
     let first = open(dir.path());
     let second = open(dir.path());
     for (kind, value) in [
-        (Kind::FirstName, "Ilona"),
+        (Kind::FirstName, "Ylwenna"),
         (Kind::City, "Quimper"),
         (Kind::PostalCode, "29000"),
         (Kind::Civility, "Mme"),
@@ -339,7 +342,7 @@ fn looks_like_pseudonym_recognises_reserved_namespaces() {
         .text;
     assert_eq!(pseudonymizer.looks_like_pseudonym(&iban), Some(Kind::Iban));
     assert_eq!(
-        pseudonymizer.looks_like_pseudonym("ilona.kervadec@canary-mail.fr"),
+        pseudonymizer.looks_like_pseudonym("ylwenna.kervadec@canary-mail.fr"),
         None
     );
     assert_eq!(pseudonymizer.looks_like_pseudonym("06 41 27 83 95"), None);
@@ -356,7 +359,7 @@ fn the_store_holds_no_real_value_in_clear() {
         values.push((Kind::Email, format!("canary.person{n:03}@canary-mail.fr")));
         values.push((Kind::Phone, format!("06 41 27 {:02} {:02}", n / 10, n)));
         values.push((Kind::LastName, format!("Kervadecanary{n:03}")));
-        values.push((Kind::PersonName, format!("Ilona Thaumassinary{n:03}")));
+        values.push((Kind::PersonName, format!("Ylwenna Hazvekmorary{n:03}")));
     }
     for (kind, value) in &values {
         pseudonymizer.pseudonymize(*kind, value);
@@ -379,7 +382,7 @@ fn the_store_holds_no_real_value_in_clear() {
 fn secret_and_store_are_private_to_the_user() {
     let dir = tempfile::tempdir().unwrap();
     let pseudonymizer = open(dir.path());
-    pseudonymizer.pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    pseudonymizer.pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     for name in ["secret", "mapping.sqlite", "mapping.sqlite-wal"] {
         let path = dir.path().join(name);
         if name.ends_with("-wal") && !path.exists() {
@@ -403,7 +406,7 @@ fn concurrent_openers_share_one_secret() {
                 barrier.wait();
                 Pseudonymizer::open(&path)
                     .expect("open")
-                    .pseudonymize(Kind::FirstName, "Ilona")
+                    .pseudonymize(Kind::FirstName, "Ylwenna")
                     .text
             })
         })
@@ -416,7 +419,7 @@ fn concurrent_openers_share_one_secret() {
 #[test]
 fn a_store_without_its_secret_points_to_the_purge_command() {
     let dir = tempfile::tempdir().unwrap();
-    open(dir.path()).pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     std::fs::remove_file(dir.path().join("secret")).unwrap();
     let error = match Pseudonymizer::open(dir.path()) {
         Ok(_) => panic!("open must fail without the secret"),
@@ -428,7 +431,7 @@ fn a_store_without_its_secret_points_to_the_purge_command() {
 #[test]
 fn purge_deletes_the_store_and_the_secret() {
     let dir = tempfile::tempdir().unwrap();
-    let before = open(dir.path()).pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    let before = open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     let deleted = purge(dir.path()).unwrap();
     assert!(deleted.contains(&dir.path().join("secret")));
     assert!(deleted.contains(&dir.path().join("mapping.sqlite")));
@@ -442,7 +445,7 @@ fn purge_deletes_the_store_and_the_secret() {
 #[test]
 fn mapping_purge_command_asks_for_confirmation() {
     let dir = tempfile::tempdir().unwrap();
-    open(dir.path()).pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr");
+    open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
     let binary = env!("CARGO_BIN_EXE_pg-pseudo-mcp");
 
     let mut refused = Command::new(binary)
@@ -688,7 +691,7 @@ fn person_names_keep_the_case_pattern_of_the_input() {
     let pseudonymizer = open(dir.path());
 
     let title = pseudonymizer
-        .pseudonymize(Kind::PersonName, "Ilona Kervadec")
+        .pseudonymize(Kind::PersonName, "Ylwenna Kervadec")
         .text;
     let words: Vec<&str> = title.split(' ').collect();
     assert_eq!(words.len(), 2, "{title}");
@@ -699,13 +702,13 @@ fn person_names_keep_the_case_pattern_of_the_input() {
     }
 
     let upper = pseudonymizer
-        .pseudonymize(Kind::PersonName, "ODILON THAUMASSIN")
+        .pseudonymize(Kind::PersonName, "ODRIGAN HAZVEKMOR")
         .text;
     assert_eq!(upper, upper.to_uppercase());
     assert_eq!(upper.split(' ').count(), 2, "{upper}");
 
     let lower = pseudonymizer
-        .pseudonymize(Kind::PersonName, "maëlys brizolier")
+        .pseudonymize(Kind::PersonName, "maëlouz brizolier")
         .text;
     assert_eq!(lower, lower.to_lowercase());
 
@@ -718,7 +721,7 @@ fn person_names_keep_the_case_pattern_of_the_input() {
 
     let last_name = pseudonymizer.pseudonymize(Kind::LastName, "KERVADEC").text;
     assert_eq!(last_name, last_name.to_uppercase());
-    let first_name = pseudonymizer.pseudonymize(Kind::FirstName, "ilona").text;
+    let first_name = pseudonymizer.pseudonymize(Kind::FirstName, "ylwenna").text;
     assert_eq!(first_name, first_name.to_lowercase());
 }
 

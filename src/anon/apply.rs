@@ -42,7 +42,12 @@ impl<'a> Anonymizer<'a> {
         }
     }
 
-    pub fn rows(&self, columns: &[ColumnMeta], rows: Vec<Vec<Cell>>) -> AnonymizedRows {
+    pub fn rows(
+        &self,
+        columns: &[ColumnMeta],
+        rows: Vec<Vec<Cell>>,
+        lineage: Option<&[bool]>,
+    ) -> AnonymizedRows {
         let classes: Vec<ColumnClass> = columns
             .iter()
             .map(|column| {
@@ -58,6 +63,16 @@ impl<'a> Anonymizer<'a> {
                 })
             })
             .collect();
+        let tainted: Vec<bool> = match lineage {
+            Some(flags) if flags.len() == columns.len() => flags.to_vec(),
+            Some(_) => vec![true; columns.len()],
+            None => vec![false; columns.len()],
+        };
+        let tainted: Vec<bool> = tainted
+            .into_iter()
+            .zip(&classes)
+            .map(|(flag, class)| flag && class.derived)
+            .collect();
         let mut flags: Vec<Option<ColumnFlag>> = vec![None; columns.len()];
         let rows = rows
             .into_iter()
@@ -66,7 +81,7 @@ impl<'a> Anonymizer<'a> {
                     .enumerate()
                     .map(|(index, cell)| {
                         let mut tracker = Tracker::default();
-                        let value = self.cell(cell, &classes[index], &mut tracker);
+                        let value = self.cell(cell, &classes[index], tainted[index], &mut tracker);
                         if let Some((kind, reason)) = tracker.first {
                             let why = if classes[index].derived {
                                 Reason::Derived
@@ -145,7 +160,7 @@ impl<'a> Anonymizer<'a> {
             .into_owned()
     }
 
-    fn cell(&self, cell: Cell, class: &ColumnClass, tracker: &mut Tracker) -> Value {
+    fn cell(&self, cell: Cell, class: &ColumnClass, tainted: bool, tracker: &mut Tracker) -> Value {
         match cell {
             Cell::Null => Value::Null,
             Cell::Bool(value) => Value::Bool(value),
@@ -162,8 +177,8 @@ impl<'a> Anonymizer<'a> {
                 let original = Value::String(text.clone());
                 self.number(&text, original, class, tracker)
             }
-            Cell::Text(text) => Value::String(self.text(&text, class, tracker)),
-            Cell::Json(value) => self.json(value, None, tracker),
+            Cell::Text(text) => Value::String(self.text(&text, class, tainted, tracker)),
+            Cell::Json(value) => self.json(value, None, tainted, tracker),
             Cell::Uuid(text) | Cell::Time(text) | Cell::Interval(text) => Value::String(text),
             Cell::Date(text) if class.derived && class.forced_kind.is_none() => {
                 Value::String(self.pseudonymize(Kind::BirthDate, &text, Reason::Derived, tracker))
@@ -186,7 +201,7 @@ impl<'a> Anonymizer<'a> {
             Cell::Array(items) => Value::Array(
                 items
                     .into_iter()
-                    .map(|item| self.cell(item, class, tracker))
+                    .map(|item| self.cell(item, class, tainted, tracker))
                     .collect(),
             ),
             Cell::Composite(fields) => {
@@ -197,7 +212,7 @@ impl<'a> Anonymizer<'a> {
                         type_name: field_type(&field),
                         derived: class.derived,
                     });
-                    object.insert(name, self.cell(field, &field_class, tracker));
+                    object.insert(name, self.cell(field, &field_class, tainted, tracker));
                 }
                 Value::Object(object)
             }
@@ -239,12 +254,24 @@ impl<'a> Anonymizer<'a> {
         Value::String(pseudonym)
     }
 
-    fn text(&self, text: &str, class: &ColumnClass, tracker: &mut Tracker) -> String {
+    fn text(
+        &self,
+        text: &str,
+        class: &ColumnClass,
+        tainted: bool,
+        tracker: &mut Tracker,
+    ) -> String {
         let scrubbed = self.scrub_injected(text, tracker);
         if self.is_pseudonym(scrubbed.trim()) {
             return scrubbed;
         }
         match judge_text(&scrubbed, class) {
+            TextVerdict::Clear if tainted && residue_has_words(&scrubbed, &[]) => {
+                self.opaque_derived(&scrubbed, tracker)
+            }
+            TextVerdict::Spans(spans) if tainted && residue_has_words(&scrubbed, &spans) => {
+                self.opaque_derived(&scrubbed, tracker)
+            }
             TextVerdict::Clear => scrubbed,
             TextVerdict::Spans(spans) if class.derived && leaves_words(&scrubbed, &spans) => {
                 self.pseudonymize(spans[0].kind, &scrubbed, Reason::Derived, tracker)
@@ -260,7 +287,18 @@ impl<'a> Anonymizer<'a> {
         }
     }
 
-    fn json(&self, value: Value, key_kind: Option<Kind>, tracker: &mut Tracker) -> Value {
+    fn opaque_derived(&self, text: &str, tracker: &mut Tracker) -> String {
+        tracker.note_label(DERIVED_PERSONAL, Reason::Derived);
+        self.pseudonymizer.opaque_token("derived", text)
+    }
+
+    fn json(
+        &self,
+        value: Value,
+        key_kind: Option<Kind>,
+        tainted: bool,
+        tracker: &mut Tracker,
+    ) -> Value {
         match value {
             Value::String(text) => {
                 let class = ColumnClass {
@@ -268,7 +306,7 @@ impl<'a> Anonymizer<'a> {
                     clear_by_type: false,
                     derived: false,
                 };
-                Value::String(self.text(&text, &class, tracker))
+                Value::String(self.text(&text, &class, tainted, tracker))
             }
             Value::Number(number) => match key_kind {
                 Some(kind) => {
@@ -285,7 +323,7 @@ impl<'a> Anonymizer<'a> {
             Value::Array(items) => Value::Array(
                 items
                     .into_iter()
-                    .map(|item| self.json(item, key_kind, tracker))
+                    .map(|item| self.json(item, key_kind, tainted, tracker))
                     .collect(),
             ),
             Value::Object(entries) => Value::Object(
@@ -293,8 +331,8 @@ impl<'a> Anonymizer<'a> {
                     .into_iter()
                     .map(|(key, item)| {
                         let kind = dictionary_kind(&key);
-                        let key = self.free_text_tracked(&key, tracker);
-                        let item = self.json(item, kind, tracker);
+                        let key = self.json_key(&key, tainted, tracker);
+                        let item = self.json(item, kind, tainted, tracker);
                         (key, item)
                     })
                     .collect(),
@@ -303,9 +341,13 @@ impl<'a> Anonymizer<'a> {
         }
     }
 
-    fn free_text_tracked(&self, text: &str, tracker: &mut Tracker) -> String {
-        let scrubbed = self.scrub_injected(text, tracker);
-        self.replace_spans(&scrubbed, &detect_spans(&scrubbed), tracker)
+    fn json_key(&self, key: &str, tainted: bool, tracker: &mut Tracker) -> String {
+        let scrubbed = self.scrub_injected(key, tracker);
+        let spans = detect_spans(&scrubbed);
+        if tainted && !self.is_pseudonym(scrubbed.trim()) && residue_has_words(&scrubbed, &spans) {
+            return self.opaque_derived(&scrubbed, tracker);
+        }
+        self.replace_spans(&scrubbed, &spans, tracker)
     }
 
     fn replace_spans(&self, text: &str, spans: &[super::Span], tracker: &mut Tracker) -> String {
@@ -333,7 +375,14 @@ impl<'a> Anonymizer<'a> {
     fn scrub_injected(&self, text: &str, tracker: &mut Tracker) -> String {
         let mut output = text.to_string();
         for (real, pseudonym) in &self.injected {
-            if let Some(replaced) = replace_case_insensitive(&output, real, pseudonym) {
+            let embedded = |token: &str| {
+                if real.chars().count() < MIN_EMBEDDED_INJECTED_CHARS || self.is_pseudonym(token) {
+                    None
+                } else {
+                    Some(self.pseudonymizer.opaque_token("value", token))
+                }
+            };
+            if let Some(replaced) = replace_injected(&output, real, pseudonym, embedded) {
                 output = replaced;
                 tracker.note(Kind::PersonName, Reason::Detected, true);
             }
@@ -355,6 +404,12 @@ impl<'a> Anonymizer<'a> {
 
 const DERIVED_WHOLE_VALUE_WORDS: usize = 6;
 
+const DERIVED_PERSONAL: &str = "derived_personal";
+
+const MIN_RESIDUE_WORD_CHARS: usize = 3;
+
+const MIN_EMBEDDED_INJECTED_CHARS: usize = 4;
+
 const DERIVED_NUMBER_KINDS: [Kind; 5] = [
     Kind::Phone,
     Kind::Siret,
@@ -368,9 +423,10 @@ static QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
 });
 
 fn leaves_words(text: &str, spans: &[super::Span]) -> bool {
-    if text.split_whitespace().count() > DERIVED_WHOLE_VALUE_WORDS {
-        return false;
-    }
+    text.split_whitespace().count() <= DERIVED_WHOLE_VALUE_WORDS && residue_has_words(text, spans)
+}
+
+fn residue_has_words(text: &str, spans: &[super::Span]) -> bool {
     let mut residue = String::with_capacity(text.len());
     let mut cursor = 0;
     for span in spans {
@@ -383,7 +439,7 @@ fn leaves_words(text: &str, spans: &[super::Span]) -> bool {
     residue.push_str(text.get(cursor..).unwrap_or(""));
     residue
         .split(|c: char| !c.is_alphabetic())
-        .any(|word| word.chars().count() >= 3)
+        .any(|word| word.chars().count() >= MIN_RESIDUE_WORD_CHARS)
 }
 
 #[derive(Default)]
@@ -392,6 +448,10 @@ struct Tracker {
 }
 
 impl Tracker {
+    fn note_label(&mut self, label: &'static str, reason: Reason) {
+        self.first.get_or_insert((label, reason));
+    }
+
     fn note(&mut self, kind: Kind, reason: Reason, translated: bool) {
         if self.first.is_none() {
             let label = if translated {
@@ -415,7 +475,12 @@ fn field_type(cell: &Cell) -> &'static str {
     }
 }
 
-fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> Option<String> {
+fn replace_injected(
+    haystack: &str,
+    needle: &str,
+    replacement: &str,
+    embedded: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
     let pattern = regex::RegexBuilder::new(&regex::escape(needle))
         .case_insensitive(true)
         .build()
@@ -428,11 +493,21 @@ fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> 
         let before = haystack[..found.start()].chars().next_back();
         let after = haystack[found.end()..].chars().next();
         if before.is_some_and(is_word_char) || after.is_some_and(is_word_char) {
-            search = found.start()
-                + haystack[found.start()..]
-                    .chars()
-                    .next()
-                    .map_or(1, char::len_utf8);
+            let start = cursor.max(word_start(haystack, found.start()));
+            let end = word_end(haystack, found.end());
+            if let Some(token) = embedded(&haystack[start..end]) {
+                output.push_str(&haystack[cursor..start]);
+                output.push_str(&token);
+                cursor = end;
+                search = end;
+                replaced = true;
+            } else {
+                search = found.start()
+                    + haystack[found.start()..]
+                        .chars()
+                        .next()
+                        .map_or(1, char::len_utf8);
+            }
             continue;
         }
         output.push_str(&haystack[cursor..found.start()]);
@@ -446,6 +521,22 @@ fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> 
     }
     output.push_str(&haystack[cursor..]);
     Some(output)
+}
+
+fn word_start(text: &str, index: usize) -> usize {
+    text[..index]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_word_char(*c))
+        .last()
+        .map_or(index, |(position, _)| position)
+}
+
+fn word_end(text: &str, index: usize) -> usize {
+    text[index..]
+        .char_indices()
+        .find(|(_, c)| !is_word_char(*c))
+        .map_or(text.len(), |(position, _)| index + position)
 }
 
 fn is_word_char(c: char) -> bool {
@@ -490,31 +581,31 @@ mod tests {
     #[test]
     fn replaces_every_case_variant_of_the_needle() {
         assert_eq!(
-            replace_case_insensitive("A b@C.fr and B@c.FR", "b@c.fr", "x@y.org").as_deref(),
+            replace_injected("A b@C.fr and B@c.FR", "b@c.fr", "x@y.org", |_| None).as_deref(),
             Some("A x@y.org and x@y.org")
         );
         assert_eq!(
-            replace_case_insensitive("İstanbul MAËLYS", "maëlys", "x").as_deref(),
+            replace_injected("İstanbul MAËLOUZ", "maëlouz", "x", |_| None).as_deref(),
             Some("İstanbul x")
         );
-        assert_eq!(replace_case_insensitive("nothing", "b@c.fr", "x"), None);
+        assert_eq!(replace_injected("nothing", "b@c.fr", "x", |_| None), None);
     }
 
     #[test]
     fn an_injected_value_is_replaced_only_where_it_stands_as_a_whole_word() {
-        assert_eq!(replace_case_insensitive("Troyes", "Roy", "Zed"), None);
+        assert_eq!(replace_injected("Troyes", "Roy", "Zed", |_| None), None);
         assert_eq!(
-            replace_case_insensitive("leroy.marc@gmail.com", "Roy", "Zed"),
+            replace_injected("leroy.marc@gmail.com", "Roy", "Zed", |_| None),
             None
         );
-        assert_eq!(replace_case_insensitive("Roy2", "Roy", "Zed"), None);
-        assert_eq!(replace_case_insensitive("Royé", "Roy", "Zed"), None);
+        assert_eq!(replace_injected("Roy2", "Roy", "Zed", |_| None), None);
+        assert_eq!(replace_injected("Royé", "Roy", "Zed", |_| None), None);
         assert_eq!(
-            replace_case_insensitive("xa-a-a", "a-a", "Z").as_deref(),
+            replace_injected("xa-a-a", "a-a", "Z", |_| None).as_deref(),
             Some("xa-Z")
         );
         assert_eq!(
-            replace_case_insensitive("Roy, ROY et roy-Dupont", "Roy", "Zed").as_deref(),
+            replace_injected("Roy, ROY et roy-Dupont", "Roy", "Zed", |_| None).as_deref(),
             Some("Zed, Zed et Zed-Dupont")
         );
     }
@@ -546,8 +637,8 @@ mod tests {
                 Cell::Text(" roy ".to_string()),
             ],
         ];
-        let anonymized = anonymizer.rows(&columns, rows);
-        let expected = baseline.rows(&columns, vec![first()]);
+        let anonymized = anonymizer.rows(&columns, rows, None);
+        let expected = baseline.rows(&columns, vec![first()], None);
         assert_eq!(anonymized.rows[0][0], expected.rows[0][0]);
         assert_eq!(anonymized.rows[0][2], expected.rows[0][2]);
         assert_eq!(
@@ -568,6 +659,68 @@ mod tests {
     }
 
     #[test]
+    fn an_injected_value_embedded_in_a_longer_token_turns_the_whole_token_opaque() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
+        let injected = [
+            ("Kervadec".to_string(), pseudonym.clone()),
+            ("Roy".to_string(), "Zabulon".to_string()),
+        ];
+        let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("label", None),
+            text_column("code", None),
+            text_column("commentaire", Some("commentaire")),
+            text_column("ville", Some("ville")),
+        ];
+        let rows = vec![vec![
+            Cell::Text("Kervadec2026".to_string()),
+            Cell::Text("xKERVADECx".to_string()),
+            Cell::Text("Client Kervadec, appel".to_string()),
+            Cell::Text("Troyes".to_string()),
+        ]];
+        let anonymized = anonymizer.rows(&columns, rows, None);
+        let expected_troyes =
+            baseline.rows(&columns[3..], vec![vec![Cell::Text("Troyes".into())]], None);
+        assert_eq!(
+            anonymized.rows[0][0],
+            json!(pseudonymizer.opaque_token("value", "Kervadec2026"))
+        );
+        assert_eq!(
+            anonymized.rows[0][1],
+            json!(pseudonymizer.opaque_token("value", "xKERVADECx"))
+        );
+        assert_eq!(
+            anonymized.rows[0][2],
+            json!(format!("Client {pseudonym}, appel"))
+        );
+        assert_eq!(anonymized.rows[0][3], expected_troyes.rows[0][0]);
+        assert!(anonymized.per_column[0].is_some());
+        assert!(anonymized.per_column[1].is_some());
+
+        let free = anonymizer.free_text("réf Kervadec2026 pour Kervadec à Troyes");
+        assert_eq!(
+            free,
+            format!(
+                "réf {} pour {pseudonym} à Troyes",
+                pseudonymizer.opaque_token("value", "Kervadec2026")
+            )
+        );
+    }
+
+    #[test]
+    fn an_embedded_injected_value_inside_a_known_pseudonym_is_left_alone() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let injected = [
+            ("Kervadec".to_string(), "Zabulon".to_string()),
+            ("Odriganvanec".to_string(), "Kervadecson".to_string()),
+        ];
+        let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
+        assert_eq!(anonymizer.free_text("vu Odriganvanec"), "vu Kervadecson");
+    }
+
+    #[test]
     fn same_named_columns_each_get_their_own_flag() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
@@ -577,11 +730,11 @@ mod tests {
             text_column("email", Some("email")),
         ];
         let rows = vec![vec![
-            Cell::Text("ilona.kervadec@canary-mail.fr".to_string()),
+            Cell::Text("ylwenna.kervadec@canary-mail.fr".to_string()),
             Cell::Text("PAID".to_string()),
-            Cell::Text("odilon.thaumassin@canary-mail.fr".to_string()),
+            Cell::Text("odrigan.hazvekmor@canary-mail.fr".to_string()),
         ]];
-        let anonymized = anonymizer.rows(&columns, rows);
+        let anonymized = anonymizer.rows(&columns, rows, None);
         assert_eq!(anonymized.per_column.len(), 3);
         assert!(anonymized.per_column[0].is_some());
         assert!(anonymized.per_column[1].is_none());
@@ -610,7 +763,7 @@ mod tests {
         assert_eq!(masked.sqlstate.as_deref(), Some("22P02"));
 
         let pseudonym = pseudonymizer
-            .pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr")
+            .pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr")
             .text;
         let kept = anonymizer.message(&message(
             "22P02",
@@ -652,7 +805,7 @@ mod tests {
         );
 
         let email = pseudonymizer
-            .pseudonymize(Kind::Email, "odilon.thaumassin@canary-mail.fr")
+            .pseudonymize(Kind::Email, "odrigan.hazvekmor@canary-mail.fr")
             .text;
         let kept = anonymizer.message(&message(
             "23505",
@@ -663,5 +816,115 @@ mod tests {
             kept.detail.as_deref(),
             Some(format!("Key (email)=({email}) already exists.").as_str())
         );
+    }
+
+    #[test]
+    fn a_derived_value_with_personal_lineage_turns_opaque_when_no_detector_recognises_it() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let mut length = text_column("length", None);
+        length.type_name = "int4".to_string();
+        length.type_oid = 23;
+        let columns = [
+            text_column("split_part", None),
+            text_column("lower", None),
+            text_column("initials", None),
+            text_column("line", None),
+            length,
+            text_column("label", None),
+        ];
+        let row = || {
+            vec![
+                Cell::Text("ylwenna.kervadec".to_string()),
+                Cell::Text("ylwenna.kervadec@canary-mail.fr".to_string()),
+                Cell::Text("YK".to_string()),
+                Cell::Text("ylwenna.kervadec au 06 41 27 83 95".to_string()),
+                Cell::Int(31),
+                Cell::Text("PAID en_cours".to_string()),
+            ]
+        };
+        let lineage = [true, true, true, true, true, false];
+        let anonymized = anonymizer.rows(&columns, vec![row()], Some(&lineage));
+        assert_eq!(
+            anonymized.rows[0][0],
+            json!(pseudonymizer.opaque_token("derived", "ylwenna.kervadec"))
+        );
+        let email = anonymized.rows[0][1].as_str().expect("text");
+        assert!(email.contains('@'), "{email}");
+        assert!(!email.contains("kervadec"), "{email}");
+        assert_eq!(anonymized.rows[0][2], json!("YK"));
+        assert_eq!(
+            anonymized.rows[0][3],
+            json!(pseudonymizer.opaque_token("derived", "ylwenna.kervadec au 06 41 27 83 95"))
+        );
+        assert_eq!(anonymized.rows[0][4], json!(31));
+        assert_eq!(anonymized.rows[0][5], json!("PAID en_cours"));
+        assert_eq!(
+            anonymized.per_column[0],
+            Some(ColumnFlag {
+                kind: "derived_personal".to_string(),
+                why: Reason::Derived,
+            })
+        );
+        assert!(anonymized.per_column[2].is_none());
+        assert!(anonymized.per_column[5].is_none());
+    }
+
+    #[test]
+    fn a_tainted_value_nested_in_json_or_arrays_turns_opaque_too() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("jsonb_build_object", None),
+            text_column("array_agg", None),
+        ];
+        let rows = vec![vec![
+            Cell::Json(json!({"ylwenna.kervadec": "ylwenna.kervadec", "n": 2})),
+            Cell::Array(vec![Cell::Text("ylwenna.kervadec".to_string())]),
+        ]];
+        let anonymized = anonymizer.rows(&columns, rows, Some(&[true, true]));
+        let token = pseudonymizer.opaque_token("derived", "ylwenna.kervadec");
+        assert_eq!(
+            anonymized.rows[0][0],
+            json!({ token.clone(): token.clone(), "n": 2 })
+        );
+        assert_eq!(anonymized.rows[0][1], json!([token]));
+    }
+
+    #[test]
+    fn without_lineage_derived_values_keep_the_value_by_value_judgement() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [text_column("split_part", None), text_column("label", None)];
+        let row = || {
+            vec![
+                Cell::Text("ylwenna.kervadec".to_string()),
+                Cell::Text("PAID en_cours".to_string()),
+            ]
+        };
+        let unknown = anonymizer.rows(&columns, vec![row()], None);
+        let untainted = anonymizer.rows(&columns, vec![row()], Some(&[false, false]));
+        assert_eq!(unknown.rows, untainted.rows);
+        assert_eq!(unknown.per_column, untainted.per_column);
+    }
+
+    #[test]
+    fn a_lineage_that_does_not_match_the_columns_taints_every_derived_column() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("split_part", None),
+            text_column("status", Some("status")),
+        ];
+        let rows = vec![vec![
+            Cell::Text("ylwenna.kervadec".to_string()),
+            Cell::Text("PAID en_cours".to_string()),
+        ]];
+        let anonymized = anonymizer.rows(&columns, rows, Some(&[false]));
+        assert_eq!(
+            anonymized.rows[0][0],
+            json!(pseudonymizer.opaque_token("derived", "ylwenna.kervadec"))
+        );
+        assert_eq!(anonymized.rows[0][1], json!("PAID en_cours"));
     }
 }

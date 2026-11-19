@@ -243,7 +243,7 @@ fn short_capitalised_values_in_unknown_columns_default_to_names() {
         }
     ));
     assert!(matches!(
-        judge_text("Ilona Kervadec", &class),
+        judge_text("Solène Kervadec", &class),
         TextVerdict::WholeValue {
             kind: Kind::PersonName,
             reason: Reason::Detected
@@ -310,11 +310,11 @@ fn every_canary_value_is_judged_personal_in_an_unknown_text_column() {
 
 #[test]
 fn free_text_keeps_the_text_around_the_spans() {
-    let text = "Contact: Ilona Kervadec <ilona.kervadec@canary-mail.fr>";
+    let text = "Contact: Solène Kervadec <ylwenna.kervadec@canary-mail.fr>";
     let spans = detect_spans(text);
     assert_eq!(
         slices(text, &spans),
-        vec!["Ilona Kervadec", "ilona.kervadec@canary-mail.fr"]
+        vec!["Solène Kervadec", "ylwenna.kervadec@canary-mail.fr"]
     );
     assert_eq!(kinds(&spans), vec![Kind::PersonName, Kind::Email]);
 }

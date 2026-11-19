@@ -172,7 +172,7 @@ fn a_known_pseudonym_is_translated_to_the_real_value() {
     let store = FakeStore::default().with(
         Kind::Email,
         "claire.martin@example.net",
-        "ilona.kervadec@canary-mail.fr",
+        "ylwenna.kervadec@canary-mail.fr",
     );
     let guarded = prepare(
         "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = 'claire.martin@example.net'",
@@ -181,7 +181,7 @@ fn a_known_pseudonym_is_translated_to_the_real_value() {
     .unwrap();
     assert_eq!(guarded.translated_literals, 1);
     assert!(
-        guarded.sql.contains("'ilona.kervadec@canary-mail.fr'"),
+        guarded.sql.contains("'ylwenna.kervadec@canary-mail.fr'"),
         "{}",
         guarded.sql
     );
@@ -189,7 +189,7 @@ fn a_known_pseudonym_is_translated_to_the_real_value() {
     assert_eq!(
         guarded.injected,
         vec![(
-            "ilona.kervadec@canary-mail.fr".to_string(),
+            "ylwenna.kervadec@canary-mail.fr".to_string(),
             "claire.martin@example.net".to_string()
         )]
     );
@@ -313,7 +313,7 @@ fn a_pseudonym_outside_a_comparison_is_not_translated() {
     let store = FakeStore::default().with(
         Kind::Email,
         "claire.martin@example.net",
-        "ilona.kervadec@canary-mail.fr",
+        "ylwenna.kervadec@canary-mail.fr",
     );
     for sql in [
         "SELECT 'claire.martin@example.net' AS x",
@@ -327,7 +327,7 @@ fn a_pseudonym_outside_a_comparison_is_not_translated() {
     ] {
         let guarded = prepare(sql, &store).unwrap();
         assert_eq!(guarded.translated_literals, 0, "{sql}");
-        assert!(!guarded.sql.contains("ilona"), "{sql}: {}", guarded.sql);
+        assert!(!guarded.sql.contains("ylwenna"), "{sql}: {}", guarded.sql);
         assert_eq!(
             guarded.warnings[0].code, "pseudonym_not_translated",
             "{sql}"
@@ -340,7 +340,7 @@ fn json_fields_compared_with_a_pseudonym_are_translated() {
     let store = FakeStore::default().with(
         Kind::Email,
         "claire.martin@example.net",
-        "o.thaumassin@canary-mail.fr",
+        "o.hazvekmor@canary-mail.fr",
     );
     let guarded = prepare(
         "SELECT id FROM customers WHERE profile->'contact'->>'mail' = 'claire.martin@example.net'",
@@ -374,12 +374,12 @@ fn pseudonyms_in_comparisons_lists_and_casts_are_translated() {
         .with(
             Kind::Email,
             "claire.martin@example.net",
-            "ilona.kervadec@canary-mail.fr",
+            "ylwenna.kervadec@canary-mail.fr",
         )
         .with(
             Kind::Email,
             "paul.rivet@example.org",
-            "odilon.thaumassin@canary-mail.fr",
+            "odrigan.hazvekmor@canary-mail.fr",
         );
     for sql in [
         "SELECT id FROM customers WHERE email IN ('claire.martin@example.net', 'paul.rivet@example.org')",
@@ -543,5 +543,114 @@ fn statistics_views_are_refused_in_any_schema() {
     assert!(
         matches!(code.as_str(), "relation_not_allowed" | "parse_error"),
         "{code}"
+    );
+}
+
+fn lineage(sql: &str) -> Option<Vec<bool>> {
+    prepare(sql, &FakeStore::default())
+        .unwrap_or_else(|error| panic!("{sql}: {error:?}"))
+        .derived_lineage
+}
+
+#[test]
+fn an_output_computed_from_a_personal_column_carries_its_lineage() {
+    assert_eq!(
+        lineage("SELECT split_part(email, '@', 1) FROM customers"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage(
+            "SELECT upper(nom) AS n, amount * 2 FROM orders o JOIN customers c ON c.id = o.customer_id"
+        ),
+        Some(vec![true, false])
+    );
+}
+
+#[test]
+fn outputs_without_a_personal_source_carry_no_lineage() {
+    assert_eq!(
+        lineage("SELECT count(*), status FROM orders"),
+        Some(vec![false, false])
+    );
+}
+
+#[test]
+fn lineage_follows_aliases_through_ctes_and_subqueries() {
+    assert_eq!(
+        lineage("WITH x AS (SELECT email AS e FROM customers) SELECT left(e, 5) FROM x"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage(
+            "WITH x AS (SELECT email AS e FROM customers), y AS (SELECT e AS f FROM x) SELECT upper(f), 1 FROM y"
+        ),
+        Some(vec![true, false])
+    );
+    assert_eq!(
+        lineage("WITH x (e) AS (SELECT email FROM customers) SELECT left(e, 5) FROM x"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT left(s.d, 5) FROM (SELECT id, email FROM customers) AS s (i, d)"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT left(s.i::text, 5) FROM (SELECT id, email FROM customers) AS s (i, d)"),
+        Some(vec![false])
+    );
+    assert_eq!(
+        lineage(
+            "SELECT left(split_part, 5) FROM (SELECT split_part(email, '@', 1) FROM customers) s"
+        ),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT to_jsonb(s) FROM (SELECT left(email, 9) AS e FROM customers) s"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT left(a, 5) FROM customers, unnest(ARRAY[email, nom]) AS u (a)"),
+        Some(vec![true])
+    );
+}
+
+#[test]
+fn every_branch_of_a_set_operation_contributes_lineage() {
+    assert_eq!(
+        lineage("SELECT 'x' UNION ALL SELECT split_part(email, '@', 1) FROM customers"),
+        Some(vec![true])
+    );
+}
+
+#[test]
+fn lineage_is_unavailable_when_a_wildcard_hides_the_output_positions() {
+    assert_eq!(lineage("SELECT * FROM customers"), None);
+    assert_eq!(lineage("SELECT c.*, upper(nom) FROM customers c"), None);
+    assert_eq!(lineage("EXPLAIN SELECT email FROM customers"), None);
+}
+
+#[test]
+fn lineage_starts_from_personal_json_keys_and_plural_column_names() {
+    assert_eq!(
+        lineage("SELECT split_part(profile->'contact'->>'mail', '@', 1) FROM customers"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT split_part(profile #>> '{contact,mail}', '@', 1) FROM customers"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage(
+            "SELECT split_part(jsonb_extract_path_text(profile, 'contact', 'mail'), '@', 1) FROM customers"
+        ),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT split_part(unnest(emails_secondaires), '@', 1) FROM customers"),
+        Some(vec![true])
+    );
+    assert_eq!(
+        lineage("SELECT profile->>'plan', upper(status) FROM customers"),
+        Some(vec![false, false])
     );
 }

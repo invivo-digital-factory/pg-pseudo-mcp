@@ -83,8 +83,8 @@ async fn seeded_customer_columns_decode_to_typed_cells() {
     assert_eq!(
         row[2],
         Cell::Array(vec![
-            text("ilona.k@canary-mail.fr"),
-            text("ik.pro@canary-mail.fr")
+            text("ylwenna.k@canary-mail.fr"),
+            text("yk.pro@canary-mail.fr")
         ])
     );
     assert_eq!(
@@ -171,7 +171,7 @@ async fn whole_row_composites_carry_field_names() {
     let names: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(names[..4], ["id", "prenom", "nom", "email"]);
     assert_eq!(fields[0].1, Cell::Int(1));
-    assert_eq!(fields[3].1, text("ilona.kervadec@canary-mail.fr"));
+    assert_eq!(fields[3].1, text("ylwenna.kervadec@canary-mail.fr"));
     assert_eq!(fields[9].1, Cell::Date("1985-11-02".into()));
     assert_eq!(
         fields[13].1,

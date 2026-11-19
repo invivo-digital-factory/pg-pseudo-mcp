@@ -35,6 +35,10 @@ const MUST_SUCCEED_PSEUDONYMIZED: &[&str] = &[
     "SELECT replace(email, '@', ' at ') FROM customers",
     "SELECT split_part(email, '@', 1) FROM customers",
     "SELECT left(email, 12), right(email, 14) FROM customers",
+    "WITH x AS (SELECT email AS e FROM customers) SELECT split_part(e, '@', 1) FROM x",
+    "SELECT substr(nom, 1, 4) || substr(prenom, 2, 3) FROM customers",
+    "SELECT split_part(unnest(emails_secondaires), '@', 1) FROM customers",
+    "SELECT split_part(profile->'contact'->>'mail', '@', 1) FROM customers",
     "SELECT translate(nom, 'aeiou', 'AEIOU') FROM customers",
     "SELECT nom || '-' || prenom FROM customers",
     "SELECT format('%s %s', prenom, nom) FROM customers",
@@ -114,11 +118,11 @@ async fn character_level_probing_is_a_documented_limit() {
     .await;
     assert!(!error, "{text}");
     let response: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(response["rows"][0][0], Value::from(i64::from(b'i')));
+    assert_eq!(response["rows"][0][0], Value::from(i64::from(b'y')));
 
     let (_, text) = ask(
         &harness,
-        "SELECT count(*) FROM customers WHERE email LIKE 'ilona%'",
+        "SELECT count(*) FROM customers WHERE email LIKE 'ylwenna%'",
     )
     .await;
     let response: Value = serde_json::from_str(&text).unwrap();

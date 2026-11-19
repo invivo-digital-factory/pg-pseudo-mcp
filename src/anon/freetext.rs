@@ -270,10 +270,10 @@ mod tests {
 
     #[test]
     fn hex_encodings_of_any_length_are_digests() {
-        let email = "ilona.kervadec@canary-mail.fr";
+        let email = "ylwenna.kervadec@canary-mail.fr";
         assert!(is_digest(&hex::encode(email.as_bytes())));
         assert!(is_digest(&hex::encode(email.as_bytes()).to_uppercase()));
-        assert!(is_digest(&hex::encode("Ilona".as_bytes())));
+        assert!(is_digest(&hex::encode("Ylwenna".as_bytes())));
         assert!(is_digest(&hex::encode("06 41 27 83 95".as_bytes())));
         assert!(is_digest("7d52d2bbb"));
         assert!(is_digest("5d41402abc4b2a76b9719d911017c59"));
@@ -296,7 +296,7 @@ mod tests {
             "Kervadec",
             "PENDING",
             "REFUNDED",
-            "Thaumassin",
+            "Hazvekmor",
             "12345678",
             "2026-11-19",
             "0b8e4c1a-7d2f-4e5b-9c3a-1f2e3d4c5b6a",

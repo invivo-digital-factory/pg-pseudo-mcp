@@ -1,3 +1,4 @@
+mod lineage;
 mod rewrite;
 mod validate;
 
@@ -20,6 +21,7 @@ pub struct Guarded {
     pub translated_literals: usize,
     pub injected: Vec<(String, String)>,
     pub warnings: Vec<Warning>,
+    pub derived_lineage: Option<Vec<bool>>,
     is_explain: bool,
 }
 
@@ -48,6 +50,7 @@ pub fn prepare(sql: &str, lookup: &dyn PseudonymLookup) -> Result<Guarded, ToolE
     })?;
     validate::validate(&reparsed)?;
     Ok(Guarded {
+        derived_lineage: lineage::derived_lineage(&reparsed),
         is_explain: matches!(reparsed, Statement::Explain { .. }),
         sql: reparsed.to_string(),
         translated_literals: outcome.injected.len(),
