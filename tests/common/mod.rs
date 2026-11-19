@@ -56,14 +56,8 @@ pub struct Harness {
 
 impl Harness {
     pub fn new() -> Self {
-        let url = database_url();
-        let rest = url.strip_prefix("postgres://").expect("postgres:// url");
-        let (credentials, location) = rest.split_once('@').expect("user:password@host");
-        let (user, password) = credentials.split_once(':').expect("user:password");
-        let (address, database) = location.split_once('/').expect("host:port/database");
-        let (host, port) = address.split_once(':').expect("host:port");
         let dbeaver = tempfile::tempdir().expect("dbeaver dir");
-        write_workspace(dbeaver.path(), host, port, database, user, password);
+        write_workspace_for_test_database(dbeaver.path());
         let data = tempfile::tempdir().expect("data dir");
         let config = AppConfig {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
@@ -79,6 +73,16 @@ impl Harness {
             _data: data,
         }
     }
+}
+
+pub fn write_workspace_for_test_database(root: &Path) {
+    let url = database_url();
+    let rest = url.strip_prefix("postgres://").expect("postgres:// url");
+    let (credentials, location) = rest.split_once('@').expect("user:password@host");
+    let (user, password) = credentials.split_once(':').expect("user:password");
+    let (address, database) = location.split_once('/').expect("host:port/database");
+    let (host, port) = address.split_once(':').expect("host:port");
+    write_workspace(root, host, port, database, user, password);
 }
 
 fn write_workspace(
