@@ -145,6 +145,15 @@ fn server_and_session_functions_are_refused_with_their_name() {
             "SELECT * FROM dblink('host=x', 'select 1') AS t(a int)",
             "dblink",
         ),
+        (
+            "SELECT * FROM crosstab('select pg_terminate_backend(1), 1, 1') AS t(a int, b int)",
+            "crosstab",
+        ),
+        ("SELECT * FROM crosstab3('select 1, 1, 1')", "crosstab3"),
+        (
+            "SELECT * FROM connectby('t', 'id', 'parent', '1', 0) AS t(id text, parent text, level int)",
+            "connectby",
+        ),
     ] {
         let error = prepare(sql, &FakeStore::default()).expect_err(sql);
         assert_eq!(error.code, "function_not_allowed", "{sql}");

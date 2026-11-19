@@ -26,6 +26,8 @@ pub const DENIED_FUNCTION_PREFIXES: &[&str] = &[
     "pg_file_",
     "lo_",
     "dblink",
+    "crosstab",
+    "connectby",
     "query_to_xml",
     "table_to_xml",
     "schema_to_xml",
