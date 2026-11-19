@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,9 +18,18 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
+        Self::from_vars(
+            std::env::var_os("PG_PSEUDO_DBEAVER_HOME"),
+            std::env::var_os("PG_PSEUDO_DATA_DIR"),
+        )
+    }
+
+    fn from_vars(dbeaver_home: Option<OsString>, data_dir: Option<OsString>) -> Self {
+        let absolute =
+            |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
         Self {
-            dbeaver_home: std::env::var_os("PG_PSEUDO_DBEAVER_HOME").map(PathBuf::from),
-            data_dir: std::env::var_os("PG_PSEUDO_DATA_DIR").map(PathBuf::from),
+            dbeaver_home: absolute(dbeaver_home),
+            data_dir: absolute(data_dir),
         }
     }
 }
@@ -101,5 +111,19 @@ pub fn connect_options(params: &ConnectParams) -> ConnectOptions {
             dbeaver::SslMode::VerifyCa => pg::SslMode::VerifyCa,
             dbeaver::SslMode::VerifyFull => pg::SslMode::VerifyFull,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_or_relative_directories_fall_back_to_defaults() {
+        let config = AppConfig::from_vars(Some(OsString::new()), Some(OsString::from("relative")));
+        assert_eq!(config.dbeaver_home, None);
+        assert_eq!(config.data_dir, None);
+        let config = AppConfig::from_vars(None, Some(OsString::from("/tmp/pg-pseudo")));
+        assert_eq!(config.data_dir, Some(PathBuf::from("/tmp/pg-pseudo")));
     }
 }
