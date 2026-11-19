@@ -124,4 +124,4 @@ The integration suite seeds fictional French personal data and checks that no se
 
 ## Licence
 
-Not chosen yet.
+Apache License 2.0, see `LICENSE`.
