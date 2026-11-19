@@ -197,7 +197,7 @@ fn respond<T: Serialize>(result: Result<T, ToolError>) -> CallToolResult {
 struct Catalog<'a> {
     state: &'a AppState,
     connection: &'a str,
-    anonymizer: Anonymizer<'a>,
+    anonymizer: Anonymizer,
 }
 
 impl Catalog<'_> {

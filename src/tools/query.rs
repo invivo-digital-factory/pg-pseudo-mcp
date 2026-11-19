@@ -81,7 +81,7 @@ pub async fn query(state: &AppState, args: QueryArgs) -> CallToolResult {
 async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolError> {
     let started = Instant::now();
     let pseudonymizer = state.pseudonymizer()?;
-    let guarded = guard::prepare(&args.sql, pseudonymizer.as_ref())?;
+    let guarded = guard::prepare(&args.sql, &pseudonymizer)?;
     let (limits, clamps) =
         QueryLimits::from_request(args.max_rows, args.max_bytes, args.timeout_ms);
     let cell_offset = usize::try_from(args.cell_offset.unwrap_or(0)).unwrap_or(usize::MAX);

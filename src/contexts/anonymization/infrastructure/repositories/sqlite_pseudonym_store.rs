@@ -4,14 +4,17 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension, TransactionBehavior, params};
 
-use super::PseudoError;
-use super::secret::{create_private_file, restrict_permissions};
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::errors::PseudoError;
+use crate::contexts::anonymization::domain::repositories::PseudonymStore;
+use crate::contexts::anonymization::domain::types::{Kind, StoreOutcome};
+use crate::contexts::anonymization::infrastructure::data_sources::secret_file::{
+    create_private_file, restrict_permissions,
+};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 const BUSY_RETRY_PAUSE: Duration = Duration::from_millis(10);
 const KEY_CHECK: &str = "key_check";
-pub(crate) const CURRENT_KEY_ID: i64 = 1;
+const CURRENT_KEY_ID: i64 = 1;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS mappings (
@@ -30,18 +33,12 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 ";
 
-pub(crate) enum Outcome {
-    Known(String),
-    Created(String),
-    Exhausted,
-}
-
-pub(crate) struct Store {
+pub struct SqlitePseudonymStore {
     connection: Mutex<Connection>,
 }
 
-impl Store {
-    pub(crate) fn open(path: &Path, key_check: &[u8; 32]) -> Result<Self, PseudoError> {
+impl SqlitePseudonymStore {
+    pub fn open(path: &Path, key_check: &[u8; 32]) -> Result<Self, PseudoError> {
         create_private_file(path)?;
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
@@ -69,15 +66,17 @@ impl Store {
             connection: Mutex::new(connection),
         })
     }
+}
 
-    pub(crate) fn get_or_create(
+impl PseudonymStore for SqlitePseudonymStore {
+    fn get_or_create(
         &self,
         kind: Kind,
         forward_key: &[u8; 32],
         max_draws: usize,
-        mut draw: impl FnMut() -> String,
-        encrypt: impl FnOnce() -> Result<Vec<u8>, PseudoError>,
-    ) -> Result<Outcome, PseudoError> {
+        draw: &mut dyn FnMut() -> String,
+        encrypt: &dyn Fn() -> Result<Vec<u8>, PseudoError>,
+    ) -> Result<StoreOutcome, PseudoError> {
         let mut connection = self
             .connection
             .lock()
@@ -91,7 +90,7 @@ impl Store {
             )
             .optional()?;
         if let Some(pseudonym) = known {
-            return Ok(Outcome::Known(pseudonym));
+            return Ok(StoreOutcome::Known(pseudonym));
         }
         let mut taken = transaction
             .prepare_cached("SELECT 1 FROM mappings WHERE kind = ?1 AND pseudonym = ?2")?;
@@ -105,7 +104,7 @@ impl Store {
         }
         drop(taken);
         let Some(pseudonym) = chosen else {
-            return Ok(Outcome::Exhausted);
+            return Ok(StoreOutcome::Exhausted);
         };
         transaction.execute(
             "INSERT INTO mappings (kind, pseudonym, forward_key, real_ct, key_id)
@@ -119,10 +118,10 @@ impl Store {
             ],
         )?;
         transaction.commit()?;
-        Ok(Outcome::Created(pseudonym))
+        Ok(StoreOutcome::Created(pseudonym))
     }
 
-    pub(crate) fn find(&self, pseudonym: &str) -> Result<Vec<(String, Vec<u8>)>, PseudoError> {
+    fn find(&self, pseudonym: &str) -> Result<Vec<(String, Vec<u8>)>, PseudoError> {
         let connection = self
             .connection
             .lock()
@@ -189,7 +188,7 @@ fn is_busy(error: &rusqlite::Error) -> bool {
     )
 }
 
-pub(crate) fn companion_files(path: &Path) -> [PathBuf; 2] {
+pub fn companion_files(path: &Path) -> [PathBuf; 2] {
     ["-wal", "-shm"].map(|suffix| {
         let mut name = path.as_os_str().to_owned();
         name.push(suffix);

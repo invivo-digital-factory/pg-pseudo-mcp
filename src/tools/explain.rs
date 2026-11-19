@@ -41,7 +41,7 @@ pub async fn explain(state: &AppState, args: ExplainArgs) -> CallToolResult {
 
 async fn run(state: &AppState, args: ExplainArgs) -> Result<ExplainResponse, ToolError> {
     let pseudonymizer = state.pseudonymizer()?;
-    let guarded = guard::prepare(&args.sql, pseudonymizer.as_ref())?;
+    let guarded = guard::prepare(&args.sql, &pseudonymizer)?;
     let limits = QueryLimits::default();
     let anonymizer = Anonymizer::new(&pseudonymizer, &guarded.injected);
     let output = state
@@ -67,7 +67,7 @@ async fn run(state: &AppState, args: ExplainArgs) -> Result<ExplainResponse, Too
         match cell {
             Cell::Text(text) => plan.extend(text.lines().map(|line| anonymizer.free_text(line))),
             Cell::Json(value) => {
-                let scrubbed = scrub_json(value, &anonymizer);
+                let scrubbed = anonymizer.plan(value);
                 let text = serde_json::to_string_pretty(&scrubbed).unwrap_or_default();
                 plan.extend(text.lines().map(str::to_string));
             }
@@ -95,40 +95,21 @@ async fn run(state: &AppState, args: ExplainArgs) -> Result<ExplainResponse, Too
     })
 }
 
-fn scrub_json(value: serde_json::Value, anonymizer: &Anonymizer) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(text) => serde_json::Value::String(anonymizer.free_text(&text)),
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .into_iter()
-                .map(|item| scrub_json(item, anonymizer))
-                .collect(),
-        ),
-        serde_json::Value::Object(entries) => serde_json::Value::Object(
-            entries
-                .into_iter()
-                .map(|(key, item)| (anonymizer.free_text(&key), scrub_json(item, anonymizer)))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pseudo::Pseudonymizer;
+    use crate::contexts::anonymization::injector::AnonymizationInjector;
 
     #[test]
     fn json_plan_strings_are_scrubbed_before_escaping() {
         let dir = tempfile::tempdir().unwrap();
-        let pseudonymizer = Pseudonymizer::open(dir.path()).unwrap();
+        let pseudonymizer = AnonymizationInjector::new(dir.path()).use_cases().unwrap();
         let real = "o\"brien@canary-mail.fr".to_string();
         let injected = vec![(real.clone(), "anne.lorin7@example.net".to_string())];
         let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
         let plan =
             serde_json::json!([{ "Plan": { "Filter": format!("(email = '{real}'::text)") } }]);
-        let text = serde_json::to_string_pretty(&scrub_json(plan, &anonymizer)).unwrap();
+        let text = serde_json::to_string_pretty(&anonymizer.plan(plan)).unwrap();
         assert!(text.contains("anne.lorin7@example.net"), "{text}");
         assert!(!text.contains("brien"), "{text}");
     }

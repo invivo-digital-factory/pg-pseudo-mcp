@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use fake::locales::{Data, FR_FR};
 
 use super::dictionary::fold;
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::types::Kind;
 
 const PARTICLES: &[&str] = &[
     "da", "de", "del", "des", "di", "do", "dos", "du", "la", "le",

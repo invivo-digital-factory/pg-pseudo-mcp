@@ -3,9 +3,9 @@ use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::types::Kind;
 
-const IDENTIFIERS: &str = include_str!("../../data/identifier.csv");
+const IDENTIFIERS: &str = include_str!("../../../../../data/identifier.csv");
 
 const SUPPLEMENT: &[(&str, &str)] = &[
     ("nir", "social_security_id"),

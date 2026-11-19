@@ -3,9 +3,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::Span;
 use super::freetext;
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::types::{Kind, Span};
 
 const IBAN_LENGTHS: &[(&str, usize)] = &[
     ("AT", 20),

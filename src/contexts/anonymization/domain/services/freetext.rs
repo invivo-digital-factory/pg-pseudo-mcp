@@ -2,10 +2,9 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::Span;
 use super::detect::{compile, scan};
 use super::gazetteer::{name_hit, starts_upper};
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::types::{Kind, Span};
 
 const NAME_PARTICLES: &[&str] = &[
     "d'", "da", "de", "del", "della", "des", "di", "du", "la", "le", "van", "von",

@@ -1,30 +1,23 @@
-use std::sync::Arc;
-
 pub use crate::common::AppConfig;
+use crate::contexts::anonymization::injector::{AnonymizationInjector, AnonymizationUseCases};
 use crate::contexts::connections::injector::ConnectionsContext;
-use crate::pseudo::Pseudonymizer;
 use crate::tools::errors::{ErrorCategory, ToolError};
 
 pub struct AppState {
     pub config: AppConfig,
     pub connections: ConnectionsContext,
-    pseudonymizer: Result<Arc<Pseudonymizer>, String>,
+    pseudonymizer: Result<AnonymizationUseCases, String>,
 }
 
 impl AppState {
     pub fn new(config: AppConfig) -> Self {
-        let pseudonymizer = Pseudonymizer::open_default(&config)
-            .map(Arc::new)
-            .map_err(|error| error.to_string());
-        if let Err(error) = &pseudonymizer {
-            tracing::error!(%error, "pseudonym store unavailable; data tools will refuse to answer");
-        }
+        let pseudonymizer = AnonymizationInjector::from_config(&config).use_cases();
         Self::with_pseudonymizer(config, pseudonymizer)
     }
 
     pub fn with_pseudonymizer(
         config: AppConfig,
-        pseudonymizer: Result<Arc<Pseudonymizer>, String>,
+        pseudonymizer: Result<AnonymizationUseCases, String>,
     ) -> Self {
         Self {
             connections: ConnectionsContext::new(&config),
@@ -33,7 +26,7 @@ impl AppState {
         }
     }
 
-    pub fn pseudonymizer(&self) -> Result<Arc<Pseudonymizer>, ToolError> {
+    pub fn pseudonymizer(&self) -> Result<AnonymizationUseCases, ToolError> {
         self.pseudonymizer.clone().map_err(|error| {
             ToolError::new(
                 ErrorCategory::WithheldFailClosed,

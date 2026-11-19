@@ -7,8 +7,7 @@ use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-use super::GeneratorConfig;
-use crate::kind::Kind;
+use crate::contexts::anonymization::domain::types::{GeneratorConfig, Kind};
 
 pub(crate) const RESERVED_EMAIL_DOMAINS: [&str; 3] = ["example.com", "example.net", "example.org"];
 

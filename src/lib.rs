@@ -3,9 +3,7 @@ pub mod common;
 pub mod composition;
 pub mod contexts;
 pub mod guard;
-pub mod kind;
 pub mod limits;
-pub mod pseudo;
 pub mod state;
 pub mod tools;
 
@@ -21,3 +19,5 @@ pub mod pg {
         Cell, ColumnMeta, ColumnSource, DbMessage, QueryOutput,
     };
 }
+
+pub use contexts::anonymization::domain::types::kind;

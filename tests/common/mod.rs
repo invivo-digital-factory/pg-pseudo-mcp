@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use base64::Engine;
 use md5::{Digest, Md5};
+use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
 use pg_pseudo_mcp::dbeaver::credentials::encrypt_for_tests;
-use pg_pseudo_mcp::pseudo::Pseudonymizer;
 use pg_pseudo_mcp::state::{AppConfig, AppState};
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
@@ -64,9 +64,7 @@ impl Harness {
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
         };
-        let pseudonymizer = Pseudonymizer::open(data.path())
-            .map(Arc::new)
-            .map_err(|error| error.to_string());
+        let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {
             state: Arc::new(AppState::with_pseudonymizer(config, pseudonymizer)),
             _dbeaver: dbeaver,

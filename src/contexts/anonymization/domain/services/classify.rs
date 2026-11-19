@@ -1,8 +1,10 @@
+use super::detect::detect_spans;
 use super::detect::{french_phone_digits, luhn, nir_valid};
-use super::{
-    ColumnClass, ColumnInfo, Reason, TextVerdict, detect_spans, dictionary_kind, freetext,
+use super::dictionary::dictionary_kind;
+use super::freetext;
+use crate::contexts::anonymization::domain::types::{
+    ColumnClass, ColumnInfo, Kind, Reason, TextVerdict,
 };
-use crate::kind::Kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeFamily {
