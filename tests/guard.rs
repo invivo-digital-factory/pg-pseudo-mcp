@@ -400,3 +400,148 @@ fn the_explain_form_wraps_a_validated_query() {
     let error = prepare("EXPLAIN SELECT 1", &FakeStore::default()).unwrap();
     assert!(error.explain_sql().matches("EXPLAIN").count() == 1);
 }
+
+#[test]
+fn functions_called_from_the_from_clause_are_refused_with_their_name() {
+    for (sql, function) in [
+        (
+            "SELECT * FROM LATERAL pg_terminate_backend(1) t",
+            "pg_terminate_backend",
+        ),
+        (
+            "SELECT * FROM orders o, LATERAL pg_advisory_lock(4242) l",
+            "pg_advisory_lock",
+        ),
+        (
+            "SELECT * FROM LATERAL set_config('a', 'b', false) s",
+            "set_config",
+        ),
+        (
+            "SELECT * FROM LATERAL pg_read_file('/etc/passwd') f",
+            "pg_read_file",
+        ),
+        (
+            "SELECT * FROM LATERAL dblink_exec('x', 'DELETE FROM orders') AS d(r text)",
+            "dblink_exec",
+        ),
+        (
+            "SELECT * FROM orders o CROSS JOIN LATERAL pg_catalog.pg_terminate_backend(o.id) t",
+            "pg_terminate_backend",
+        ),
+        (
+            "SELECT * FROM LATERAL generate_series(1, pg_sleep(1)::int) g",
+            "pg_sleep",
+        ),
+        (
+            "SELECT * FROM unnest(ARRAY[pg_cancel_backend(1)]) u",
+            "pg_cancel_backend",
+        ),
+    ] {
+        let error = prepare(sql, &FakeStore::default()).expect_err(sql);
+        assert_eq!(error.code, "function_not_allowed", "{sql}");
+        assert!(error.message.contains(function), "{sql}: {}", error.message);
+    }
+}
+
+#[test]
+fn ordinary_table_functions_remain_readable() {
+    for sql in [
+        "SELECT * FROM generate_series(1, 3) g",
+        "SELECT * FROM LATERAL generate_series(1, 3) g",
+        "SELECT * FROM orders o, LATERAL jsonb_array_elements(o.items) e",
+        "SELECT * FROM orders o CROSS JOIN LATERAL jsonb_each_text(o.items) WITH ORDINALITY e",
+        "SELECT * FROM unnest(ARRAY[1, 2]) u",
+    ] {
+        prepare(sql, &FakeStore::default()).unwrap_or_else(|error| panic!("{sql}: {error:?}"));
+    }
+}
+
+#[test]
+fn explain_with_the_british_analyse_spelling_is_refused() {
+    for sql in [
+        "EXPLAIN (ANALYSE) SELECT * FROM orders",
+        "EXPLAIN (ANALYSE true) SELECT * FROM orders",
+        "EXPLAIN (FORMAT JSON, ANALYSE on) SELECT * FROM orders",
+    ] {
+        assert_eq!(refusal(sql), "explain_analyze", "{sql}");
+    }
+    assert_eq!(refusal("EXPLAIN ANALYSE SELECT 1"), "parse_error");
+    for sql in [
+        "EXPLAIN (ANALYSE false) SELECT * FROM orders",
+        "EXPLAIN (ANALYSE off) SELECT * FROM orders",
+    ] {
+        prepare(sql, &FakeStore::default()).unwrap_or_else(|error| panic!("{sql}: {error:?}"));
+    }
+}
+
+#[test]
+fn backup_maintenance_and_query_running_functions_are_refused() {
+    for (sql, function) in [
+        (
+            "SELECT pg_copy_logical_replication_slot('a', 'b')",
+            "pg_copy_logical_replication_slot",
+        ),
+        (
+            "SELECT pg_copy_physical_replication_slot('a', 'b')",
+            "pg_copy_physical_replication_slot",
+        ),
+        ("SELECT pg_backup_start('x')", "pg_backup_start"),
+        ("SELECT * FROM pg_backup_stop()", "pg_backup_stop"),
+        ("SELECT pg_start_backup('x')", "pg_start_backup"),
+        ("SELECT pg_stop_backup()", "pg_stop_backup"),
+        (
+            "SELECT public.pg_stat_statements_reset()",
+            "pg_stat_statements_reset",
+        ),
+        (
+            "SELECT brin_summarize_new_values('orders_brin')",
+            "brin_summarize_new_values",
+        ),
+        (
+            "SELECT brin_summarize_range('orders_brin', 0)",
+            "brin_summarize_range",
+        ),
+        (
+            "SELECT brin_desummarize_range('orders_brin', 0)",
+            "brin_desummarize_range",
+        ),
+        (
+            "SELECT gin_clean_pending_list('orders_gin')",
+            "gin_clean_pending_list",
+        ),
+        (
+            "SELECT * FROM ts_stat('SELECT to_tsvector(note) FROM orders')",
+            "ts_stat",
+        ),
+        (
+            "SELECT ts_rewrite('a'::tsquery, 'SELECT t, s FROM aliases')",
+            "ts_rewrite",
+        ),
+        (
+            "SELECT pg_background_launch('DELETE FROM orders')",
+            "pg_background_launch",
+        ),
+    ] {
+        let error = prepare(sql, &FakeStore::default()).expect_err(sql);
+        assert_eq!(error.code, "function_not_allowed", "{sql}");
+        assert!(error.message.contains(function), "{sql}: {}", error.message);
+    }
+}
+
+#[test]
+fn statistics_views_are_refused_in_any_schema() {
+    for sql in [
+        "SELECT query FROM public.pg_stat_statements",
+        "SELECT query FROM extensions.pg_stat_statements",
+        "SELECT * FROM monitoring.pg_stat_activity_copy",
+        "SELECT * FROM mydb.public.pg_statistic",
+        "SELECT 1 UNION SELECT calls FROM public.pg_stat_statements",
+    ] {
+        assert_eq!(refusal(sql), "relation_not_allowed", "{sql}");
+    }
+    let code = refusal("TABLE extensions.pg_stat_statements");
+    assert!(
+        matches!(code.as_str(), "relation_not_allowed" | "parse_error"),
+        "{code}"
+    );
+}

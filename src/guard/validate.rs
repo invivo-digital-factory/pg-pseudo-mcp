@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    Expr, ObjectName, Query, Select, SetExpr, Statement, UtilityOption, Visit, Visitor,
+    Expr, ObjectName, Query, Select, SetExpr, Statement, TableFactor, UtilityOption, Visit, Visitor,
 };
 
 use crate::tools::errors::{ErrorCategory, ToolError};
@@ -39,6 +39,14 @@ const DENIED_FUNCTION_PREFIXES: &[&str] = &[
     "schema_to_xml",
     "database_to_xml",
     "cursor_to_xml",
+    "pg_copy_",
+    "pg_backup_",
+    "pg_start_backup",
+    "pg_stop_backup",
+    "pg_stat_statements_reset",
+    "brin_summarize_",
+    "brin_desummarize_",
+    "gin_clean_pending_list",
 ];
 
 const DENIED_FUNCTIONS: &[&str] = &[
@@ -53,6 +61,9 @@ const DENIED_FUNCTIONS: &[&str] = &[
     "pg_show_all_file_settings",
     "pg_hba_file_rules",
     "pg_ident_file_mappings",
+    "ts_stat",
+    "ts_rewrite",
+    "pg_background_launch",
 ];
 
 const ALLOWED_INFORMATION_SCHEMA: &[&str] = &[
@@ -157,6 +168,20 @@ impl Visitor for Checker {
         ControlFlow::Continue(())
     }
 
+    fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<ToolError> {
+        let name = match factor {
+            TableFactor::Function { name, .. } | TableFactor::SemanticView { name, .. } => name,
+            _ => return ControlFlow::Continue(()),
+        };
+        let (schema, name) = split_name(name);
+        if let Some(error) =
+            check_function(&name).or_else(|| check_relation(schema.as_deref(), &name))
+        {
+            return ControlFlow::Break(error);
+        }
+        ControlFlow::Continue(())
+    }
+
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<ToolError> {
         if let Expr::Function(function) = expr {
             let (_, name) = split_name(&function.name);
@@ -195,7 +220,8 @@ fn check_table_shorthand(body: &SetExpr) -> Option<ToolError> {
 
 fn requests_analyze(options: &[UtilityOption]) -> bool {
     options.iter().any(|option| {
-        option.name.value.eq_ignore_ascii_case("analyze")
+        (option.name.value.eq_ignore_ascii_case("analyze")
+            || option.name.value.eq_ignore_ascii_case("analyse"))
             && !matches!(
                 &option.arg,
                 Some(Expr::Value(value)) if matches!(value.value, sqlparser::ast::Value::Boolean(false))
@@ -238,12 +264,13 @@ fn check_function(name: &str) -> Option<ToolError> {
 }
 
 fn check_relation(schema: Option<&str>, name: &str) -> Option<ToolError> {
-    let refused_relation = match schema {
-        Some("pg_catalog") => !ALLOWED_CATALOG_RELATIONS.contains(&name),
-        Some("information_schema") => !ALLOWED_INFORMATION_SCHEMA.contains(&name),
-        Some(_) => false,
-        None => name.starts_with("pg_") && !ALLOWED_CATALOG_RELATIONS.contains(&name),
-    };
+    let refused_relation = name.starts_with("pg_stat")
+        || match schema {
+            Some("pg_catalog") => !ALLOWED_CATALOG_RELATIONS.contains(&name),
+            Some("information_schema") => !ALLOWED_INFORMATION_SCHEMA.contains(&name),
+            Some(_) => false,
+            None => name.starts_with("pg_") && !ALLOWED_CATALOG_RELATIONS.contains(&name),
+        };
     refused_relation.then(|| {
         refused(
             "relation_not_allowed",
