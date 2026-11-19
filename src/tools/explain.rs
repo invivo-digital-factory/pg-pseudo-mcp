@@ -3,6 +3,7 @@ use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
 use crate::anon::apply::Anonymizer;
+use crate::contexts::connections::domain::types::ExecutionLimits;
 use crate::guard;
 use crate::limits::QueryLimits;
 use crate::pg::Cell;
@@ -43,13 +44,19 @@ async fn run(state: &AppState, args: ExplainArgs) -> Result<ExplainResponse, Too
     let guarded = guard::prepare(&args.sql, pseudonymizer.as_ref())?;
     let limits = QueryLimits::default();
     let anonymizer = Anonymizer::new(&pseudonymizer, &guarded.injected);
-    let output = {
-        let mut session = state.session(&args.connection).await?;
-        session
-            .run_read_only(&guarded.explain_sql(), MAX_PLAN_LINES, limits.timeout_ms)
-            .await
-            .map_err(|error| database_error(&anonymizer, error, &limits))?
-    };
+    let output = state
+        .connections
+        .explain_statement
+        .execute(
+            &args.connection,
+            &guarded.explain_sql(),
+            ExecutionLimits {
+                max_rows: MAX_PLAN_LINES,
+                timeout_ms: limits.timeout_ms,
+            },
+        )
+        .await
+        .map_err(|error| database_error(&anonymizer, error, &limits))?;
     let mut warnings = guarded.warnings;
     let mut plan = Vec::new();
     for cell in output

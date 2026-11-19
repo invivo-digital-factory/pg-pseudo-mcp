@@ -8,7 +8,6 @@ pub const MIN_BYTES: usize = 1024;
 pub const MAX_CELL_CHARS: usize = 500;
 pub const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 pub const MAX_TIMEOUT_MS: u64 = 60_000;
-pub const LOCK_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct QueryLimits {

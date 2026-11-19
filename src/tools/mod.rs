@@ -1,3 +1,4 @@
+pub mod connection_error;
 pub mod connections;
 pub mod errors;
 pub mod explain;

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::anon::apply::Anonymizer;
 use crate::anon::{ColumnInfo, classify_column};
+use crate::contexts::connections::domain::types::ExecutionLimits;
 use crate::limits::QueryLimits;
 use crate::pg::{Cell, QueryOutput};
 use crate::state::AppState;
@@ -202,9 +203,17 @@ struct Catalog<'a> {
 impl Catalog<'_> {
     async fn fetch(&self, sql: &str, max_rows: usize) -> Result<QueryOutput, ToolError> {
         let limits = QueryLimits::default();
-        let mut session = self.state.session(self.connection).await?;
-        session
-            .run_read_only(sql, max_rows, limits.timeout_ms)
+        self.state
+            .connections
+            .read_catalog
+            .execute(
+                self.connection,
+                sql,
+                ExecutionLimits {
+                    max_rows,
+                    timeout_ms: limits.timeout_ms,
+                },
+            )
             .await
             .map_err(|error| database_error(&self.anonymizer, error, &limits))
     }

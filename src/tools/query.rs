@@ -7,10 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::anon::apply::{Anonymizer, ColumnFlag};
+use crate::contexts::connections::domain::errors::ConnectionError;
+use crate::contexts::connections::domain::types::ExecutionLimits;
 use crate::guard;
 use crate::limits::QueryLimits;
 use crate::pg::{DbMessage, PgError};
 use crate::state::AppState;
+use crate::tools::connection_error::tool_error;
 use crate::tools::errors::{ErrorCategory, ToolError};
 use crate::tools::result::{TruncatedBy, Truncation, Warning, json_result};
 
@@ -83,13 +86,19 @@ async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolErr
         QueryLimits::from_request(args.max_rows, args.max_bytes, args.timeout_ms);
     let cell_offset = usize::try_from(args.cell_offset.unwrap_or(0)).unwrap_or(usize::MAX);
     let anonymizer = Anonymizer::new(&pseudonymizer, &guarded.injected);
-    let output = {
-        let mut session = state.session(&args.connection).await?;
-        session
-            .run_read_only(&guarded.sql, limits.max_rows, limits.timeout_ms)
-            .await
-            .map_err(|error| database_error(&anonymizer, error, &limits))?
-    };
+    let output = state
+        .connections
+        .run_read_only_statement
+        .execute(
+            &args.connection,
+            &guarded.sql,
+            ExecutionLimits {
+                max_rows: limits.max_rows,
+                timeout_ms: limits.timeout_ms,
+            },
+        )
+        .await
+        .map_err(|error| database_error(&anonymizer, error, &limits))?;
     let mut warnings = guarded.warnings.clone();
     warnings.extend(clamps.into_iter().map(|clamp| {
         Warning::new(
@@ -157,9 +166,13 @@ async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolErr
 
 pub(crate) fn database_error(
     anonymizer: &Anonymizer,
-    error: PgError,
+    error: ConnectionError,
     limits: &QueryLimits,
 ) -> ToolError {
+    tool_error(error, |error| session_error(anonymizer, error, limits))
+}
+
+fn session_error(anonymizer: &Anonymizer, error: PgError, limits: &QueryLimits) -> ToolError {
     match error {
         PgError::Timeout => ToolError::new(
             ErrorCategory::Timeout,
