@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/Library/Application Support/pg-pseudo-mcp/**)",
+      "Read(~/.local/share/pg-pseudo-mcp/**)",
+      "Read(~/Library/DBeaverData/**)",
+      "Read(~/.local/share/DBeaverData/**)",
+      "Bash(psql:*)",
+      "Bash(pg_dump:*)",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

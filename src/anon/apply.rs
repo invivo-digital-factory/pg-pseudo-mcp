@@ -100,14 +100,46 @@ impl<'a> Anonymizer<'a> {
     }
 
     pub fn message(&self, message: &DbMessage) -> DbMessage {
+        let quotes_data = message
+            .sqlstate
+            .as_deref()
+            .is_some_and(|state| state.starts_with("22") || state.starts_with("23"));
+        let scrub = |text: &str| {
+            let text = self.free_text(text);
+            if quotes_data {
+                self.mask_quoted(&text)
+            } else {
+                text
+            }
+        };
         DbMessage {
             severity: message.severity.clone(),
             sqlstate: message.sqlstate.clone(),
-            message: self.free_text(&message.message),
-            detail: message.detail.as_deref().map(|text| self.free_text(text)),
-            hint: message.hint.as_deref().map(|text| self.free_text(text)),
+            message: scrub(&message.message),
+            detail: message.detail.as_deref().map(scrub),
+            hint: message.hint.as_deref().map(scrub),
             where_: None,
         }
+    }
+
+    fn mask_quoted(&self, text: &str) -> String {
+        QUOTED
+            .replace_all(text, |captures: &regex::Captures| {
+                let inner = captures
+                    .get(2)
+                    .or_else(|| captures.get(4))
+                    .map_or("", |m| m.as_str());
+                if inner.is_empty() || self.is_pseudonym(inner) {
+                    captures[0].to_string()
+                } else {
+                    let token = self.pseudonymizer.opaque_token("value", inner);
+                    match captures.get(1) {
+                        Some(_) => format!("\"{token}\""),
+                        None => format!("=({token})"),
+                    }
+                }
+            })
+            .into_owned()
     }
 
     fn cell(&self, cell: Cell, class: &ColumnClass, tracker: &mut Tracker) -> Value {
@@ -115,7 +147,14 @@ impl<'a> Anonymizer<'a> {
             Cell::Null => Value::Null,
             Cell::Bool(value) => Value::Bool(value),
             Cell::Int(value) => self.number(&value.to_string(), json!(value), class, tracker),
-            Cell::Float(value) => json!(value),
+            Cell::Float(value) => {
+                if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e18 {
+                    let digits = format!("{}", value as i64);
+                    self.number(&digits, json!(value), class, tracker)
+                } else {
+                    json!(value)
+                }
+            }
             Cell::Numeric(text) => {
                 let original = Value::String(text.clone());
                 self.number(&text, original, class, tracker)
@@ -123,6 +162,9 @@ impl<'a> Anonymizer<'a> {
             Cell::Text(text) => Value::String(self.text(&text, class, tracker)),
             Cell::Json(value) => self.json(value, None, tracker),
             Cell::Uuid(text) | Cell::Time(text) | Cell::Interval(text) => Value::String(text),
+            Cell::Date(text) if class.derived && class.forced_kind.is_none() => {
+                Value::String(self.pseudonymize(Kind::BirthDate, &text, Reason::Derived, tracker))
+            }
             Cell::Date(text) | Cell::Timestamp(text) | Cell::TimestampTz(text) => {
                 if class.forced_kind == Some(Kind::BirthDate) {
                     Value::String(self.pseudonymize(
@@ -170,8 +212,18 @@ impl<'a> Anonymizer<'a> {
         class: &ColumnClass,
         tracker: &mut Tracker,
     ) -> Value {
-        let Some(hint) = class.forced_kind else {
-            return original;
+        let hint = match class.forced_kind {
+            Some(hint) => hint,
+            None if class.derived => {
+                let Some(kind) = DERIVED_NUMBER_KINDS
+                    .iter()
+                    .find_map(|kind| numeric_shape_kind(digits, Some(*kind)))
+                else {
+                    return original;
+                };
+                kind
+            }
+            None => return original,
         };
         let kind = numeric_shape_kind(digits, Some(hint)).unwrap_or(hint);
         let integral = digits.split('.').next().unwrap_or(digits);
@@ -191,6 +243,9 @@ impl<'a> Anonymizer<'a> {
         }
         match judge_text(&scrubbed, class) {
             TextVerdict::Clear => scrubbed,
+            TextVerdict::Spans(spans) if class.derived && leaves_words(&scrubbed, &spans) => {
+                self.pseudonymize(spans[0].kind, &scrubbed, Reason::Derived, tracker)
+            }
             TextVerdict::Spans(spans) => self.replace_spans(&scrubbed, &spans, tracker),
             TextVerdict::WholeValue { kind, reason } => {
                 self.pseudonymize(kind, &scrubbed, reason, tracker)
@@ -295,6 +350,39 @@ impl<'a> Anonymizer<'a> {
     }
 }
 
+const DERIVED_WHOLE_VALUE_WORDS: usize = 6;
+
+const DERIVED_NUMBER_KINDS: [Kind; 5] = [
+    Kind::Phone,
+    Kind::Siret,
+    Kind::Siren,
+    Kind::Nir,
+    Kind::CardNumber,
+];
+
+static QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"(")([^"]*)(")|=\(([^)]*)\)"#).expect("quoted fragment pattern")
+});
+
+fn leaves_words(text: &str, spans: &[super::Span]) -> bool {
+    if text.split_whitespace().count() > DERIVED_WHOLE_VALUE_WORDS {
+        return false;
+    }
+    let mut residue = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for span in spans {
+        if span.start >= cursor {
+            residue.push_str(text.get(cursor..span.start).unwrap_or(""));
+            residue.push(' ');
+            cursor = span.end;
+        }
+    }
+    residue.push_str(text.get(cursor..).unwrap_or(""));
+    residue
+        .split(|c: char| !c.is_alphabetic())
+        .any(|word| word.chars().count() >= 3)
+}
+
 #[derive(Default)]
 struct Tracker {
     first: Option<(&'static str, Reason)>,
@@ -325,28 +413,18 @@ fn field_type(cell: &Cell) -> &'static str {
 }
 
 fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> Option<String> {
-    let lower_haystack = haystack.to_lowercase();
-    let lower_needle = needle.to_lowercase();
-    if lower_haystack.len() != haystack.len() || lower_needle.len() != needle.len() {
-        return haystack
-            .contains(needle)
-            .then(|| haystack.replace(needle, replacement));
-    }
-    let mut output = String::with_capacity(haystack.len());
-    let mut cursor = 0;
-    let mut found = false;
-    while let Some(offset) = lower_haystack[cursor..].find(&lower_needle) {
-        let start = cursor + offset;
-        output.push_str(&haystack[cursor..start]);
-        output.push_str(replacement);
-        cursor = start + needle.len();
-        found = true;
-    }
-    if !found {
+    let pattern = regex::RegexBuilder::new(&regex::escape(needle))
+        .case_insensitive(true)
+        .build()
+        .ok()?;
+    if !pattern.is_match(haystack) {
         return None;
     }
-    output.push_str(&haystack[cursor..]);
-    Some(output)
+    Some(
+        pattern
+            .replace_all(haystack, regex::NoExpand(replacement))
+            .into_owned(),
+    )
 }
 
 #[cfg(test)]
@@ -358,6 +436,10 @@ mod tests {
         assert_eq!(
             replace_case_insensitive("A b@C.fr and B@c.FR", "b@c.fr", "x@y.org").as_deref(),
             Some("A x@y.org and x@y.org")
+        );
+        assert_eq!(
+            replace_case_insensitive("İstanbul MAËLYS", "maëlys", "x").as_deref(),
+            Some("İstanbul x")
         );
         assert_eq!(replace_case_insensitive("nothing", "b@c.fr", "x"), None);
     }
