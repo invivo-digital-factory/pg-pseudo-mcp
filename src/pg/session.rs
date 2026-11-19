@@ -159,14 +159,14 @@ async fn run_statement(
         .map_err(pg)?;
     let statement = transaction.prepare(sql).await.map_err(pg)?;
     if !statement.params().is_empty() {
-        return Err(PgError::Db(DbMessage {
+        return Err(PgError::Db(Box::new(DbMessage {
             severity: "ERROR".into(),
             sqlstate: Some(UNDEFINED_PARAMETER.into()),
             message: "parameter placeholders are not supported; inline the values".into(),
             detail: None,
             hint: None,
             where_: None,
-        }));
+        })));
     }
     let sources = sources
         .resolve(transaction, statement.columns())

@@ -259,12 +259,20 @@ fn cut_cell(value: &mut Value, offset: usize, max_chars: usize) -> bool {
             };
             remaining > max_chars
         }
-        Value::Array(items) => items
-            .iter_mut()
-            .fold(false, |cut, item| cut_cell(item, offset, max_chars) || cut),
-        Value::Object(entries) => entries
-            .values_mut()
-            .fold(false, |cut, item| cut_cell(item, offset, max_chars) || cut),
+        Value::Array(items) => {
+            let mut cut = false;
+            for item in items.iter_mut() {
+                cut |= cut_cell(item, offset, max_chars);
+            }
+            cut
+        }
+        Value::Object(entries) => {
+            let mut cut = false;
+            for item in entries.values_mut() {
+                cut |= cut_cell(item, offset, max_chars);
+            }
+            cut
+        }
         _ => false,
     }
 }
