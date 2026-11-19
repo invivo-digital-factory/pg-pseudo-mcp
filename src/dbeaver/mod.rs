@@ -1,4 +1,5 @@
 pub mod credentials;
+pub mod pgpass;
 pub mod variables;
 mod workspace;
 
@@ -32,6 +33,27 @@ pub enum SslMode {
     VerifyFull,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshAuth {
+    PublicKey {
+        key_path: PathBuf,
+        passphrase: Option<Secret>,
+    },
+    Password(Secret),
+    Agent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelParams {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub auth: SshAuth,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub verify_host_key: bool,
+}
+
 #[derive(Clone)]
 pub struct ConnectParams {
     pub host: String,
@@ -40,6 +62,7 @@ pub struct ConnectParams {
     pub user: String,
     pub password: Secret,
     pub sslmode: SslMode,
+    pub tunnel: Option<TunnelParams>,
 }
 
 impl fmt::Debug for ConnectParams {
@@ -51,6 +74,7 @@ impl fmt::Debug for ConnectParams {
             .field("user", &self.user)
             .field("password", &self.password)
             .field("sslmode", &self.sslmode)
+            .field("tunnel", &self.tunnel)
             .finish()
     }
 }

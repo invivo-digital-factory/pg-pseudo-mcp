@@ -1,9 +1,9 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pg_pseudo_mcp::dbeaver::credentials::encrypt_for_tests;
 use pg_pseudo_mcp::dbeaver::{
-    ConnectionEntry, ConnectionStatus, SslMode, discover, find_connection,
+    ConnectionEntry, ConnectionStatus, SshAuth, SslMode, TunnelParams, discover, find_connection,
 };
 use pg_pseudo_mcp::state::AppConfig;
 use pg_pseudo_mcp::tools::connections::list_connections;
@@ -69,7 +69,7 @@ fn creds(id: &str, user: &str, password: &str) -> Value {
 fn config(root: &Path) -> AppConfig {
     AppConfig {
         dbeaver_home: Some(root.to_path_buf()),
-        data_dir: None,
+        ..AppConfig::default()
     }
 }
 
@@ -231,23 +231,6 @@ fn invalid_json_data_sources_is_unavailable_and_other_projects_still_load() {
 }
 
 #[test]
-fn enabled_ssh_tunnel_is_unsupported() {
-    let home = TempDir::new().unwrap();
-    write_project(
-        home.path(),
-        "General",
-        "",
-        &sources(json!({ "pg-1": pg_connection("Shop", json!({
-            "configuration": { "handlers": { "ssh_tunnel": { "type": "TUNNEL", "enabled": true } } }
-        })) })),
-        Some(&creds("pg-1", "a", "b")),
-    );
-    let entry = only(home.path());
-    assert!(matches!(entry.status, ConnectionStatus::Unsupported { .. }));
-    assert!(reason(&entry.status).contains("SSH"));
-}
-
-#[test]
 fn disabled_ssh_tunnel_is_ignored() {
     let home = TempDir::new().unwrap();
     write_project(
@@ -286,14 +269,13 @@ fn non_native_auth_model_is_unsupported() {
         "General",
         "",
         &sources(json!({ "pg-1": pg_connection("Shop", json!({
-            "configuration": { "auth-model": "postgres_pgpass" }
+            "configuration": { "auth-model": "postgres_kerberos" }
         })) })),
         Some(&creds("pg-1", "a", "b")),
     );
-    assert!(matches!(
-        only(home.path()).status,
-        ConnectionStatus::Unsupported { .. }
-    ));
+    let entry = only(home.path());
+    assert!(matches!(entry.status, ConnectionStatus::Unsupported { .. }));
+    assert!(reason(&entry.status).contains("postgres_kerberos"));
 }
 
 #[test]
@@ -530,4 +512,455 @@ async fn list_connections_output_has_no_host_user_or_password() {
     let legacy = connections.iter().find(|c| c["name"] == "Legacy").unwrap();
     assert_eq!(legacy["status"], "unsupported");
     assert!(legacy["reason"].as_str().unwrap().contains("mysql"));
+}
+
+fn key_file(home: &TempDir) -> PathBuf {
+    let path = home.path().join("keys").join("id_bastion");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "synthetic key material").unwrap();
+    path
+}
+
+fn tunnel(properties: Value) -> Value {
+    let mut base = json!({
+        "authType": "PUBLIC_KEY",
+        "host": "bastion.example",
+        "port": 2228.0,
+        "implementation": "sshj",
+        "jumpServer.count": 0.0,
+        "localHost": "",
+        "shareTunnels": true
+    });
+    merge(&mut base, properties);
+    json!({
+        "configuration": {
+            "handlers": {
+                "ssh_tunnel": {
+                    "type": "TUNNEL",
+                    "enabled": true,
+                    "save-password": true,
+                    "properties": base
+                }
+            }
+        }
+    })
+}
+
+fn tunnel_creds(id: &str, ssh: Value) -> Value {
+    json!({ id: {
+        "#connection": { "user": "reader", "password": "db-pw" },
+        "network/ssh_tunnel": ssh
+    } })
+}
+
+fn tunneled(home: &TempDir, properties: Value, ssh: Value) -> ConnectionEntry {
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({ "pg-1": pg_connection("Shop", tunnel(properties)) })),
+        Some(&tunnel_creds("pg-1", ssh)),
+    );
+    only(home.path())
+}
+
+fn tunnel_of(entry: ConnectionEntry) -> TunnelParams {
+    assert_eq!(entry.status, ConnectionStatus::Available, "{entry:?}");
+    entry.params.unwrap().tunnel.expect("tunnel params")
+}
+
+#[test]
+fn tunneled_public_key_connection_is_available() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let entry = tunneled(
+        &home,
+        json!({ "keyPath": key.to_str().unwrap() }),
+        json!({ "user": "ssh-user", "password": "key-passphrase" }),
+    );
+    let params = entry.params.clone().unwrap();
+    assert_eq!(params.host, "db.internal.example");
+    assert_eq!(params.port, 5433);
+    assert_eq!(params.password.expose(), "db-pw");
+    let tunnel = tunnel_of(entry);
+    assert_eq!(tunnel.host, "bastion.example");
+    assert_eq!(tunnel.port, 2228);
+    assert_eq!(tunnel.user, "ssh-user");
+    assert_eq!(
+        tunnel.auth,
+        SshAuth::PublicKey {
+            key_path: key,
+            passphrase: Some(pg_pseudo_mcp::dbeaver::Secret::new("key-passphrase")),
+        }
+    );
+    assert_eq!(tunnel.remote_host, "db.internal.example");
+    assert_eq!(tunnel.remote_port, 5433);
+    assert!(tunnel.verify_host_key);
+}
+
+#[test]
+fn public_key_without_saved_passphrase_is_available() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let tunnel = tunnel_of(tunneled(
+        &home,
+        json!({ "keyPath": key.to_str().unwrap(), "jumpServer.count": 0 }),
+        json!({ "user": "ssh-user" }),
+    ));
+    assert_eq!(
+        tunnel.auth,
+        SshAuth::PublicKey {
+            key_path: key,
+            passphrase: None
+        }
+    );
+}
+
+#[test]
+fn placeholder_key_path_is_unavailable() {
+    let home = TempDir::new().unwrap();
+    let entry = tunneled(
+        &home,
+        json!({ "keyPath": "/Users/CHANGEME/.ssh/id" }),
+        json!({ "user": "ssh-user", "password": "key-passphrase" }),
+    );
+    assert!(matches!(entry.status, ConnectionStatus::Unavailable { .. }));
+    assert_eq!(
+        reason(&entry.status),
+        "SSH key file not found: /Users/CHANGEME/.ssh/id"
+    );
+    assert!(entry.params.is_none());
+}
+
+#[test]
+fn jump_server_is_unsupported() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let entry = tunneled(
+        &home,
+        json!({ "keyPath": key.to_str().unwrap(), "jumpServer.count": 1 }),
+        json!({ "user": "ssh-user" }),
+    );
+    assert_eq!(
+        entry.status,
+        ConnectionStatus::Unsupported {
+            reason: "SSH jump servers are not supported yet".to_string()
+        }
+    );
+}
+
+#[test]
+fn password_auth_with_saved_password_is_available() {
+    let home = TempDir::new().unwrap();
+    let tunnel = tunnel_of(tunneled(
+        &home,
+        json!({ "authType": "PASSWORD", "port": "2222" }),
+        json!({ "user": "ssh-user", "password": "ssh-pw" }),
+    ));
+    assert_eq!(tunnel.port, 2222);
+    assert_eq!(
+        tunnel.auth,
+        SshAuth::Password(pg_pseudo_mcp::dbeaver::Secret::new("ssh-pw"))
+    );
+}
+
+#[test]
+fn password_auth_without_saved_password_is_unavailable() {
+    let home = TempDir::new().unwrap();
+    let entry = tunneled(
+        &home,
+        json!({ "authType": "PASSWORD" }),
+        json!({ "user": "ssh-user" }),
+    );
+    assert!(matches!(entry.status, ConnectionStatus::Unavailable { .. }));
+    assert!(reason(&entry.status).contains("SSH password"), "{entry:?}");
+}
+
+#[test]
+fn missing_ssh_user_is_unavailable() {
+    let home = TempDir::new().unwrap();
+    let entry = tunneled(
+        &home,
+        json!({ "authType": "AGENT" }),
+        json!({ "password": "ssh-pw" }),
+    );
+    assert_eq!(
+        entry.status,
+        ConnectionStatus::Unavailable {
+            reason: "SSH user not saved in DBeaver".to_string()
+        }
+    );
+}
+
+#[test]
+fn agent_auth_is_available() {
+    let home = TempDir::new().unwrap();
+    let tunnel = tunnel_of(tunneled(
+        &home,
+        json!({ "authType": "AGENT", "port": null }),
+        json!({ "user": "ssh-user" }),
+    ));
+    assert_eq!(tunnel.auth, SshAuth::Agent);
+    assert_eq!(tunnel.port, 22);
+}
+
+#[test]
+fn bypass_host_verification_disables_host_key_check() {
+    for bypass in [json!(true), json!("true")] {
+        let home = TempDir::new().unwrap();
+        let tunnel = tunnel_of(tunneled(
+            &home,
+            json!({ "authType": "AGENT", "bypassHostVerification": bypass }),
+            json!({ "user": "ssh-user" }),
+        ));
+        assert!(!tunnel.verify_host_key);
+    }
+    let home = TempDir::new().unwrap();
+    let tunnel = tunnel_of(tunneled(
+        &home,
+        json!({ "authType": "AGENT", "bypassHostVerification": false }),
+        json!({ "user": "ssh-user" }),
+    ));
+    assert!(tunnel.verify_host_key);
+}
+
+#[test]
+fn handler_user_and_password_win_over_the_credentials_file() {
+    let home = TempDir::new().unwrap();
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({ "pg-1": pg_connection("Shop", merge_into(
+            tunnel(json!({ "authType": "PASSWORD", "remoteHost": "10.0.0.7" })),
+            json!({ "configuration": { "handlers": { "ssh_tunnel": {
+                "user": "handler-user", "password": "handler-pw"
+            } } } }),
+        )) })),
+        Some(&tunnel_creds(
+            "pg-1",
+            json!({ "user": "file-user", "password": "file-pw" }),
+        )),
+    );
+    let tunnel = tunnel_of(only(home.path()));
+    assert_eq!(tunnel.user, "handler-user");
+    assert_eq!(
+        tunnel.auth,
+        SshAuth::Password(pg_pseudo_mcp::dbeaver::Secret::new("handler-pw"))
+    );
+    assert_eq!(tunnel.remote_host, "10.0.0.7");
+    assert_eq!(tunnel.remote_port, 5433);
+}
+
+fn merge_into(mut target: Value, patch: Value) -> Value {
+    merge(&mut target, patch);
+    target
+}
+
+#[test]
+fn tunnel_fields_resolve_variables() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let key_dir = key.parent().unwrap().to_str().unwrap().to_string();
+    let tunnel = tunnel_of(tunneled(
+        &home,
+        json!({
+            "host": "${PGMCP_TEST_SSH_HOST_UNSET:bastion.default}",
+            "port": "${PGMCP_TEST_SSH_PORT_UNSET:2200}",
+            "keyPath": format!("${{PGMCP_TEST_SSH_KEYDIR_UNSET:{key_dir}}}/id_bastion")
+        }),
+        json!({ "user": "${PGMCP_TEST_SSH_USER_UNSET:ssh-default}" }),
+    ));
+    assert_eq!(tunnel.host, "bastion.default");
+    assert_eq!(tunnel.port, 2200);
+    assert_eq!(tunnel.user, "ssh-default");
+    assert_eq!(
+        tunnel.auth,
+        SshAuth::PublicKey {
+            key_path: key,
+            passphrase: None
+        }
+    );
+}
+
+#[test]
+fn enabled_proxy_handler_is_unsupported() {
+    let home = TempDir::new().unwrap();
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({ "pg-1": pg_connection("Shop", json!({
+            "configuration": { "handlers": { "socks_proxy": { "type": "PROXY", "enabled": true } } }
+        })) })),
+        Some(&creds("pg-1", "a", "b")),
+    );
+    let entry = only(home.path());
+    assert!(matches!(entry.status, ConnectionStatus::Unsupported { .. }));
+    assert!(reason(&entry.status).contains("proxy"));
+}
+
+#[test]
+fn debug_of_tunneled_params_never_prints_secrets() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let entry = tunneled(
+        &home,
+        json!({ "keyPath": key.to_str().unwrap() }),
+        json!({ "user": "ssh-user", "password": "passphrase-canary" }),
+    );
+    let params = entry.params.clone().unwrap();
+    let tunnel = params.tunnel.clone().unwrap();
+    for text in [
+        format!("{params:?}"),
+        format!("{tunnel:?}"),
+        format!("{entry:?}"),
+    ] {
+        assert!(!text.contains("passphrase-canary"), "{text}");
+        assert!(!text.contains("db-pw"), "{text}");
+    }
+    let home = TempDir::new().unwrap();
+    let entry = tunneled(
+        &home,
+        json!({ "authType": "PASSWORD" }),
+        json!({ "user": "ssh-user", "password": "ssh-pw-canary" }),
+    );
+    assert!(!format!("{entry:?}").contains("ssh-pw-canary"));
+}
+
+#[test]
+fn pgpass_supplies_the_database_password() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    let pgpass = home.path().join("pgpass-dbeaver-test");
+    fs::write(
+        &pgpass,
+        "# synthetic\nbastion.example:*:*:*:wrong-host\ndb.internal.example:5433:shop:writer:wrong-user\n*:5433:shop:reader:p\\:gp\\\\ss\n",
+    )
+    .unwrap();
+    let pgpass_model = |extra: Value| {
+        merge_into(
+            json!({ "configuration": { "auth-model": "postgres_pgpass" } }),
+            extra,
+        )
+    };
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": pg_connection("Shop", pgpass_model(merge_into(
+                tunnel(json!({ "keyPath": key.to_str().unwrap() })),
+                json!({ "save-password": false }),
+            ))),
+            "pg-2": pg_connection("Billing", pgpass_model(json!({
+                "configuration": { "database": "billing", "port": "5432" }
+            }))),
+            "pg-3": pg_connection("NoUser", pgpass_model(json!({})))
+        })),
+        Some(&json!({
+            "pg-1": {
+                "#connection": { "user": "reader" },
+                "network/ssh_tunnel": { "user": "ssh-user" }
+            },
+            "pg-2": { "#connection": { "user": "reader" } }
+        })),
+    );
+    unsafe { std::env::set_var("PGPASSFILE", &pgpass) };
+    let discovery = discover(Some(home.path()));
+    let by_name = |name: &str| {
+        discovery
+            .connections
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap()
+            .clone()
+    };
+    let shop = by_name("Shop");
+    assert_eq!(shop.status, ConnectionStatus::Available, "{shop:?}");
+    let params = shop.params.unwrap();
+    assert_eq!(params.user, "reader");
+    assert_eq!(params.password.expose(), r"p:gp\ss");
+    assert_eq!(params.tunnel.unwrap().host, "bastion.example");
+    assert_eq!(
+        by_name("Billing").status,
+        ConnectionStatus::Unavailable {
+            reason: "no matching entry in the pgpass file".to_string()
+        }
+    );
+    let no_user = by_name("NoUser");
+    assert!(matches!(
+        no_user.status,
+        ConnectionStatus::Unavailable { .. }
+    ));
+    assert!(reason(&no_user.status).contains("user"));
+
+    unsafe { std::env::set_var("PGPASSFILE", home.path().join("absent-pgpass")) };
+    assert_eq!(
+        by_name_in(&discover(Some(home.path())), "Shop").status,
+        ConnectionStatus::Unavailable {
+            reason: "no matching entry in the pgpass file".to_string()
+        }
+    );
+}
+
+fn by_name_in(discovery: &pg_pseudo_mcp::dbeaver::Discovery, name: &str) -> ConnectionEntry {
+    discovery
+        .connections
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test]
+async fn list_connections_hides_tunnel_details() {
+    let home = TempDir::new().unwrap();
+    let key = key_file(&home);
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": pg_connection("Shop", tunnel(json!({ "keyPath": key.to_str().unwrap() }))),
+            "pg-2": pg_connection("Billing", tunnel(json!({ "authType": "PASSWORD" })))
+        })),
+        Some(&json!({
+            "pg-1": {
+                "#connection": { "user": "canary-db-user", "password": "canary-db-pw" },
+                "network/ssh_tunnel": { "user": "canary-ssh-user", "password": "canary-passphrase" }
+            },
+            "pg-2": {
+                "#connection": { "user": "canary-db-user", "password": "canary-db-pw" },
+                "network/ssh_tunnel": { "user": "canary-ssh-user", "password": "canary-ssh-pw" }
+            }
+        })),
+    );
+    let result = list_connections(&config(home.path())).await;
+    let text = serde_json::to_string(&result).unwrap();
+    for forbidden in [
+        "bastion.example",
+        "2228",
+        "canary-ssh-user",
+        "canary-passphrase",
+        "canary-ssh-pw",
+        "canary-db-user",
+        "canary-db-pw",
+        "id_bastion",
+        "db.internal.example",
+    ] {
+        assert!(!text.contains(forbidden), "{forbidden} leaked in {text}");
+    }
+    let body: Value = serde_json::from_str(
+        result.content[0]
+            .as_text()
+            .map(|text| text.text.as_str())
+            .unwrap(),
+    )
+    .unwrap();
+    let connections = body["connections"].as_array().unwrap();
+    assert_eq!(connections.len(), 2);
+    for connection in connections {
+        assert_eq!(connection["status"], "available", "{connection}");
+    }
 }

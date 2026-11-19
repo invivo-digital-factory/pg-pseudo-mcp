@@ -1,15 +1,21 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use super::credentials::{CredentialStore, Secret};
+use super::pgpass;
 use super::variables::{process_env, resolve};
-use super::{ConnectParams, ConnectionEntry, ConnectionStatus, SslMode};
+use super::{ConnectParams, ConnectionEntry, ConnectionStatus, SshAuth, SslMode, TunnelParams};
 
 static NULL: Value = Value::Null;
 
-const SSH_REASON: &str = "SSH tunnel not supported in this version";
+const JUMP_SERVER_REASON: &str = "SSH jump servers are not supported yet";
+const SSH_USER_REASON: &str = "SSH user not saved in DBeaver";
+const SSH_PASSWORD_REASON: &str = "no saved SSH password for this connection in DBeaver";
+const PGPASS_REASON: &str = "no matching entry in the pgpass file";
+const NO_USER_REASON: &str = "no saved user name for this connection in DBeaver";
 const PROXY_REASON: &str = "proxy not supported in this version";
 const MASTER_PASSWORD_REASON: &str = "credentials protected by DBeaver master password or secure storage; unlock or re-save them in DBeaver";
 const NO_PASSWORD_REASON: &str = "no saved password for this connection in DBeaver";
@@ -191,15 +197,16 @@ fn evaluate(
             "engine {engine} is not supported, only PostgreSQL"
         )));
     }
-    check_handlers(configuration)?;
-    match text(configuration, "auth-model").as_deref() {
-        None | Some("native") => {}
+    let tunnel_handler = find_tunnel_handler(configuration)?;
+    let pgpass_auth = match text(configuration, "auth-model").as_deref() {
+        None | Some("native") => false,
+        Some("postgres_pgpass") => true,
         Some(model) => {
             return Err(unsupported(format!(
                 "authentication model {model} is not supported in this version"
             )));
         }
-    }
+    };
 
     let own_field = |name: &str| match name {
         "host" | "port" | "database" | "user" => text(configuration, name),
@@ -246,35 +253,178 @@ fn evaluate(
             .as_deref(),
     )?;
 
+    let port = port.unwrap_or(5432);
+    let database = database.unwrap_or_else(|| "postgres".to_string());
     let saved = store.get(id);
     let plain_user = text(configuration, "user")
         .map(|value| expand(&value))
         .transpose()?;
-    let plain_password = text(configuration, "password");
-    let user = plain_user.or_else(|| saved.and_then(|saved| saved.user.clone()));
-    let password = plain_password
-        .map(Secret::new)
-        .or_else(|| saved.and_then(|saved| saved.password.clone()));
+    let user = plain_user
+        .or_else(|| saved.and_then(|saved| saved.user.clone()))
+        .filter(|user| !user.is_empty());
 
-    let Some(password) = password else {
-        return Err(unavailable(missing_password_reason(
-            connection,
-            saved.is_some(),
-            credentials_problem,
-        )));
+    let (user, password) = if pgpass_auth {
+        let user = user.ok_or_else(|| unavailable(NO_USER_REASON))?;
+        let target = pgpass::Target {
+            host: &host,
+            port,
+            database: &database,
+            user: &user,
+        };
+        let password = pgpass::default_path()
+            .and_then(|path| pgpass::lookup(&path, &target))
+            .ok_or_else(|| unavailable(PGPASS_REASON))?;
+        (user, password)
+    } else {
+        let password = text(configuration, "password")
+            .map(Secret::new)
+            .or_else(|| saved.and_then(|saved| saved.password.clone()));
+        let Some(password) = password else {
+            return Err(unavailable(missing_password_reason(
+                connection,
+                saved.is_some(),
+                credentials_problem,
+            )));
+        };
+        (user.ok_or_else(|| unavailable(NO_USER_REASON))?, password)
     };
-    let user = user
-        .filter(|user| !user.is_empty())
-        .ok_or_else(|| unavailable("no saved user name for this connection in DBeaver"))?;
+
+    let tunnel = tunnel_handler
+        .map(|handler| build_tunnel(id, handler, store, &host, port, &expand))
+        .transpose()?;
 
     Ok(ConnectParams {
         host,
-        port: port.unwrap_or(5432),
-        database: database.unwrap_or_else(|| "postgres".to_string()),
+        port,
+        database,
         user,
         password,
         sslmode,
+        tunnel,
     })
+}
+
+fn build_tunnel<E>(
+    id: &str,
+    handler: &Value,
+    store: &CredentialStore,
+    database_host: &str,
+    database_port: u16,
+    expand: &E,
+) -> Result<TunnelParams, ConnectionStatus>
+where
+    E: Fn(&str) -> Result<String, ConnectionStatus>,
+{
+    let properties = handler.get("properties").unwrap_or(&NULL);
+    let expanded = |key: &str| -> Result<Option<String>, ConnectionStatus> {
+        text(properties, key)
+            .map(|value| expand(&value))
+            .transpose()
+            .map(|value| value.filter(|value| !value.is_empty()))
+    };
+    let host = expanded("host")?.ok_or_else(|| unavailable("SSH tunnel has no host"))?;
+    let port = match expanded("port")? {
+        Some(raw) => {
+            parse_port(&raw).ok_or_else(|| unavailable("SSH tunnel port is not a valid number"))?
+        }
+        None => 22,
+    };
+    let saved = store.ssh(id);
+    let user = text(handler, "user")
+        .or_else(|| saved.and_then(|saved| saved.user.clone()))
+        .map(|value| expand(&value))
+        .transpose()?
+        .filter(|user| !user.is_empty())
+        .ok_or_else(|| unavailable(SSH_USER_REASON))?;
+    let password = text(handler, "password")
+        .map(Secret::new)
+        .or_else(|| saved.and_then(|saved| saved.password.clone()))
+        .filter(|password| !password.expose().is_empty());
+    let auth = match text(properties, "authType").as_deref() {
+        Some("PUBLIC_KEY") => {
+            let key_path = expanded("keyPath")?
+                .map(PathBuf::from)
+                .ok_or_else(|| unavailable("SSH key file not set in DBeaver"))?;
+            check_key_file(&key_path)?;
+            SshAuth::PublicKey {
+                key_path,
+                passphrase: password,
+            }
+        }
+        None | Some("PASSWORD") => {
+            SshAuth::Password(password.ok_or_else(|| unavailable(SSH_PASSWORD_REASON))?)
+        }
+        Some("AGENT") => SshAuth::Agent,
+        Some(other) => {
+            return Err(unsupported(format!(
+                "SSH authentication type {other} is not supported"
+            )));
+        }
+    };
+    let (remote_host, remote_port) = match expanded("remoteHost")? {
+        Some(remote_host) => {
+            let remote_port = match expanded("remotePort")? {
+                Some(raw) => parse_port(&raw)
+                    .ok_or_else(|| unavailable("SSH tunnel remote port is not a valid number"))?,
+                None => database_port,
+            };
+            (remote_host, remote_port)
+        }
+        None => (database_host.to_string(), database_port),
+    };
+    Ok(TunnelParams {
+        host,
+        port,
+        user,
+        auth,
+        remote_host,
+        remote_port,
+        verify_host_key: !is_true(properties.get("bypassHostVerification")),
+    })
+}
+
+fn check_key_file(path: &Path) -> Result<(), ConnectionStatus> {
+    match fs::metadata(path) {
+        Err(error) if error.kind() == ErrorKind::NotFound => Err(unavailable(format!(
+            "SSH key file not found: {}",
+            path.display()
+        ))),
+        Ok(metadata) if !metadata.is_file() => Err(unavailable(format!(
+            "SSH key path is not a file: {}",
+            path.display()
+        ))),
+        _ if fs::File::open(path).is_err() => Err(unavailable(format!(
+            "SSH key file is not readable: {}",
+            path.display()
+        ))),
+        _ => Ok(()),
+    }
+}
+
+fn parse_port(raw: &str) -> Option<u16> {
+    let raw = raw.trim();
+    let port = raw.parse::<u16>().ok().or_else(|| {
+        let number = raw.parse::<f64>().ok()?;
+        (number.fract() == 0.0 && (0.0..=f64::from(u16::MAX)).contains(&number))
+            .then_some(number as u16)
+    })?;
+    (port != 0).then_some(port)
+}
+
+fn is_true(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::String(text)) => text.trim().eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
+fn jump_server_count(properties: &Value) -> f64 {
+    match properties.get("jumpServer.count") {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(0.0),
+        Some(Value::String(text)) => text.trim().parse().unwrap_or(0.0),
+        _ => 0.0,
+    }
 }
 
 fn missing_password_reason(
@@ -298,24 +448,29 @@ fn missing_password_reason(
     }
 }
 
-fn check_handlers(configuration: &Value) -> Result<(), ConnectionStatus> {
+fn find_tunnel_handler(configuration: &Value) -> Result<Option<&Value>, ConnectionStatus> {
     let Some(handlers) = configuration.get("handlers").and_then(Value::as_object) else {
-        return Ok(());
+        return Ok(None);
     };
+    let mut tunnel = None;
     for (handler_id, handler) in handlers {
         if handler.get("enabled").and_then(Value::as_bool) != Some(true) {
             continue;
         }
         let kind = text(handler, "type").unwrap_or_default();
         let marker = format!("{handler_id} {kind}").to_ascii_lowercase();
-        if marker.contains("ssh") || marker.contains("tunnel") {
-            return Err(unsupported(SSH_REASON));
-        }
         if marker.contains("proxy") || marker.contains("socks") {
             return Err(unsupported(PROXY_REASON));
         }
+        if marker.contains("ssh") || marker.contains("tunnel") {
+            let properties = handler.get("properties").unwrap_or(&NULL);
+            if jump_server_count(properties) > 0.0 {
+                return Err(unsupported(JUMP_SERVER_REASON));
+            }
+            tunnel.get_or_insert(handler);
+        }
     }
-    Ok(())
+    Ok(tunnel)
 }
 
 fn property_sslmode(properties: Option<&Value>) -> Option<String> {

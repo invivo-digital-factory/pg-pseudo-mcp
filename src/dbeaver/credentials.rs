@@ -48,11 +48,16 @@ pub struct SavedCredentials {
 #[derive(Debug, Default)]
 pub struct CredentialStore {
     entries: HashMap<String, SavedCredentials>,
+    ssh_entries: HashMap<String, SavedCredentials>,
 }
 
 impl CredentialStore {
     pub fn get(&self, connection_id: &str) -> Option<&SavedCredentials> {
         self.entries.get(connection_id)
+    }
+
+    pub fn ssh(&self, connection_id: &str) -> Option<&SavedCredentials> {
+        self.ssh_entries.get(connection_id)
     }
 
     pub fn from_encrypted(bytes: &[u8]) -> Result<Self, CredentialsError> {
@@ -61,26 +66,29 @@ impl CredentialStore {
             serde_json::from_slice(&plaintext).map_err(|_| CredentialsError::Malformed)?;
         let object = root.as_object().ok_or(CredentialsError::Malformed)?;
         let mut entries = HashMap::new();
+        let mut ssh_entries = HashMap::new();
         for (id, value) in object {
-            let Some(connection) = value.get("#connection").and_then(Value::as_object) else {
-                continue;
-            };
-            let text = |key: &str| {
-                connection
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            };
-            entries.insert(
-                id.clone(),
-                SavedCredentials {
-                    user: text("user"),
-                    password: text("password").map(Secret::new),
-                },
-            );
+            if let Some(saved) = saved_at(value, "#connection") {
+                entries.insert(id.clone(), saved);
+            }
+            if let Some(saved) = saved_at(value, "network/ssh_tunnel") {
+                ssh_entries.insert(id.clone(), saved);
+            }
         }
-        Ok(Self { entries })
+        Ok(Self {
+            entries,
+            ssh_entries,
+        })
     }
+}
+
+fn saved_at(value: &Value, node: &str) -> Option<SavedCredentials> {
+    let node = value.get(node)?.as_object()?;
+    let text = |key: &str| node.get(key).and_then(Value::as_str).map(str::to_string);
+    Some(SavedCredentials {
+        user: text("user"),
+        password: text("password").map(Secret::new),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -131,6 +139,19 @@ mod tests {
         assert_eq!(saved.user.as_deref(), Some("u"));
         assert_eq!(saved.password.as_ref().unwrap().expose(), "p");
         assert!(store.get("c2").is_none());
+    }
+
+    #[test]
+    fn reads_ssh_tunnel_credentials_even_without_a_connection_node() {
+        let json = r##"{"c1":{"#connection":{"user":"u"},"network/ssh_tunnel":{"user":"ssh-u","password":"ssh-p"}},"c2":{"network/ssh_tunnel":{"user":"only-ssh"}}}"##;
+        let store = CredentialStore::from_encrypted(&encrypt_for_tests(json, [3; 16])).unwrap();
+        let ssh = store.ssh("c1").unwrap();
+        assert_eq!(ssh.user.as_deref(), Some("ssh-u"));
+        assert_eq!(ssh.password.as_ref().unwrap().expose(), "ssh-p");
+        assert_eq!(store.ssh("c2").unwrap().user.as_deref(), Some("only-ssh"));
+        assert!(store.ssh("c2").unwrap().password.is_none());
+        assert!(store.get("c2").is_none());
+        assert!(store.ssh("c3").is_none());
     }
 
     #[test]
