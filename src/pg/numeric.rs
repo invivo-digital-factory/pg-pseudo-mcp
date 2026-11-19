@@ -21,8 +21,10 @@ pub(crate) fn numeric_to_string(raw: &[u8]) -> Result<String, String> {
         return Err("numeric digit count does not match its payload".into());
     }
     let digits = body
-        .chunks_exact(2)
-        .map(|pair| i16::from_be_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_be_bytes(*pair))
         .map(|digit| {
             u16::try_from(digit)
                 .ok()
