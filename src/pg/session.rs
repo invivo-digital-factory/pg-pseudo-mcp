@@ -205,15 +205,23 @@ async fn open(options: &ConnectOptions, deadline: Duration) -> Result<Live, PgEr
     let started = Instant::now();
     let link = match &options.tunnel {
         None => None,
-        Some(tunnel) => match tokio::time::timeout(deadline, SshLink::open(tunnel)).await {
-            Ok(link) => Some(link?),
-            Err(_) => {
-                return Err(PgError::Connect(format!(
-                    "SSH tunnel to {}:{} timed out after {deadline:?} before the server answered and authentication completed",
-                    tunnel.host, tunnel.port
-                )));
+        Some(tunnel) => {
+            if !tunnel.verify_host_key {
+                tracing::warn!(
+                    ssh_host = %tunnel.host,
+                    "SSH host key verification is bypassed for this connection; the server identity is not checked"
+                );
             }
-        },
+            match tokio::time::timeout(deadline, SshLink::open(tunnel)).await {
+                Ok(link) => Some(link?),
+                Err(_) => {
+                    return Err(PgError::Connect(format!(
+                        "SSH tunnel to {}:{} timed out after {deadline:?} before the server answered and authentication completed",
+                        tunnel.host, tunnel.port
+                    )));
+                }
+            }
+        }
     };
     let remaining = deadline.saturating_sub(started.elapsed());
     match tokio::time::timeout(remaining, handshake(options, link)).await {

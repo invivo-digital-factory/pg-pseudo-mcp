@@ -838,6 +838,7 @@ fn pgpass_supplies_the_database_password() {
         "# synthetic\nbastion.example:*:*:*:wrong-host\ndb.internal.example:5433:shop:writer:wrong-user\n*:5433:shop:reader:p\\:gp\\\\ss\n",
     )
     .unwrap();
+    set_mode(&pgpass, 0o600);
     let pgpass_model = |extra: Value| {
         merge_into(
             json!({ "configuration": { "auth-model": "postgres_pgpass" } }),
@@ -895,6 +896,16 @@ fn pgpass_supplies_the_database_password() {
     ));
     assert!(reason(&no_user.status).contains("user"));
 
+    set_mode(&pgpass, 0o644);
+    if cfg!(unix) {
+        assert_eq!(
+            by_name_in(&discover(Some(home.path())), "Shop").status,
+            ConnectionStatus::Unavailable {
+                reason: "pgpass file permissions are too open; run chmod 600 on it".to_string()
+            }
+        );
+    }
+
     unsafe { std::env::set_var("PGPASSFILE", home.path().join("absent-pgpass")) };
     assert_eq!(
         by_name_in(&discover(Some(home.path())), "Shop").status,
@@ -903,6 +914,15 @@ fn pgpass_supplies_the_database_password() {
         }
     );
 }
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) {}
 
 fn by_name_in(discovery: &pg_pseudo_mcp::dbeaver::Discovery, name: &str) -> ConnectionEntry {
     discovery
@@ -963,4 +983,47 @@ async fn list_connections_hides_tunnel_details() {
     for connection in connections {
         assert_eq!(connection["status"], "available", "{connection}");
     }
+}
+
+#[tokio::test]
+async fn list_connections_flags_a_bypassed_ssh_host_key_check() {
+    let home = TempDir::new().unwrap();
+    write_project(
+        home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": pg_connection("Shop", tunnel(json!({
+                "authType": "AGENT",
+                "bypassHostVerification": true
+            }))),
+            "pg-2": pg_connection("Billing", tunnel(json!({ "authType": "AGENT" }))),
+            "pg-3": pg_connection("Direct", json!({}))
+        })),
+        Some(&json!({
+            "pg-1": tunnel_creds("pg-1", json!({ "user": "ssh-user" }))["pg-1"],
+            "pg-2": tunnel_creds("pg-2", json!({ "user": "ssh-user" }))["pg-2"],
+            "pg-3": creds("pg-3", "reader", "db-pw")["pg-3"]
+        })),
+    );
+    let result = list_connections(&config(home.path())).await;
+    let body: Value = serde_json::from_str(
+        result.content[0]
+            .as_text()
+            .map(|text| text.text.as_str())
+            .unwrap(),
+    )
+    .unwrap();
+    let connections = body["connections"].as_array().unwrap();
+    let named = |name: &str| connections.iter().find(|c| c["name"] == name).unwrap();
+    assert_eq!(named("Shop")["status"], "available", "{body}");
+    assert_eq!(named("Shop")["ssh_host_key_check"], "bypassed", "{body}");
+    assert!(
+        named("Billing").get("ssh_host_key_check").is_none(),
+        "{body}"
+    );
+    assert!(
+        named("Direct").get("ssh_host_key_check").is_none(),
+        "{body}"
+    );
 }

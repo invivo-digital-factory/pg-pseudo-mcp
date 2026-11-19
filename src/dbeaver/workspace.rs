@@ -271,9 +271,11 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let password = pgpass::default_path()
-            .and_then(|path| pgpass::lookup(&path, &target))
-            .ok_or_else(|| unavailable(PGPASS_REASON))?;
+        let password = match pgpass::default_path() {
+            Some(path) => pgpass::lookup(&path, &target).map_err(unavailable)?,
+            None => None,
+        }
+        .ok_or_else(|| unavailable(PGPASS_REASON))?;
         (user, password)
     } else {
         let password = text(configuration, "password")

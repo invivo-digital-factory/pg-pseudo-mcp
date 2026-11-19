@@ -36,12 +36,21 @@ fn locate(
     }
 }
 
-pub fn lookup(path: &Path, target: &Target<'_>) -> Option<Secret> {
-    let bytes = fs::read(path).ok()?;
+const NOT_A_FILE_REASON: &str = "pgpass file is not a regular file";
+const TOO_OPEN_REASON: &str = "pgpass file permissions are too open; run chmod 600 on it";
+
+pub fn lookup(path: &Path, target: &Target<'_>) -> Result<Option<Secret>, String> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Ok(None);
+    };
+    check_permissions(&metadata)?;
+    let Ok(bytes) = fs::read(path) else {
+        return Ok(None);
+    };
     let contents = String::from_utf8_lossy(&bytes);
     let port = target.port.to_string();
     let wanted = [target.host, port.as_str(), target.database, target.user];
-    contents.lines().find_map(|line| {
+    Ok(contents.lines().find_map(|line| {
         if line.is_empty() || line.starts_with('#') {
             return None;
         }
@@ -51,7 +60,24 @@ pub fn lookup(path: &Path, target: &Target<'_>) -> Option<Secret> {
             .zip(wanted)
             .all(|(field, value)| field.matches(value))
             .then(|| Secret::new(password))
-    })
+    }))
+}
+
+#[cfg(unix)]
+fn check_permissions(metadata: &fs::Metadata) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    if !metadata.is_file() {
+        return Err(NOT_A_FILE_REASON.to_string());
+    }
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err(TOO_OPEN_REASON.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn check_permissions(_metadata: &fs::Metadata) -> Result<(), String> {
+    Ok(())
 }
 
 struct Field {
@@ -91,17 +117,17 @@ fn split_line(line: &str) -> Option<([Field; 4], String)> {
         })
     };
     let fields = [next_field()?, next_field()?, next_field()?, next_field()?];
-    Some((fields, unescape(chars.as_str())))
+    Some((fields, password(chars.as_str())))
 }
 
-fn unescape(text: &str) -> String {
+fn password(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(next) = chars.next() {
-        if next == '\\' {
-            output.push(chars.next().unwrap_or('\\'));
-        } else {
-            output.push(next);
+        match next {
+            ':' => break,
+            '\\' => output.push(chars.next().unwrap_or('\\')),
+            other => output.push(other),
         }
     }
     output
@@ -124,12 +150,24 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("pgpass");
         fs::write(&path, contents).unwrap();
+        restrict(&path, 0o600);
         (dir, path)
     }
 
+    #[cfg(unix)]
+    fn restrict(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(not(unix))]
+    fn restrict(_path: &Path, _mode: u32) {}
+
     fn found(contents: &str) -> Option<String> {
         let (_dir, path) = write(contents);
-        lookup(&path, &target()).map(|secret| secret.expose().to_string())
+        lookup(&path, &target())
+            .unwrap()
+            .map(|secret| secret.expose().to_string())
     }
 
     #[test]
@@ -162,8 +200,10 @@ mod tests {
     fn escaped_colons_and_backslashes_are_unescaped() {
         assert_eq!(
             found(r"*:*:*:reader:p\:a\\ss:word").as_deref(),
-            Some(r"p:a\ss:word")
+            Some(r"p:a\ss")
         );
+        assert_eq!(found(r"*:*:*:reader:pw:").as_deref(), Some("pw"));
+        assert_eq!(found(r"*:*:*:reader:pw\").as_deref(), Some(r"pw\"));
         let target = Target {
             host: "h:1",
             port: 5432,
@@ -171,7 +211,7 @@ mod tests {
             user: "u",
         };
         let (_dir, path) = write(r"h\:1:5432:d\\b:u:pw");
-        assert_eq!(lookup(&path, &target).unwrap().expose(), "pw");
+        assert_eq!(lookup(&path, &target).unwrap().unwrap().expose(), "pw");
     }
 
     #[test]
@@ -184,7 +224,37 @@ mod tests {
         assert_eq!(found("db.internal.example:5432:shop:reader:pw"), None);
         assert_eq!(found("db.internal.example:5433:shop:writer:pw"), None);
         let dir = tempfile::TempDir::new().unwrap();
-        assert!(lookup(&dir.path().join("absent"), &target()).is_none());
+        assert!(
+            lookup(&dir.path().join("absent"), &target())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_readable_by_group_or_others_is_ignored() {
+        let (_dir, path) = write("*:*:*:*:pw");
+        restrict(&path, 0o644);
+        let refused = lookup(&path, &target()).map(|found| found.is_some());
+        assert_eq!(
+            refused,
+            Err("pgpass file permissions are too open; run chmod 600 on it".to_string())
+        );
+        restrict(&path, 0o640);
+        assert!(lookup(&path, &target()).is_err());
+        restrict(&path, 0o600);
+        assert_eq!(lookup(&path, &target()).unwrap().unwrap().expose(), "pw");
+        restrict(&path, 0o400);
+        assert_eq!(lookup(&path, &target()).unwrap().unwrap().expose(), "pw");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pgpass_path_that_is_not_a_regular_file_is_ignored() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let reason = lookup(dir.path(), &target()).map(|found| found.is_some());
+        assert_eq!(reason, Err("pgpass file is not a regular file".to_string()));
     }
 
     #[test]
@@ -219,7 +289,7 @@ mod tests {
     #[test]
     fn secret_is_never_printed() {
         let (_dir, path) = write("*:*:*:*:hunter2-canary");
-        let secret = lookup(&path, &target()).unwrap();
+        let secret = lookup(&path, &target()).unwrap().unwrap();
         assert!(!format!("{secret:?}").contains("hunter2-canary"));
     }
 }

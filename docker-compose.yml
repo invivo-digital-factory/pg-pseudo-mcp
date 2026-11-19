@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: pgpseudo
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - ./tests/sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -17,7 +17,7 @@ services:
   ssh:
     build: tests/ssh
     ports:
-      - "55222:22"
+      - "127.0.0.1:55222:22"
     depends_on:
       postgres:
         condition: service_healthy

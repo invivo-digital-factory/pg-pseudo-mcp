@@ -7,7 +7,7 @@ PasswordAuthentication yes
 KbdInteractiveAuthentication no
 AuthorizedKeysFile .ssh/authorized_keys
 AllowTcpForwarding yes
-PermitOpen any
+PermitOpen postgres:5432
 X11Forwarding no
 PidFile /run/sshd.pid
 Subsystem sftp internal-sftp

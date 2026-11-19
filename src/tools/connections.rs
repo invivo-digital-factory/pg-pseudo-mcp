@@ -42,6 +42,14 @@ fn describe(entry: &ConnectionEntry) -> Value {
     if let Some(database) = &entry.database {
         item.insert("database".to_string(), json!(database));
     }
+    let bypassed = entry
+        .params
+        .as_ref()
+        .and_then(|params| params.tunnel.as_ref())
+        .is_some_and(|tunnel| !tunnel.verify_host_key);
+    if bypassed {
+        item.insert("ssh_host_key_check".to_string(), json!("bypassed"));
+    }
     item.insert("type".to_string(), json!(entry.connection_type));
     if let Some(folder) = &entry.folder {
         item.insert("folder".to_string(), json!(folder));
