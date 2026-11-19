@@ -137,13 +137,19 @@ pub fn is_error(result: &CallToolResult) -> bool {
 
 pub fn assert_no_canary(response: &str) {
     for value in CANARY_VALUES {
-        let forms = [
+        let mut forms = vec![
             value.to_string(),
             value.to_lowercase(),
             value.to_uppercase(),
             hex::encode(Md5::digest(value.as_bytes())),
             base64::engine::general_purpose::STANDARD.encode(value.as_bytes()),
+            hex::encode(value.as_bytes()),
+            hex::encode_upper(value.as_bytes()),
         ];
+        if let Ok(number) = value.parse::<u64>() {
+            forms.push(format!("{number:x}"));
+            forms.push(format!("{number:X}"));
+        }
         for form in forms {
             assert!(
                 !response.contains(&form),

@@ -152,22 +152,67 @@ pub(crate) fn any_case_name_shape(value: &str) -> Option<Kind> {
 }
 
 pub(crate) fn is_digest(value: &str) -> bool {
-    let hex = matches!(value.len(), 32 | 40 | 64) && value.bytes().all(|b| b.is_ascii_hexdigit());
-    hex || is_base64(value)
+    is_hex(value) || is_bytea_hex(value) || is_base64(value)
+}
+
+const MIN_ENCODED_LEN: usize = 8;
+
+fn is_hex(value: &str) -> bool {
+    if value.len() < MIN_ENCODED_LEN || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return false;
+    }
+    value.bytes().any(|b| b.is_ascii_alphabetic())
+        || hex::decode(value)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .is_some_and(|text| !text.chars().any(char::is_control))
+}
+
+fn is_bytea_hex(value: &str) -> bool {
+    value.strip_prefix("\\x").is_some_and(|body| {
+        !body.is_empty()
+            && body.len().is_multiple_of(2)
+            && body.bytes().all(|b| b.is_ascii_hexdigit())
+    })
 }
 
 fn is_base64(value: &str) -> bool {
-    if value.len() < 16 {
+    use base64::Engine;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE};
+
+    let compact: String = value
+        .chars()
+        .filter(|c| !matches!(c, '\n' | '\r'))
+        .collect();
+    if compact.len() < MIN_ENCODED_LEN || is_uuid(&compact) {
         return false;
     }
-    let body = value.trim_end_matches('=');
-    let padding = value.len() - body.len();
-    padding <= 2
-        && !body.is_empty()
-        && body
+    let body = compact.trim_end_matches('=');
+    let padding = compact.len() - body.len();
+    let charset = body
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'-' | b'_'));
+    if padding > 2 || body.is_empty() || !charset || !compact.len().is_multiple_of(4) {
+        return false;
+    }
+    if body.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let signal = padding > 0
+        || body
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
-        && (value.len().is_multiple_of(4) || padding > 0)
+            .any(|b| b.is_ascii_digit() || matches!(b, b'+' | b'/'))
+        || (body.bytes().skip(1).any(|b| b.is_ascii_uppercase())
+            && body.bytes().any(|b| b.is_ascii_lowercase()));
+    signal && (STANDARD.decode(&compact).is_ok() || URL_SAFE.decode(&compact).is_ok())
+}
+
+fn is_uuid(value: &str) -> bool {
+    let groups: Vec<&str> = value.split('-').collect();
+    groups.iter().map(|group| group.len()).eq([8, 4, 4, 4, 12])
+        && groups
+            .iter()
+            .all(|group| group.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]
@@ -219,8 +264,45 @@ mod tests {
         assert!(is_digest("5d41402abc4b2a76b9719d911017c592"));
         assert!(is_digest(&"a".repeat(40)));
         assert!(is_digest("aGVsbG8gd29ybGQ="));
-        assert!(!is_digest("5d41402abc4b2a76b9719d911017c59"));
         assert!(!is_digest("short=="));
         assert!(!is_digest("not base64 at all!"));
+    }
+
+    #[test]
+    fn hex_encodings_of_any_length_are_digests() {
+        let email = "ilona.kervadec@canary-mail.fr";
+        assert!(is_digest(&hex::encode(email.as_bytes())));
+        assert!(is_digest(&hex::encode(email.as_bytes()).to_uppercase()));
+        assert!(is_digest(&hex::encode("Ilona".as_bytes())));
+        assert!(is_digest(&hex::encode("06 41 27 83 95".as_bytes())));
+        assert!(is_digest("7d52d2bbb"));
+        assert!(is_digest("5d41402abc4b2a76b9719d911017c59"));
+        assert!(is_digest("deadbeef"));
+        assert!(is_digest("\\x696c6f6e612e6b"));
+        assert!(!is_digest("0641278395"));
+        assert!(!is_digest("20261119"));
+        assert!(!is_digest("33641278395"));
+        assert!(!is_digest("abc123"));
+    }
+
+    #[test]
+    fn short_base64_encodings_are_digests_but_plain_words_are_not() {
+        assert!(is_digest("S2VydmFkZWM="));
+        assert!(is_digest("SWxvbmE="));
+        assert!(is_digest("T2RpbG9u"));
+        assert!(is_digest("aWxvbmF+fn4="));
+        assert!(is_digest("aWxvbmF-fn4="));
+        for word in [
+            "Kervadec",
+            "PENDING",
+            "REFUNDED",
+            "Thaumassin",
+            "12345678",
+            "2026-11-19",
+            "0b8e4c1a-7d2f-4e5b-9c3a-1f2e3d4c5b6a",
+            "en_cours",
+        ] {
+            assert!(!is_digest(word), "{word}");
+        }
     }
 }

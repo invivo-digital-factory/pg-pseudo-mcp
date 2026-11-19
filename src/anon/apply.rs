@@ -25,6 +25,7 @@ pub struct Anonymizer<'a> {
 pub struct AnonymizedRows {
     pub rows: Vec<Vec<Value>>,
     pub pseudonymized: BTreeMap<String, ColumnFlag>,
+    pub per_column: Vec<Option<ColumnFlag>>,
 }
 
 impl<'a> Anonymizer<'a> {
@@ -84,12 +85,14 @@ impl<'a> Anonymizer<'a> {
             .collect();
         let pseudonymized = columns
             .iter()
-            .zip(flags)
-            .filter_map(|(column, flag)| flag.map(|flag| (column.name.clone(), flag)))
+            .zip(&flags)
+            .filter_map(|(column, flag)| flag.clone().map(|flag| (column.name.clone(), flag)))
             .collect();
+        let per_column = flags;
         AnonymizedRows {
             rows,
             pseudonymized,
+            per_column,
         }
     }
 
@@ -417,19 +420,72 @@ fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> 
         .case_insensitive(true)
         .build()
         .ok()?;
-    if !pattern.is_match(haystack) {
+    let mut output = String::with_capacity(haystack.len());
+    let mut cursor = 0;
+    let mut search = 0;
+    let mut replaced = false;
+    while let Some(found) = pattern.find_at(haystack, search) {
+        let before = haystack[..found.start()].chars().next_back();
+        let after = haystack[found.end()..].chars().next();
+        if before.is_some_and(is_word_char) || after.is_some_and(is_word_char) {
+            search = found.start()
+                + haystack[found.start()..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+            continue;
+        }
+        output.push_str(&haystack[cursor..found.start()]);
+        output.push_str(replacement);
+        cursor = found.end();
+        search = cursor;
+        replaced = true;
+    }
+    if !replaced {
         return None;
     }
-    Some(
-        pattern
-            .replace_all(haystack, regex::NoExpand(replacement))
-            .into_owned(),
-    )
+    output.push_str(&haystack[cursor..]);
+    Some(output)
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '\u{0300}'..='\u{036F}')
 }
 
 #[cfg(test)]
 mod tests {
-    use super::replace_case_insensitive;
+    use super::*;
+    use crate::pg::ColumnSource;
+
+    fn pseudonymizer() -> (tempfile::TempDir, Pseudonymizer) {
+        let dir = tempfile::tempdir().expect("data dir");
+        let pseudonymizer = Pseudonymizer::open(dir.path()).expect("pseudonymizer");
+        (dir, pseudonymizer)
+    }
+
+    fn text_column(name: &str, source: Option<&str>) -> ColumnMeta {
+        ColumnMeta {
+            name: name.to_string(),
+            type_name: "text".to_string(),
+            type_oid: 25,
+            source: source.map(|column| ColumnSource {
+                schema: "public".to_string(),
+                table: "customers".to_string(),
+                column: column.to_string(),
+            }),
+        }
+    }
+
+    fn message(sqlstate: &str, text: &str, detail: Option<&str>) -> DbMessage {
+        DbMessage {
+            severity: "ERROR".to_string(),
+            sqlstate: Some(sqlstate.to_string()),
+            message: text.to_string(),
+            detail: detail.map(str::to_string),
+            hint: None,
+            where_: Some("SQL function \"f\" statement 1".to_string()),
+        }
+    }
 
     #[test]
     fn replaces_every_case_variant_of_the_needle() {
@@ -442,5 +498,170 @@ mod tests {
             Some("İstanbul x")
         );
         assert_eq!(replace_case_insensitive("nothing", "b@c.fr", "x"), None);
+    }
+
+    #[test]
+    fn an_injected_value_is_replaced_only_where_it_stands_as_a_whole_word() {
+        assert_eq!(replace_case_insensitive("Troyes", "Roy", "Zed"), None);
+        assert_eq!(
+            replace_case_insensitive("leroy.marc@gmail.com", "Roy", "Zed"),
+            None
+        );
+        assert_eq!(replace_case_insensitive("Roy2", "Roy", "Zed"), None);
+        assert_eq!(replace_case_insensitive("Royé", "Roy", "Zed"), None);
+        assert_eq!(
+            replace_case_insensitive("xa-a-a", "a-a", "Z").as_deref(),
+            Some("xa-Z")
+        );
+        assert_eq!(
+            replace_case_insensitive("Roy, ROY et roy-Dupont", "Roy", "Zed").as_deref(),
+            Some("Zed, Zed et Zed-Dupont")
+        );
+    }
+
+    #[test]
+    fn a_short_injected_name_leaves_longer_words_containing_it_untouched() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let pseudonym = "Zabulon".to_string();
+        let injected = [("Roy".to_string(), pseudonym.clone())];
+        let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("ville", Some("ville")),
+            text_column("commentaire", Some("commentaire")),
+            text_column("email", Some("email")),
+        ];
+        let first = || {
+            vec![
+                Cell::Text("Troyes".to_string()),
+                Cell::Text("Client Roy, appel".to_string()),
+                Cell::Text("leroy.marc@gmail.com".to_string()),
+            ]
+        };
+        let rows = vec![
+            first(),
+            vec![
+                Cell::Text("Roy".to_string()),
+                Cell::Text("ROY".to_string()),
+                Cell::Text(" roy ".to_string()),
+            ],
+        ];
+        let anonymized = anonymizer.rows(&columns, rows);
+        let expected = baseline.rows(&columns, vec![first()]);
+        assert_eq!(anonymized.rows[0][0], expected.rows[0][0]);
+        assert_eq!(anonymized.rows[0][2], expected.rows[0][2]);
+        assert_eq!(
+            anonymized.rows[0][1],
+            json!(format!("Client {pseudonym}, appel"))
+        );
+        assert_eq!(anonymized.rows[1][0], json!(pseudonym));
+        assert_eq!(anonymized.rows[1][1], json!(pseudonym));
+        assert_eq!(anonymized.rows[1][2], json!(format!(" {pseudonym} ")));
+
+        let email = anonymizer.free_text("écrire à leroy.marc@gmail.com");
+        assert!(!email.contains(&pseudonym), "{email}");
+        assert!(!email.contains("leroy.marc@gmail.com"), "{email}");
+        assert_eq!(
+            anonymizer.free_text("vu Roy à Troyes"),
+            format!("vu {pseudonym} à Troyes")
+        );
+    }
+
+    #[test]
+    fn same_named_columns_each_get_their_own_flag() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("email", Some("email")),
+            text_column("status", Some("status")),
+            text_column("email", Some("email")),
+        ];
+        let rows = vec![vec![
+            Cell::Text("ilona.kervadec@canary-mail.fr".to_string()),
+            Cell::Text("PAID".to_string()),
+            Cell::Text("odilon.thaumassin@canary-mail.fr".to_string()),
+        ]];
+        let anonymized = anonymizer.rows(&columns, rows);
+        assert_eq!(anonymized.per_column.len(), 3);
+        assert!(anonymized.per_column[0].is_some());
+        assert!(anonymized.per_column[1].is_none());
+        assert!(anonymized.per_column[2].is_some());
+        assert_eq!(anonymized.pseudonymized.len(), 1);
+    }
+
+    #[test]
+    fn invalid_input_messages_quote_opaque_tokens_instead_of_values() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let masked = anonymizer.message(&message(
+            "22P02",
+            "invalid input syntax for type integer: \"Brizolier\"",
+            None,
+        ));
+        assert!(!masked.message.contains("Brizolier"), "{}", masked.message);
+        assert!(
+            masked
+                .message
+                .starts_with("invalid input syntax for type integer: \"<value id="),
+            "{}",
+            masked.message
+        );
+        assert_eq!(masked.where_, None);
+        assert_eq!(masked.sqlstate.as_deref(), Some("22P02"));
+
+        let pseudonym = pseudonymizer
+            .pseudonymize(Kind::Email, "ilona.kervadec@canary-mail.fr")
+            .text;
+        let kept = anonymizer.message(&message(
+            "22P02",
+            &format!("invalid input syntax for type integer: \"{pseudonym}\""),
+            None,
+        ));
+        assert_eq!(
+            kept.message,
+            format!("invalid input syntax for type integer: \"{pseudonym}\"")
+        );
+    }
+
+    #[test]
+    fn unique_violation_details_mask_the_key_value_unless_it_is_a_pseudonym() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let injected_pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
+        let injected = [("Kervadec".to_string(), injected_pseudonym.clone())];
+        let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
+
+        let masked = anonymizer.message(&message(
+            "23505",
+            "duplicate key value violates unique constraint \"customers_nom_key\"",
+            Some("Key (nom)=(Brizolier) already exists."),
+        ));
+        let detail = masked.detail.expect("detail");
+        assert!(!detail.contains("Brizolier"), "{detail}");
+        assert!(detail.starts_with("Key (nom)=(<value id="), "{detail}");
+        assert!(detail.ends_with(") already exists."), "{detail}");
+        assert_eq!(masked.where_, None);
+
+        let translated = anonymizer.message(&message(
+            "23505",
+            "duplicate key value violates unique constraint \"customers_nom_key\"",
+            Some("Key (nom)=(Kervadec) already exists."),
+        ));
+        assert_eq!(
+            translated.detail.as_deref(),
+            Some(format!("Key (nom)=({injected_pseudonym}) already exists.").as_str())
+        );
+
+        let email = pseudonymizer
+            .pseudonymize(Kind::Email, "odilon.thaumassin@canary-mail.fr")
+            .text;
+        let kept = anonymizer.message(&message(
+            "23505",
+            "duplicate key value violates unique constraint \"customers_email_key\"",
+            Some(&format!("Key (email)=({email}) already exists.")),
+        ));
+        assert_eq!(
+            kept.detail.as_deref(),
+            Some(format!("Key (email)=({email}) already exists.").as_str())
+        );
     }
 }
