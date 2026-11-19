@@ -1,0 +1,24 @@
+use cucumber::then;
+
+use crate::querying_world::QueryingWorld;
+
+const REAL_FRAGMENTS: [&str; 4] = ["ylwenna", "kervadec", "canary-mail", "canary"];
+
+#[then(regex = r#"^la colonne "([^"]+)" est signalée comme dérivée et pseudonymisée$"#)]
+async fn column_is_flagged_derived(world: &mut QueryingWorld, column: String) {
+    let answer = world.answer();
+    assert_eq!(
+        answer.body()["pseudonymized"][column.as_str()]["why"],
+        "derived",
+        "{}",
+        answer.text
+    );
+}
+
+#[then(regex = r"^la réponse ne contient aucun fragment de l'adresse réelle$")]
+async fn answer_has_no_real_fragment(world: &mut QueryingWorld) {
+    let text = world.answer().text.to_lowercase();
+    for fragment in REAL_FRAGMENTS {
+        assert!(!text.contains(fragment), "{fragment} leaked in {text}");
+    }
+}

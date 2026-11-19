@@ -117,6 +117,21 @@ PG_PSEUDO_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseud
 
 The integration suite seeds fictional French personal data and checks that no seeded value, in any case, as an MD5 or base64 encoding, or as a fragment of an email, appears in any response.
 
+### Contexts and business scenarios
+
+The code lives in three contexts under `src/contexts/`, wired together in `src/composition/`:
+
+- `connections`: discovers the DBeaver connections and opens sessions, through an SSH tunnel when configured.
+- `anonymization`: pseudonymizes values, translates a pseudonym back locally, purges the mapping.
+- `querying`: guards statements as read-only and answers the query, schema and explain tools.
+
+Each context documents what it does with Cucumber features written in French, in `src/contexts/<context>/test/features/`, with their steps in `src/contexts/<context>/test/steps/`. Scenarios tagged `@integration` need the docker compose database and SSH bastion; without `PG_PSEUDO_TEST_DATABASE_URL` the runner skips them and says so.
+
+```bash
+cargo test --test bdd
+PG_PSEUDO_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test --test bdd
+```
+
 ## Third-party data
 
 - `data/identifier.csv` comes from PostgreSQL Anonymizer by DALIBO, under the PostgreSQL Licence; see `data/NOTICE`.
