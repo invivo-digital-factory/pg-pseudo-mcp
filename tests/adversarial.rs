@@ -61,6 +61,11 @@ const MUST_SUCCEED_PSEUDONYMIZED: &[&str] = &[
     "SELECT date_naissance::date AS d, date_naissance + 1 FROM customers",
     "SELECT telephone_secours * 1.0, telephone_secours::float8 FROM customers",
     "SELECT siren::bigint, replace(iban, ' ', '') FROM customers",
+    "SELECT left(email, 6) || '@example.com' FROM customers",
+    "SELECT *, split_part(email, '@', 1) FROM customers",
+    "SELECT c.*, left(email, 5) FROM customers c",
+    "SELECT split_part(c::text, ',', 4) FROM customers c",
+    "SELECT substr(c::text, 2, 20) FROM customers c",
 ];
 
 const MAY_ERROR: &[&str] = &[

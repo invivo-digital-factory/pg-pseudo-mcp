@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pg_pseudo_mcp::guard::Lineage::{self, Clean, Personal, Unknown};
 use pg_pseudo_mcp::guard::{PseudonymLookup, prepare};
 use pg_pseudo_mcp::kind::Kind;
 use pg_pseudo_mcp::tools::errors::ErrorCategory;
@@ -546,7 +547,7 @@ fn statistics_views_are_refused_in_any_schema() {
     );
 }
 
-fn lineage(sql: &str) -> Option<Vec<bool>> {
+fn lineage(sql: &str) -> Option<Vec<Lineage>> {
     prepare(sql, &FakeStore::default())
         .unwrap_or_else(|error| panic!("{sql}: {error:?}"))
         .derived_lineage
@@ -556,13 +557,13 @@ fn lineage(sql: &str) -> Option<Vec<bool>> {
 fn an_output_computed_from_a_personal_column_carries_its_lineage() {
     assert_eq!(
         lineage("SELECT split_part(email, '@', 1) FROM customers"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage(
             "SELECT upper(nom) AS n, amount * 2 FROM orders o JOIN customers c ON c.id = o.customer_id"
         ),
-        Some(vec![true, false])
+        Some(vec![Personal, Clean])
     );
 }
 
@@ -570,7 +571,7 @@ fn an_output_computed_from_a_personal_column_carries_its_lineage() {
 fn outputs_without_a_personal_source_carry_no_lineage() {
     assert_eq!(
         lineage("SELECT count(*), status FROM orders"),
-        Some(vec![false, false])
+        Some(vec![Clean, Clean])
     );
 }
 
@@ -578,39 +579,39 @@ fn outputs_without_a_personal_source_carry_no_lineage() {
 fn lineage_follows_aliases_through_ctes_and_subqueries() {
     assert_eq!(
         lineage("WITH x AS (SELECT email AS e FROM customers) SELECT left(e, 5) FROM x"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage(
             "WITH x AS (SELECT email AS e FROM customers), y AS (SELECT e AS f FROM x) SELECT upper(f), 1 FROM y"
         ),
-        Some(vec![true, false])
+        Some(vec![Personal, Clean])
     );
     assert_eq!(
         lineage("WITH x (e) AS (SELECT email FROM customers) SELECT left(e, 5) FROM x"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT left(s.d, 5) FROM (SELECT id, email FROM customers) AS s (i, d)"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT left(s.i::text, 5) FROM (SELECT id, email FROM customers) AS s (i, d)"),
-        Some(vec![false])
+        Some(vec![Clean])
     );
     assert_eq!(
         lineage(
             "SELECT left(split_part, 5) FROM (SELECT split_part(email, '@', 1) FROM customers) s"
         ),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT to_jsonb(s) FROM (SELECT left(email, 9) AS e FROM customers) s"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT left(a, 5) FROM customers, unnest(ARRAY[email, nom]) AS u (a)"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
 }
 
@@ -618,39 +619,92 @@ fn lineage_follows_aliases_through_ctes_and_subqueries() {
 fn every_branch_of_a_set_operation_contributes_lineage() {
     assert_eq!(
         lineage("SELECT 'x' UNION ALL SELECT split_part(email, '@', 1) FROM customers"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
 }
 
 #[test]
-fn lineage_is_unavailable_when_a_wildcard_hides_the_output_positions() {
-    assert_eq!(lineage("SELECT * FROM customers"), None);
-    assert_eq!(lineage("SELECT c.*, upper(nom) FROM customers c"), None);
+fn every_output_position_from_a_wildcard_on_is_unknown() {
+    assert_eq!(lineage("SELECT * FROM customers"), Some(vec![Unknown]));
+    assert_eq!(
+        lineage("SELECT *, split_part(email, '@', 1) FROM customers"),
+        Some(vec![Unknown])
+    );
+    assert_eq!(
+        lineage("SELECT c.*, upper(nom) FROM customers c"),
+        Some(vec![Unknown])
+    );
+    assert_eq!(
+        lineage("SELECT upper(status), c.*, left(email, 5) FROM customers c"),
+        Some(vec![Clean, Unknown])
+    );
+    assert_eq!(
+        lineage("SELECT left(email, 5), * FROM customers"),
+        Some(vec![Personal, Unknown])
+    );
+    assert_eq!(
+        lineage("SELECT status FROM orders UNION ALL SELECT * FROM orders"),
+        Some(vec![Personal, Unknown])
+    );
+}
+
+#[test]
+fn lineage_is_unavailable_for_a_statement_that_returns_no_rows_of_its_own() {
     assert_eq!(lineage("EXPLAIN SELECT email FROM customers"), None);
+}
+
+#[test]
+fn a_whole_row_used_as_a_value_carries_personal_lineage() {
+    for sql in [
+        "SELECT split_part(c::text, ',', 4) FROM customers c",
+        "SELECT substr(c::text, 2, 20) FROM customers c",
+        "SELECT row_to_json(c) FROM customers c",
+        "SELECT to_jsonb(customers) FROM customers",
+        "SELECT to_jsonb(customers) FROM public.customers",
+        "SELECT ROW(c.*) FROM customers c",
+        "SELECT to_jsonb(c.*) FROM customers c",
+        "SELECT (c).email FROM customers c",
+        "SELECT upper((o).status) FROM orders o",
+        "SELECT left(t::text, 30) FROM customers c JOIN orders t ON t.customer_id = c.id",
+        "SELECT left(s::text, 30) FROM (SELECT * FROM customers) s",
+    ] {
+        assert_eq!(lineage(sql), Some(vec![Personal]), "{sql}");
+    }
+}
+
+#[test]
+fn a_column_qualified_by_its_relation_keeps_its_own_lineage() {
+    for sql in [
+        "SELECT upper(c.status) FROM customers c",
+        "SELECT upper(customers.status) FROM customers",
+        "SELECT to_jsonb(s) FROM (SELECT status FROM customers) s",
+    ] {
+        assert_eq!(lineage(sql), Some(vec![Clean]), "{sql}");
+    }
 }
 
 #[test]
 fn lineage_starts_from_personal_json_keys_and_plural_column_names() {
     assert_eq!(
         lineage("SELECT split_part(profile->'contact'->>'mail', '@', 1) FROM customers"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT split_part(profile #>> '{contact,mail}', '@', 1) FROM customers"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage(
             "SELECT split_part(jsonb_extract_path_text(profile, 'contact', 'mail'), '@', 1) FROM customers"
         ),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT split_part(unnest(emails_secondaires), '@', 1) FROM customers"),
-        Some(vec![true])
+        Some(vec![Personal])
     );
     assert_eq!(
         lineage("SELECT profile->>'plan', upper(status) FROM customers"),
-        Some(vec![false, false])
+        Some(vec![Clean, Clean])
     );
 }

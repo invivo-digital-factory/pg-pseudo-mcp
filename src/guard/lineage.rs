@@ -2,23 +2,50 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, Ident, ObjectName, Query, Select, SelectItem, SetExpr, Statement,
-    TableAlias, TableFactor, Value, ValueWithSpan, Visit, Visitor,
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident,
+    ObjectName, Query, Select, SelectItem, SetExpr, Statement, TableAlias, TableFactor, Value,
+    ValueWithSpan, Visit, Visitor,
 };
 
 use crate::anon::dictionary_kind;
 
-pub fn derived_lineage(statement: &Statement) -> Option<Vec<bool>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lineage {
+    Clean,
+    Personal,
+    Unknown,
+}
+
+pub fn derived_lineage(statement: &Statement) -> Option<Vec<Lineage>> {
     let Statement::Query(query) = statement else {
         return None;
     };
     let tainted = tainted_names(statement);
     let shape = Shape::of_query(query, &tainted);
-    (!shape.rest).then_some(shape.items)
+    let mut lineage: Vec<Lineage> = shape
+        .items
+        .iter()
+        .map(|personal| {
+            if *personal {
+                Lineage::Personal
+            } else {
+                Lineage::Clean
+            }
+        })
+        .collect();
+    if shape.rest {
+        lineage.push(Lineage::Unknown);
+    }
+    Some(lineage)
 }
 
 fn tainted_names(statement: &Statement) -> HashSet<String> {
-    let mut collector = Collector::default();
+    let mut relations = Relations::default();
+    let _ = statement.visit(&mut relations);
+    let mut collector = Collector {
+        tainted: relations.names,
+        changed: false,
+    };
     loop {
         collector.changed = false;
         let _ = statement.visit(&mut collector);
@@ -29,6 +56,29 @@ fn tainted_names(statement: &Statement) -> HashSet<String> {
 }
 
 #[derive(Default)]
+struct Relations {
+    names: HashSet<String>,
+}
+
+impl Visitor for Relations {
+    type Break = ();
+
+    fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<()> {
+        if let TableFactor::Table {
+            name,
+            alias,
+            args: None,
+            ..
+        } = factor
+        {
+            let relation = last_part(name).map(|part| part.value.to_lowercase());
+            let alias = alias.as_ref().map(|alias| alias.name.value.to_lowercase());
+            self.names.extend(relation.into_iter().chain(alias));
+        }
+        ControlFlow::Continue(())
+    }
+}
+
 struct Collector {
     tainted: HashSet<String>,
     changed: bool,
@@ -243,6 +293,10 @@ fn references<V: Visit>(node: &V, tainted: &HashSet<String>) -> bool {
                 Expr::CompoundIdentifier(parts) => parts
                     .last()
                     .is_some_and(|ident| is_tainted(ident, self.tainted)),
+                Expr::QualifiedWildcard(name, _) => {
+                    last_part(name).is_some_and(|part| is_tainted(part, self.tainted))
+                }
+                Expr::Function(function) if expands_tainted_row(function, self.tainted) => true,
                 Expr::BinaryOp {
                     op:
                         BinaryOperator::Arrow
@@ -266,6 +320,21 @@ fn references<V: Visit>(node: &V, tainted: &HashSet<String>) -> bool {
     }
 
     node.visit(&mut Finder { tainted }).is_break()
+}
+
+fn expands_tainted_row(function: &Function, tainted: &HashSet<String>) -> bool {
+    let FunctionArguments::List(list) = &function.args else {
+        return false;
+    };
+    list.args.iter().any(|arg| {
+        let expr = match arg {
+            FunctionArg::Named { arg, .. }
+            | FunctionArg::ExprNamed { arg, .. }
+            | FunctionArg::Unnamed(arg) => arg,
+        };
+        matches!(expr, FunctionArgExpr::QualifiedWildcard(name)
+            if last_part(name).is_some_and(|part| is_tainted(part, tainted)))
+    })
 }
 
 fn has_personal_key<V: Visit>(node: &V) -> bool {

@@ -2,6 +2,7 @@ mod lineage;
 mod rewrite;
 mod validate;
 
+pub use lineage::Lineage;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -21,7 +22,7 @@ pub struct Guarded {
     pub translated_literals: usize,
     pub injected: Vec<(String, String)>,
     pub warnings: Vec<Warning>,
-    pub derived_lineage: Option<Vec<bool>>,
+    pub derived_lineage: Option<Vec<Lineage>>,
     is_explain: bool,
 }
 
