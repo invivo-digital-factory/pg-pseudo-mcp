@@ -521,6 +521,96 @@ fn birth_dates_shift_by_whole_weeks_and_keep_their_format() {
     }
 }
 
+fn alphabetic_words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphabetic())
+        .filter(|word| word.chars().count() >= 3)
+        .map(str::to_lowercase)
+        .collect()
+}
+
+fn assert_no_input_words(input: &str, output: &str) {
+    let lowered = output.to_lowercase();
+    for word in alphabetic_words(input) {
+        assert!(!lowered.contains(&word), "{input} -> {output}");
+    }
+}
+
+#[test]
+fn phone_pseudonyms_never_copy_text_around_the_number() {
+    let dir = tempfile::tempdir().unwrap();
+    let pseudonymizer = open(dir.path());
+    for value in [
+        "06 41 27 83 95 (Marie Dupont)",
+        "tel: 0641278395",
+        "06.41.27.83.95 poste Kervadec",
+    ] {
+        let text = pseudonymizer.pseudonymize(Kind::Phone, value).text;
+        assert_no_input_words(value, &text);
+        assert_eq!(
+            separator_layout(&text),
+            "xx xx xx xx xx",
+            "{value} -> {text}"
+        );
+        assert!(phone_in_fictional_block(&text), "{value} -> {text}");
+    }
+}
+
+#[test]
+fn iban_pseudonyms_never_copy_trailing_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let pseudonymizer = open(dir.path());
+    let value = "FR76 3000 4000 0312 3456 7890 143 Kervadec";
+    let text = pseudonymizer.pseudonymize(Kind::Iban, value).text;
+    assert_no_input_words(value, &text);
+    assert!(iban_valid(&text), "{text}");
+    assert_eq!(
+        separator_layout(&text),
+        "xxxx xxxx xxxx xxxx xxxx xxxx xxx",
+        "{text}"
+    );
+}
+
+#[test]
+fn birth_date_pseudonyms_keep_only_a_valid_time_suffix() {
+    let dir = tempfile::tempdir().unwrap();
+    let pseudonymizer = open(dir.path());
+    let value = "1985-11-02 Marie";
+    let text = pseudonymizer.pseudonymize(Kind::BirthDate, value).text;
+    assert_no_input_words(value, &text);
+    assert_eq!(separator_layout(&text), "xxxx-xx-xx", "{text}");
+    let timed = pseudonymizer
+        .pseudonymize(Kind::BirthDate, "1985-11-02T10:30:00Z")
+        .text;
+    assert!(timed.ends_with("T10:30:00Z"), "{timed}");
+    assert_eq!(timed.len(), 20, "{timed}");
+}
+
+#[test]
+fn ip_pseudonyms_keep_only_a_numeric_prefix_length() {
+    let dir = tempfile::tempdir().unwrap();
+    let pseudonymizer = open(dir.path());
+    let value = "10.0.0.1/Marie";
+    let text = pseudonymizer.pseudonymize(Kind::IpAddress, value).text;
+    assert_no_input_words(value, &text);
+    assert!(!text.contains('/'), "{text}");
+    assert!(text.parse::<std::net::Ipv4Addr>().is_ok(), "{text}");
+    let masked = pseudonymizer
+        .pseudonymize(Kind::IpAddress, "10.0.0.1/24")
+        .text;
+    assert!(masked.ends_with("/24"), "{masked}");
+}
+
+#[test]
+fn siren_pseudonyms_never_copy_trailing_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let pseudonymizer = open(dir.path());
+    let value = "418273652 Kervadec";
+    let text = pseudonymizer.pseudonymize(Kind::Siren, value).text;
+    assert_no_input_words(value, &text);
+    assert_eq!(text.len(), 9, "{text}");
+    assert!(luhn_valid(&text), "{text}");
+}
+
 #[test]
 fn a_single_number_phone_pool_exhausts_on_the_second_phone() {
     let dir = tempfile::tempdir().unwrap();

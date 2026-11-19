@@ -1,7 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::LazyLock;
 
 use fake::locales::{Data, FR_FR};
 use rand::Rng;
+use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
@@ -14,6 +16,14 @@ pub(crate) const FICTIONAL_PHONE_BLOCKS: [&str; 7] = [
     "019900", "026191", "035373", "046571", "053649", "063998", "073998",
 ];
 const PHONE_BLOCK_SIZE: usize = 10_000;
+
+const COPIED_SEPARATORS: &str = " .-+()/";
+const MAX_PREFIX_LENGTH_DIGITS: usize = 3;
+
+static TIME_SUFFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[ T]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}(:?\d{2})?)?$")
+        .expect("time suffix pattern is valid")
+});
 
 const PSEUDONYM_BANK_CODE: &str = "99999";
 const CARD_PREFIX: &str = "400000";
@@ -277,6 +287,12 @@ fn capitalize(word: &str) -> String {
 }
 
 fn overlay(template: &str, replacement: &str, is_slot: impl Fn(char) -> bool) -> Option<String> {
+    if template
+        .chars()
+        .any(|c| !is_slot(c) && !COPIED_SEPARATORS.contains(c))
+    {
+        return None;
+    }
     if template.chars().filter(|c| is_slot(*c)).count() != replacement.chars().count() {
         return None;
     }
@@ -397,7 +413,7 @@ fn phone<R: Rng + ?Sized>(value: &str, rng: &mut R, config: &GeneratorConfig) ->
         blocks[index / PHONE_BLOCK_SIZE],
         index % PHONE_BLOCK_SIZE
     );
-    if digits.len() < 9 {
+    if !is_french_phone_shape(value, &digits) {
         return group_in_pairs(&national);
     }
     let kept_prefix = digits.len() - 9;
@@ -417,6 +433,23 @@ fn phone<R: Rng + ?Sized>(value: &str, rng: &mut R, config: &GeneratorConfig) ->
             }
         })
         .collect()
+}
+
+fn is_french_phone_shape(value: &str, digits: &[char]) -> bool {
+    if value
+        .chars()
+        .any(|c| !c.is_ascii_digit() && !COPIED_SEPARATORS.contains(c))
+    {
+        return false;
+    }
+    let digits: String = digits.iter().collect();
+    match digits.len() {
+        10 => digits.starts_with('0'),
+        11 => digits.starts_with("33"),
+        12 => digits.starts_with("330"),
+        13 => digits.starts_with("0033"),
+        _ => false,
+    }
 }
 
 fn group_in_pairs(national: &str) -> String {
@@ -540,6 +573,7 @@ fn nir<R: Rng + ?Sized>(value: &str, rng: &mut R) -> String {
 
 fn ip_address<R: Rng + ?Sized>(value: &str, rng: &mut R) -> String {
     let (address, suffix) = value.split_at(value.find('/').unwrap_or(value.len()));
+    let suffix = if is_prefix_length(suffix) { suffix } else { "" };
     let generated = if address.contains(':') {
         let mut segment = || below(rng, 0x1_0000) as u16;
         Ipv6Addr::new(
@@ -558,6 +592,13 @@ fn ip_address<R: Rng + ?Sized>(value: &str, rng: &mut R) -> String {
         Ipv4Addr::new(a, b, c, 1 + below(rng, 254) as u8).to_string()
     };
     format!("{generated}{suffix}")
+}
+
+fn is_prefix_length(suffix: &str) -> bool {
+    suffix.strip_prefix('/').is_some_and(|length| {
+        (1..=MAX_PREFIX_LENGTH_DIGITS).contains(&length.len())
+            && length.bytes().all(|b| b.is_ascii_digit())
+    })
 }
 
 fn is_documentation_ip(text: &str) -> bool {
@@ -740,6 +781,11 @@ fn birth_date<R: Rng + ?Sized>(value: &str, rng: &mut R) -> String {
     let shift = if below(rng, 2) == 0 { -weeks } else { weeks } * 7;
     match parse_date(value) {
         Some((layout, year, month, day, rest)) => {
+            let rest = if rest.is_empty() || TIME_SUFFIX.is_match(rest) {
+                rest
+            } else {
+                ""
+            };
             let (year, month, day) = civil_from_days(days_from_civil(year, month, day) + shift);
             match layout {
                 DateLayout::Iso => format!("{year:04}-{month:02}-{day:02}{rest}"),
