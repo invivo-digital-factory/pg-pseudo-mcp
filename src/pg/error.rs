@@ -30,7 +30,7 @@ pub enum PgError {
     #[error("statement timed out")]
     Timeout,
     #[error("{}", describe(.0))]
-    Db(DbMessage),
+    Db(Box<DbMessage>),
     #[error("cannot decode result: {0}")]
     Decode(String),
 }
@@ -39,7 +39,7 @@ impl PgError {
     pub(crate) fn from_postgres(error: &tokio_postgres::Error) -> Self {
         match error.as_db_error() {
             Some(db) if db.code() == &SqlState::QUERY_CANCELED => Self::Timeout,
-            Some(db) => Self::Db(DbMessage::from_db_error(db)),
+            Some(db) => Self::Db(Box::new(DbMessage::from_db_error(db))),
             None => Self::Connect(error.to_string()),
         }
     }
