@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PG_PSEUDO_TEST_DATABASE_URL: postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Start the seeded database and the SSH bastion
+        run: docker compose up -d --build --wait
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo test -- --include-ignored
+      - run: cargo build --release
