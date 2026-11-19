@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::limits;
+use crate::contexts::querying::domain::constants::limits;
 
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {

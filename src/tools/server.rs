@@ -7,8 +7,9 @@ use rmcp::{
 
 use std::sync::Arc;
 
+use crate::contexts::querying::presentation::json_result;
 use crate::state::{AppConfig, AppState};
-use crate::tools::{connections, explain, info, query, result::json_result, schema};
+use crate::tools::{connections, explain, info, query, schema};
 
 pub const INSTRUCTIONS: &str = "\
 pg-pseudo-mcp gives read-only access to the PostgreSQL databases configured in the developer's DBeaver.

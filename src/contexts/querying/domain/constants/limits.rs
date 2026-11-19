@@ -1,0 +1,9 @@
+pub const DEFAULT_MAX_ROWS: usize = 50;
+pub const MAX_ROWS_CEILING: usize = 500;
+pub const DEFAULT_MAX_BYTES: usize = 16 * 1024;
+pub const MAX_BYTES_CEILING: usize = 64 * 1024;
+pub const MIN_BYTES: usize = 1024;
+pub const MAX_CELL_CHARS: usize = 500;
+pub const DEFAULT_TIMEOUT_MS: u64 = 10_000;
+pub const MAX_TIMEOUT_MS: u64 = 60_000;
+pub const MIN_TIMEOUT_MS: u64 = 100;

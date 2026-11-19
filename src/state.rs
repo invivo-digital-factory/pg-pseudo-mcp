@@ -1,12 +1,16 @@
 pub use crate::common::AppConfig;
+use std::sync::Arc;
+
+use crate::composition::adapters::ReadOnlyDatabaseAdapter;
+use crate::composition::querying::querying_context;
 use crate::contexts::anonymization::injector::{AnonymizationInjector, AnonymizationUseCases};
 use crate::contexts::connections::injector::ConnectionsContext;
-use crate::tools::errors::{ErrorCategory, ToolError};
+use crate::contexts::querying::injector::QueryingContext;
 
 pub struct AppState {
     pub config: AppConfig,
-    pub connections: ConnectionsContext,
-    pseudonymizer: Result<AnonymizationUseCases, String>,
+    pub connections: Arc<ConnectionsContext>,
+    pub querying: QueryingContext<ReadOnlyDatabaseAdapter>,
 }
 
 impl AppState {
@@ -19,22 +23,12 @@ impl AppState {
         config: AppConfig,
         pseudonymizer: Result<AnonymizationUseCases, String>,
     ) -> Self {
+        let connections = Arc::new(ConnectionsContext::new(&config));
         Self {
-            connections: ConnectionsContext::new(&config),
+            querying: querying_context(Arc::clone(&connections), pseudonymizer),
+            connections,
             config,
-            pseudonymizer,
         }
-    }
-
-    pub fn pseudonymizer(&self) -> Result<AnonymizationUseCases, ToolError> {
-        self.pseudonymizer.clone().map_err(|error| {
-            ToolError::new(
-                ErrorCategory::WithheldFailClosed,
-                "pseudonym_store_unavailable",
-                error,
-            )
-            .with_hint("ask the developer to run pg-pseudo-mcp outside the agent to repair the pseudonym store")
-        })
     }
 }
 
