@@ -8,9 +8,9 @@ use md5::{Digest, Md5};
 use pg_pseudo_mcp::common::AppConfig;
 use pg_pseudo_mcp::composition::contexts::Contexts;
 use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
+use pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
 use pg_pseudo_mcp::contexts::connections::presentation;
 use pg_pseudo_mcp::contexts::querying::presentation as querying;
-use pg_pseudo_mcp::dbeaver::credentials::encrypt_for_tests;
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
