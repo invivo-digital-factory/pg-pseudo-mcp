@@ -21,7 +21,7 @@ const COPIED_SEPARATORS: &str = " .-+()/";
 const MAX_PREFIX_LENGTH_DIGITS: usize = 3;
 
 static TIME_SUFFIX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[ T]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}(:?\d{2})?)?$")
+    Regex::new(r"^[ T][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?$")
         .expect("time suffix pattern is valid")
 });
 
