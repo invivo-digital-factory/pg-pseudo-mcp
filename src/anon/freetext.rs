@@ -135,6 +135,22 @@ pub(crate) fn name_shape(value: &str) -> Option<Kind> {
     (shaped && words.iter().any(|word| has_lowercase(word))).then_some(Kind::PersonName)
 }
 
+pub(crate) fn any_case_name_shape(value: &str) -> Option<Kind> {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    if words.is_empty() || words.len() > 4 || !words.iter().all(|word| is_name_word(word)) {
+        return None;
+    }
+    let letters = |word: &&str| word.chars().filter(|c| c.is_alphabetic()).count();
+    if !words.iter().any(|word| letters(word) >= 3) {
+        return None;
+    }
+    Some(if words.len() == 1 {
+        Kind::LastName
+    } else {
+        Kind::PersonName
+    })
+}
+
 pub(crate) fn is_digest(value: &str) -> bool {
     let hex = matches!(value.len(), 32 | 40 | 64) && value.bytes().all(|b| b.is_ascii_hexdigit());
     hex || is_base64(value)

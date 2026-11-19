@@ -1,3 +1,4 @@
+pub mod apply;
 mod classify;
 mod detect;
 mod dictionary;

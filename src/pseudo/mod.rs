@@ -182,6 +182,23 @@ impl Pseudonymizer {
     pub fn looks_like_pseudonym(&self, text: &str) -> Option<Kind> {
         generators::recognise(text)
     }
+
+    pub fn opaque_token(&self, label: &str, value: &str) -> String {
+        let seed = self
+            .keys
+            .seed(Kind::PersonName, &format!("opaque\u{0}{label}\u{0}{value}"));
+        format!("<{label} id={}>", hex::encode(&seed[..4]))
+    }
+}
+
+impl crate::guard::PseudonymLookup for Pseudonymizer {
+    fn reverse(&self, text: &str) -> Option<(Kind, String)> {
+        Pseudonymizer::reverse(self, text)
+    }
+
+    fn looks_like_pseudonym(&self, text: &str) -> Option<Kind> {
+        Pseudonymizer::looks_like_pseudonym(self, text)
+    }
 }
 
 fn opaque(kind: Kind, seed: &[u8; 32]) -> Pseudonym {

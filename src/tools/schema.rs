@@ -2,7 +2,7 @@ use rmcp::model::CallToolResult;
 use rmcp::schemars;
 use serde::Deserialize;
 
-use crate::state::AppConfig;
+use crate::state::AppState;
 use crate::tools::errors::ToolError;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -35,14 +35,14 @@ pub struct DescribeTableArgs {
     pub table: String,
 }
 
-pub async fn search_schema(_config: &AppConfig, _args: SearchSchemaArgs) -> CallToolResult {
+pub async fn search_schema(_state: &AppState, _args: SearchSchemaArgs) -> CallToolResult {
     ToolError::not_implemented("search_schema").into_call_result()
 }
 
-pub async fn list_tables(_config: &AppConfig, _args: ListTablesArgs) -> CallToolResult {
+pub async fn list_tables(_state: &AppState, _args: ListTablesArgs) -> CallToolResult {
     ToolError::not_implemented("list_tables").into_call_result()
 }
 
-pub async fn describe_table(_config: &AppConfig, _args: DescribeTableArgs) -> CallToolResult {
+pub async fn describe_table(_state: &AppState, _args: DescribeTableArgs) -> CallToolResult {
     ToolError::not_implemented("describe_table").into_call_result()
 }

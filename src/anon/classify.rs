@@ -63,7 +63,14 @@ pub fn judge_text(text: &str, class: &ColumnClass) -> TextVerdict {
         return TextVerdict::Digest;
     }
     let spans = detect_spans(text);
-    if let Some(kind) = freetext::name_shape(trimmed) {
+    let shape = freetext::name_shape(trimmed).or_else(|| {
+        if class.derived {
+            freetext::any_case_name_shape(trimmed)
+        } else {
+            None
+        }
+    });
+    if let Some(kind) = shape {
         let reason = if spans.is_empty() {
             Reason::Default
         } else {

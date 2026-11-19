@@ -43,7 +43,9 @@ struct Detectors {
 fn detectors() -> &'static Detectors {
     static DETECTORS: OnceLock<Detectors> = OnceLock::new();
     DETECTORS.get_or_init(|| Detectors {
-        email: compile(r"[\p{L}\p{N}._%+'-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}"),
+        email: compile(
+            r"[\p{L}\p{N}_%+-][\p{L}\p{N}._%+'-]*@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}",
+        ),
         phone: compile(
             r"(?:\+33[ .-]?(?:\(0\)[ .-]?)?|0033[ .-]?|0)[1-9](?:[ .-]?\d{2}){4}|33[1-9]\d{8}",
         ),

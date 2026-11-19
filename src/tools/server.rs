@@ -5,7 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use crate::state::AppConfig;
+use std::sync::Arc;
+
+use crate::state::{AppConfig, AppState};
 use crate::tools::{connections, explain, info, query, result::json_result, schema};
 
 pub const INSTRUCTIONS: &str = "\
@@ -23,7 +25,7 @@ server_info returns the live limits and known limitations.";
 
 #[derive(Clone)]
 pub struct PgPseudoServer {
-    config: AppConfig,
+    state: Arc<AppState>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
@@ -31,8 +33,12 @@ pub struct PgPseudoServer {
 #[tool_router]
 impl PgPseudoServer {
     pub fn new(config: AppConfig) -> Self {
+        Self::with_state(Arc::new(AppState::new(config)))
+    }
+
+    pub fn with_state(state: Arc<AppState>) -> Self {
         Self {
-            config,
+            state,
             tool_router: Self::tool_router(),
         }
     }
@@ -42,7 +48,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_connections(&self) -> CallToolResult {
-        connections::list_connections(&self.config).await
+        connections::list_connections(&self.state.config).await
     }
 
     #[tool(
@@ -53,7 +59,7 @@ impl PgPseudoServer {
         &self,
         Parameters(args): Parameters<schema::SearchSchemaArgs>,
     ) -> CallToolResult {
-        schema::search_schema(&self.config, args).await
+        schema::search_schema(&self.state, args).await
     }
 
     #[tool(
@@ -64,7 +70,7 @@ impl PgPseudoServer {
         &self,
         Parameters(args): Parameters<schema::ListTablesArgs>,
     ) -> CallToolResult {
-        schema::list_tables(&self.config, args).await
+        schema::list_tables(&self.state, args).await
     }
 
     #[tool(
@@ -75,7 +81,7 @@ impl PgPseudoServer {
         &self,
         Parameters(args): Parameters<schema::DescribeTableArgs>,
     ) -> CallToolResult {
-        schema::describe_table(&self.config, args).await
+        schema::describe_table(&self.state, args).await
     }
 
     #[tool(
@@ -83,7 +89,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn query(&self, Parameters(args): Parameters<query::QueryArgs>) -> CallToolResult {
-        query::query(&self.config, args).await
+        query::query(&self.state, args).await
     }
 
     #[tool(
@@ -91,7 +97,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn explain(&self, Parameters(args): Parameters<explain::ExplainArgs>) -> CallToolResult {
-        explain::explain(&self.config, args).await
+        explain::explain(&self.state, args).await
     }
 
     #[tool(
