@@ -1,0 +1,14 @@
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+AuthorizedKeysFile .ssh/authorized_keys
+AllowTcpForwarding yes
+PermitOpen any
+X11Forwarding no
+PidFile /run/sshd.pid
+Subsystem sftp internal-sftp
+MaxStartups 100:30:200

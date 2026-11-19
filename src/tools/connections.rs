@@ -26,11 +26,17 @@ fn describe(entry: &ConnectionEntry) -> Value {
         }
         ConnectionStatus::Unavailable { reason } => {
             item.insert("status".to_string(), json!("unavailable"));
-            item.insert("reason".to_string(), json!(reason));
+            item.insert(
+                "reason".to_string(),
+                json!(crate::tools::errors::redact_home(reason)),
+            );
         }
         ConnectionStatus::Unsupported { reason } => {
             item.insert("status".to_string(), json!("unsupported"));
-            item.insert("reason".to_string(), json!(reason));
+            item.insert(
+                "reason".to_string(),
+                json!(crate::tools::errors::redact_home(reason)),
+            );
         }
     }
     if let Some(database) = &entry.database {

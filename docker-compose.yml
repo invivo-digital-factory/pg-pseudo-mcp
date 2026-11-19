@@ -14,3 +14,15 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  ssh:
+    build: tests/ssh
+    ports:
+      - "55222:22"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 22"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

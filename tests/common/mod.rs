@@ -68,6 +68,7 @@ impl Harness {
         let config = AppConfig {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
+            ssh_known_hosts: None,
         };
         let pseudonymizer = Pseudonymizer::open(data.path())
             .map(Arc::new)

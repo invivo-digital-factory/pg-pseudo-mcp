@@ -37,7 +37,7 @@ impl ToolError {
         Self {
             code: code.into(),
             category,
-            message: message.into(),
+            message: redact_home(&message.into()),
             hint: None,
             retryable: false,
             sqlstate: None,
@@ -45,7 +45,7 @@ impl ToolError {
     }
 
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
-        self.hint = Some(hint.into());
+        self.hint = Some(redact_home(&hint.into()));
         self
     }
 
@@ -73,6 +73,18 @@ impl ToolError {
     }
 }
 
+pub fn redact_home(text: &str) -> String {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return text.to_string();
+    };
+    let home = home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    if home.len() < 2 {
+        return text.to_string();
+    }
+    text.replace(home, "~")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +102,18 @@ mod tests {
         assert_eq!(json["hint"], "only SELECT, WITH and EXPLAIN are accepted");
         assert!(json.get("sqlstate").is_none());
         assert_eq!(json["retryable"], false);
+    }
+
+    #[test]
+    fn the_home_directory_never_reaches_the_agent() {
+        let home = std::env::var("HOME").unwrap();
+        let error = ToolError::new(
+            ErrorCategory::ConnectionUnavailable,
+            "connection_failed",
+            format!("SSH key file not found: {home}/.ssh/id_test"),
+        )
+        .with_hint(format!("check {home}/.ssh/known_hosts"));
+        assert_eq!(error.message, "SSH key file not found: ~/.ssh/id_test");
+        assert_eq!(error.hint.as_deref(), Some("check ~/.ssh/known_hosts"));
     }
 }

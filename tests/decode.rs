@@ -27,6 +27,7 @@ fn options() -> ConnectOptions {
             .map(|p| String::from_utf8_lossy(p).into_owned())
             .unwrap_or_default(),
         sslmode: SslMode::Disable,
+        tunnel: None,
     }
 }
 

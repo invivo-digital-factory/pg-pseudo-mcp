@@ -1,9 +1,10 @@
 use std::future::poll_fn;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_postgres::config::SslMode as WireSslMode;
+use tokio_postgres::tls::MakeTlsConnect;
 use tokio_postgres::{AsyncMessage, CancelToken, Client, Config, Connection, NoTls, Transaction};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
@@ -13,6 +14,7 @@ use super::options::{ConnectOptions, SslMode};
 use super::output::{ColumnMeta, QueryOutput};
 use super::provenance::SourceCache;
 use super::tls::verified_connector;
+use super::tunnel::{SshLink, TunnelStream};
 
 const APPLICATION_NAME: &str = "pg-pseudo-mcp";
 const LOCK_TIMEOUT_MS: u64 = 2000;
@@ -35,6 +37,7 @@ struct Live {
     notices: UnboundedReceiver<DbMessage>,
     cancel_token: CancelToken,
     tls: Option<MakeRustlsConnect>,
+    link: Option<SshLink>,
 }
 
 pub async fn connect(options: &ConnectOptions) -> Result<Session, PgError> {
@@ -77,7 +80,7 @@ impl Session {
     ) -> Result<QueryOutput, PgError> {
         let timeout_ms = timeout_ms.clamp(1, MAX_STATEMENT_TIMEOUT_MS);
         let live = match &mut self.live {
-            Some(live) if !live.client.is_closed() => live,
+            Some(live) if !live.is_closed() => live,
             slot => slot.insert(open(&self.options, self.connect_deadline).await?),
         };
         live.drain_notices();
@@ -92,7 +95,7 @@ impl Session {
         match tokio::time::timeout(deadline, execution).await {
             Ok(Execution { result, healthy }) => {
                 let notices = live.drain_notices();
-                if !healthy || live.client.is_closed() {
+                if !healthy || live.is_closed() {
                     self.live = None;
                 }
                 result.map(|output| QueryOutput { notices, ..output })
@@ -199,7 +202,21 @@ async fn run_statement(
 }
 
 async fn open(options: &ConnectOptions, deadline: Duration) -> Result<Live, PgError> {
-    match tokio::time::timeout(deadline, handshake(options)).await {
+    let started = Instant::now();
+    let link = match &options.tunnel {
+        None => None,
+        Some(tunnel) => match tokio::time::timeout(deadline, SshLink::open(tunnel)).await {
+            Ok(link) => Some(link?),
+            Err(_) => {
+                return Err(PgError::Connect(format!(
+                    "SSH tunnel to {}:{} timed out after {deadline:?} before the server answered and authentication completed",
+                    tunnel.host, tunnel.port
+                )));
+            }
+        },
+    };
+    let remaining = deadline.saturating_sub(started.elapsed());
+    match tokio::time::timeout(remaining, handshake(options, link)).await {
         Ok(opened) => opened,
         Err(_) => Err(PgError::Connect(format!(
             "connection timed out after {deadline:?} without completing TLS or authentication"
@@ -207,7 +224,7 @@ async fn open(options: &ConnectOptions, deadline: Duration) -> Result<Live, PgEr
     }
 }
 
-async fn handshake(options: &ConnectOptions) -> Result<Live, PgError> {
+async fn handshake(options: &ConnectOptions, link: Option<SshLink>) -> Result<Live, PgError> {
     let mut config = Config::new();
     config
         .host(&options.host)
@@ -216,25 +233,50 @@ async fn handshake(options: &ConnectOptions) -> Result<Live, PgError> {
         .user(&options.user)
         .password(options.password.as_bytes())
         .application_name(APPLICATION_NAME)
-        .connect_timeout(CONNECT_TIMEOUT);
+        .connect_timeout(CONNECT_TIMEOUT)
+        .ssl_mode(match options.sslmode {
+            SslMode::Disable => WireSslMode::Disable,
+            SslMode::Allow | SslMode::Prefer => WireSslMode::Prefer,
+            _ => WireSslMode::Require,
+        });
     let refused = |error: tokio_postgres::Error| PgError::Connect(error.to_string());
-    match options.sslmode {
-        SslMode::Disable => {
-            config.ssl_mode(WireSslMode::Disable);
+    let tls = match options.sslmode {
+        SslMode::Disable => None,
+        _ => Some(
+            verified_connector()
+                .map_err(|error| PgError::Connect(format!("tls setup failed: {error}")))?,
+        ),
+    };
+    match (link, tls) {
+        (None, None) => {
             let (client, connection) = config.connect(NoTls).await.map_err(refused)?;
-            Ok(Live::start(client, connection, None))
+            Ok(Live::start(client, connection, None, None))
         }
-        mode => {
-            config.ssl_mode(match mode {
-                SslMode::Allow | SslMode::Prefer => WireSslMode::Prefer,
-                _ => WireSslMode::Require,
-            });
-            let tls = verified_connector()
-                .map_err(|error| PgError::Connect(format!("tls setup failed: {error}")))?;
+        (None, Some(tls)) => {
             let (client, connection) = config.connect(tls.clone()).await.map_err(refused)?;
-            Ok(Live::start(client, connection, Some(tls)))
+            Ok(Live::start(client, connection, Some(tls), None))
+        }
+        (Some(link), None) => {
+            let stream = link.forward().await?;
+            let (client, connection) = config.connect_raw(stream, NoTls).await.map_err(refused)?;
+            Ok(Live::start(client, connection, None, Some(link)))
+        }
+        (Some(link), Some(tls)) => {
+            let stream = link.forward().await?;
+            let (client, connection) = config
+                .connect_raw(stream, tunnel_tls(&tls, link.remote_host()))
+                .await
+                .map_err(refused)?;
+            Ok(Live::start(client, connection, Some(tls), Some(link)))
         }
     }
+}
+
+type TunnelTls = <MakeRustlsConnect as MakeTlsConnect<TunnelStream>>::TlsConnect;
+
+fn tunnel_tls(tls: &MakeRustlsConnect, host: &str) -> TunnelTls {
+    let Ok(connect) = MakeTlsConnect::<TunnelStream>::make_tls_connect(&mut tls.clone(), host);
+    connect
 }
 
 impl Live {
@@ -242,6 +284,7 @@ impl Live {
         client: Client,
         connection: Connection<S, T>,
         tls: Option<MakeRustlsConnect>,
+        link: Option<SshLink>,
     ) -> Self
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -254,7 +297,12 @@ impl Live {
             client,
             notices,
             tls,
+            link,
         }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.client.is_closed() || self.link.as_ref().is_some_and(SshLink::is_closed)
     }
 
     fn drain_notices(&mut self) -> Vec<DbMessage> {
@@ -270,17 +318,36 @@ impl Live {
             client,
             cancel_token,
             tls,
+            link,
             ..
         } = self;
         tokio::spawn(async move {
             let cancel = async {
-                match tls {
-                    Some(tls) => cancel_token.cancel_query(tls).await,
-                    None => cancel_token.cancel_query(NoTls).await,
+                match (&link, tls) {
+                    (None, Some(tls)) => {
+                        let _ = cancel_token.cancel_query(tls).await;
+                    }
+                    (None, None) => {
+                        let _ = cancel_token.cancel_query(NoTls).await;
+                    }
+                    (Some(link), tls) => {
+                        let Ok(stream) = link.forward().await else {
+                            return;
+                        };
+                        let _ = match tls {
+                            Some(tls) => {
+                                cancel_token
+                                    .cancel_query_raw(stream, tunnel_tls(&tls, link.remote_host()))
+                                    .await
+                            }
+                            None => cancel_token.cancel_query_raw(stream, NoTls).await,
+                        };
+                    }
                 }
             };
             let _ = tokio::time::timeout(CANCEL_TIMEOUT, cancel).await;
             drop(client);
+            drop(link);
         });
     }
 }

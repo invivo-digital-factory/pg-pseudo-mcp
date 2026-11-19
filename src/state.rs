@@ -15,6 +15,7 @@ use crate::tools::errors::{ErrorCategory, ToolError};
 pub struct AppConfig {
     pub dbeaver_home: Option<PathBuf>,
     pub data_dir: Option<PathBuf>,
+    pub ssh_known_hosts: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -22,15 +23,21 @@ impl AppConfig {
         Self::from_vars(
             std::env::var_os("PG_PSEUDO_DBEAVER_HOME"),
             std::env::var_os("PG_PSEUDO_DATA_DIR"),
+            std::env::var_os("PG_PSEUDO_SSH_KNOWN_HOSTS"),
         )
     }
 
-    fn from_vars(dbeaver_home: Option<OsString>, data_dir: Option<OsString>) -> Self {
+    fn from_vars(
+        dbeaver_home: Option<OsString>,
+        data_dir: Option<OsString>,
+        ssh_known_hosts: Option<OsString>,
+    ) -> Self {
         let absolute =
             |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
         Self {
             dbeaver_home: absolute(dbeaver_home),
             data_dir: absolute(data_dir),
+            ssh_known_hosts: absolute(ssh_known_hosts),
         }
     }
 }
@@ -82,7 +89,7 @@ impl AppState {
 
     pub async fn session(&self, connection: &str) -> Result<SessionGuard, ToolError> {
         let params = dbeaver::find_connection(&self.config, connection)?;
-        let options = connect_options(&params);
+        let options = connect_options(&self.config, &params);
         let slot = self.slot(connection).await;
         let mut cached = slot.lock_owned().await;
         let session = match cached.take() {
@@ -124,7 +131,7 @@ impl AppState {
     }
 }
 
-pub fn connect_options(params: &ConnectParams) -> ConnectOptions {
+pub fn connect_options(config: &AppConfig, params: &ConnectParams) -> ConnectOptions {
     ConnectOptions {
         host: params.host.clone(),
         port: params.port,
@@ -139,6 +146,30 @@ pub fn connect_options(params: &ConnectParams) -> ConnectOptions {
             dbeaver::SslMode::VerifyCa => pg::SslMode::VerifyCa,
             dbeaver::SslMode::VerifyFull => pg::SslMode::VerifyFull,
         },
+        tunnel: params.tunnel.as_ref().map(|tunnel| pg::Tunnel {
+            host: tunnel.host.clone(),
+            port: tunnel.port,
+            user: tunnel.user.clone(),
+            auth: match &tunnel.auth {
+                dbeaver::SshAuth::PublicKey {
+                    key_path,
+                    passphrase,
+                } => pg::TunnelAuth::PublicKey {
+                    key_path: key_path.clone(),
+                    passphrase: passphrase
+                        .as_ref()
+                        .map(|passphrase| passphrase.expose().to_string()),
+                },
+                dbeaver::SshAuth::Password(password) => {
+                    pg::TunnelAuth::Password(password.expose().to_string())
+                }
+                dbeaver::SshAuth::Agent => pg::TunnelAuth::Agent,
+            },
+            remote_host: tunnel.remote_host.clone(),
+            remote_port: tunnel.remote_port,
+            verify_host_key: tunnel.verify_host_key,
+            known_hosts: config.ssh_known_hosts.clone(),
+        }),
     }
 }
 
@@ -201,7 +232,7 @@ mod tests {
         AppState::with_pseudonymizer(
             AppConfig {
                 dbeaver_home: Some(root.to_path_buf()),
-                data_dir: None,
+                ..AppConfig::default()
             },
             Err("unused".into()),
         )
@@ -278,7 +309,10 @@ mod tests {
         );
         let state = state_for(root.path());
         let params = dbeaver::find_connection(&state.config, "app").expect("params");
-        state.cache_for_tests("app", Session::idle(connect_options(&params)));
+        state.cache_for_tests(
+            "app",
+            Session::idle(connect_options(&state.config, &params)),
+        );
         assert!(state.session("app").await.is_ok());
         write_workspace(
             root.path(),
@@ -298,10 +332,83 @@ mod tests {
 
     #[test]
     fn empty_or_relative_directories_fall_back_to_defaults() {
-        let config = AppConfig::from_vars(Some(OsString::new()), Some(OsString::from("relative")));
+        let config = AppConfig::from_vars(
+            Some(OsString::new()),
+            Some(OsString::from("relative")),
+            Some(OsString::from("known_hosts")),
+        );
         assert_eq!(config.dbeaver_home, None);
         assert_eq!(config.data_dir, None);
-        let config = AppConfig::from_vars(None, Some(OsString::from("/tmp/pg-pseudo")));
+        assert_eq!(config.ssh_known_hosts, None);
+        let config = AppConfig::from_vars(
+            None,
+            Some(OsString::from("/tmp/pg-pseudo")),
+            Some(OsString::from("/tmp/known_hosts")),
+        );
         assert_eq!(config.data_dir, Some(PathBuf::from("/tmp/pg-pseudo")));
+        assert_eq!(
+            config.ssh_known_hosts,
+            Some(PathBuf::from("/tmp/known_hosts"))
+        );
+    }
+
+    fn tunneled(auth: dbeaver::SshAuth) -> ConnectParams {
+        ConnectParams {
+            host: "db.internal".into(),
+            port: 5432,
+            database: "app".into(),
+            user: "reader".into(),
+            password: dbeaver::Secret::new("db-pass"),
+            sslmode: dbeaver::SslMode::Require,
+            tunnel: Some(dbeaver::TunnelParams {
+                host: "bastion.example".into(),
+                port: 2222,
+                user: "jump".into(),
+                auth,
+                remote_host: "db.internal".into(),
+                remote_port: 6432,
+                verify_host_key: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_dbeaver_ssh_tunnel_maps_to_a_pg_tunnel_with_the_configured_known_hosts() {
+        let config = AppConfig {
+            ssh_known_hosts: Some(PathBuf::from("/etc/pg-pseudo/known_hosts")),
+            ..AppConfig::default()
+        };
+        let options = connect_options(
+            &config,
+            &tunneled(dbeaver::SshAuth::PublicKey {
+                key_path: PathBuf::from("/keys/id_ed25519"),
+                passphrase: Some(dbeaver::Secret::new("phrase")),
+            }),
+        );
+        assert_eq!(
+            options.tunnel,
+            Some(pg::Tunnel {
+                host: "bastion.example".into(),
+                port: 2222,
+                user: "jump".into(),
+                auth: pg::TunnelAuth::PublicKey {
+                    key_path: PathBuf::from("/keys/id_ed25519"),
+                    passphrase: Some("phrase".into()),
+                },
+                remote_host: "db.internal".into(),
+                remote_port: 6432,
+                verify_host_key: false,
+                known_hosts: Some(PathBuf::from("/etc/pg-pseudo/known_hosts")),
+            })
+        );
+        let password = connect_options(
+            &AppConfig::default(),
+            &tunneled(dbeaver::SshAuth::Password(dbeaver::Secret::new("ssh-pass"))),
+        );
+        let tunnel = password.tunnel.expect("tunnel");
+        assert_eq!(tunnel.auth, pg::TunnelAuth::Password("ssh-pass".into()));
+        assert_eq!(tunnel.known_hosts, None);
+        let agent = connect_options(&AppConfig::default(), &tunneled(dbeaver::SshAuth::Agent));
+        assert_eq!(agent.tunnel.expect("tunnel").auth, pg::TunnelAuth::Agent);
     }
 }
