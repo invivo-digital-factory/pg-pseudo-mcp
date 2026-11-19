@@ -70,7 +70,7 @@ pg-pseudo-mcp protects against **accidental disclosure by a cooperative agent**.
 - **Same-account file access.** The agent runs as your user. With its own shell or file tools it can read DBeaver's credentials (DBeaver's encryption key is public), the pseudonym secret and the mapping, or connect with `psql`. Deny those paths, see below.
 - **Backups.** The mapping stores real values encrypted with a key derived from the secret, but both sit in the same directory; a backup (Time Machine, for example) that copies the directory copies everything needed to decrypt it.
 - **Detection misses.** Names absent from the built-in lists, inside long free text and without a civility marker, can pass through. Unusual identifiers without a checksum are not recognised.
-- **Computed timestamps.** Computed `date` values are shifted like birth dates, but computed timestamps are kept so that `date_trunc` and time-series analysis stay exact; a birth date explicitly cast to `timestamp` therefore passes in clear.
+- **Computed timestamps.** Computed `date` values are shifted like birth dates, but computed timestamps are kept so that `date_trunc` and time-series analysis stay exact; a birth date explicitly cast to `timestamp` therefore passes in clear. Intervals computed from birth dates (`age()`, date differences) are exact and reveal the real birth date.
 - **Unsupported connections.** SSH tunnels, proxies, non-native authentication and credentials protected by a DBeaver master password or secure storage are listed as unsupported or unavailable. Servers with certificates from a private CA are not supported yet.
 
 ### Claude Code deny rules

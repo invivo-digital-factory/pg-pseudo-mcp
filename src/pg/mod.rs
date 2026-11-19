@@ -11,4 +11,4 @@ mod tls;
 pub use error::{DbMessage, PgError};
 pub use options::{ConnectOptions, SslMode};
 pub use output::{Cell, ColumnMeta, ColumnSource, QueryOutput};
-pub use session::{Session, connect};
+pub use session::{CONNECT_DEADLINE, Session, connect, connect_within};

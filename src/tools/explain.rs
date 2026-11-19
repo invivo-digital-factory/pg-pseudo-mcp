@@ -24,6 +24,8 @@ pub struct ExplainArgs {
 #[derive(Debug, Serialize)]
 pub struct ExplainResponse {
     pub plan: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
     pub translated_literals: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<Warning>,
@@ -40,26 +42,47 @@ async fn run(state: &AppState, args: ExplainArgs) -> Result<ExplainResponse, Too
     let pseudonymizer = state.pseudonymizer()?;
     let guarded = guard::prepare(&args.sql, pseudonymizer.as_ref())?;
     let limits = QueryLimits::default();
-    let session = state.session(&args.connection).await?;
     let anonymizer = Anonymizer::new(&pseudonymizer, &guarded.injected);
     let output = {
-        let mut session = session.lock().await;
+        let mut session = state.session(&args.connection).await?;
         session
             .run_read_only(&guarded.explain_sql(), MAX_PLAN_LINES, limits.timeout_ms)
             .await
             .map_err(|error| database_error(&anonymizer, error, &limits))?
     };
-    let plan = output
+    let mut warnings = guarded.warnings;
+    let mut plan = Vec::new();
+    for cell in output
         .rows
         .into_iter()
-        .filter_map(|row| match row.into_iter().next() {
-            Some(Cell::Text(line)) => Some(anonymizer.free_text(&line)),
-            _ => None,
-        })
-        .collect();
+        .filter_map(|row| row.into_iter().next())
+    {
+        match cell {
+            Cell::Text(text) => plan.extend(text.lines().map(|line| anonymizer.free_text(line))),
+            Cell::Json(value) => {
+                let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                plan.extend(text.lines().map(|line| anonymizer.free_text(line)));
+            }
+            Cell::Null => {}
+            other => {
+                let shown = match other {
+                    Cell::Opaque { type_name, .. } => type_name,
+                    _ => "an unsupported type".to_string(),
+                };
+                warnings.push(Warning::new(
+                    "plan_format_unsupported",
+                    format!("the plan came back as {shown}, which is not shown; use FORMAT TEXT, JSON or YAML"),
+                ));
+                break;
+            }
+        }
+    }
+    let truncated = output.more_rows || plan.len() > MAX_PLAN_LINES;
+    plan.truncate(MAX_PLAN_LINES);
     Ok(ExplainResponse {
         plan,
+        truncated,
         translated_literals: guarded.translated_literals,
-        warnings: guarded.warnings,
+        warnings,
     })
 }

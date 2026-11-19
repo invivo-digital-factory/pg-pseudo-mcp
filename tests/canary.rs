@@ -27,8 +27,7 @@ fn sql(text: &str) -> QueryArgs {
     QueryArgs {
         connection: CONNECTION.to_string(),
         sql: text.to_string(),
-        max_rows: None,
-        timeout_ms: None,
+        ..QueryArgs::default()
     }
 }
 

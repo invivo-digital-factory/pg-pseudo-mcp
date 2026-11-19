@@ -17,6 +17,7 @@ use super::tls::verified_connector;
 const APPLICATION_NAME: &str = "pg-pseudo-mcp";
 const LOCK_TIMEOUT_MS: u64 = 2000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const CONNECT_DEADLINE: Duration = Duration::from_secs(12);
 const CLIENT_GRACE: Duration = Duration::from_secs(5);
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_STATEMENT_TIMEOUT_MS: u64 = i32::MAX as u64;
@@ -24,6 +25,7 @@ const UNDEFINED_PARAMETER: &str = "42P02";
 
 pub struct Session {
     options: ConnectOptions,
+    connect_deadline: Duration,
     live: Option<Live>,
     sources: SourceCache,
 }
@@ -36,15 +38,37 @@ struct Live {
 }
 
 pub async fn connect(options: &ConnectOptions) -> Result<Session, PgError> {
-    let live = open(options).await?;
+    connect_within(options, CONNECT_DEADLINE).await
+}
+
+pub async fn connect_within(
+    options: &ConnectOptions,
+    deadline: Duration,
+) -> Result<Session, PgError> {
+    let live = open(options, deadline).await?;
     Ok(Session {
         options: options.clone(),
+        connect_deadline: deadline,
         live: Some(live),
         sources: SourceCache::default(),
     })
 }
 
 impl Session {
+    pub fn options(&self) -> &ConnectOptions {
+        &self.options
+    }
+
+    #[cfg(test)]
+    pub(crate) fn idle(options: ConnectOptions) -> Self {
+        Self {
+            options,
+            connect_deadline: CONNECT_DEADLINE,
+            live: None,
+            sources: SourceCache::default(),
+        }
+    }
+
     pub async fn run_read_only(
         &mut self,
         sql: &str,
@@ -54,7 +78,7 @@ impl Session {
         let timeout_ms = timeout_ms.clamp(1, MAX_STATEMENT_TIMEOUT_MS);
         let live = match &mut self.live {
             Some(live) if !live.client.is_closed() => live,
-            slot => slot.insert(open(&self.options).await?),
+            slot => slot.insert(open(&self.options, self.connect_deadline).await?),
         };
         live.drain_notices();
         let deadline = Duration::from_millis(timeout_ms) + CLIENT_GRACE;
@@ -174,7 +198,16 @@ async fn run_statement(
     })
 }
 
-async fn open(options: &ConnectOptions) -> Result<Live, PgError> {
+async fn open(options: &ConnectOptions, deadline: Duration) -> Result<Live, PgError> {
+    match tokio::time::timeout(deadline, handshake(options)).await {
+        Ok(opened) => opened,
+        Err(_) => Err(PgError::Connect(format!(
+            "connection timed out after {deadline:?} without completing TLS or authentication"
+        ))),
+    }
+}
+
+async fn handshake(options: &ConnectOptions) -> Result<Live, PgError> {
     let mut config = Config::new();
     config
         .host(&options.host)

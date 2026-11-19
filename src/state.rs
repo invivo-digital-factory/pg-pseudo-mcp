@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMappedMutexGuard, OwnedMutexGuard};
 
 use crate::dbeaver::{self, ConnectParams};
 use crate::pg::{self, ConnectOptions, Session};
@@ -37,8 +38,13 @@ impl AppConfig {
 pub struct AppState {
     pub config: AppConfig,
     pseudonymizer: Result<Arc<Pseudonymizer>, String>,
-    sessions: Mutex<HashMap<String, Arc<Mutex<Session>>>>,
+    sessions: Mutex<HashMap<String, SessionSlot>>,
+    connect_deadline: Duration,
 }
+
+type SessionSlot = Arc<Mutex<Option<Session>>>;
+
+pub type SessionGuard = OwnedMappedMutexGuard<Option<Session>, Session>;
 
 impl AppState {
     pub fn new(config: AppConfig) -> Self {
@@ -59,6 +65,7 @@ impl AppState {
             config,
             pseudonymizer,
             sessions: Mutex::new(HashMap::new()),
+            connect_deadline: pg::CONNECT_DEADLINE,
         }
     }
 
@@ -73,26 +80,47 @@ impl AppState {
         })
     }
 
-    pub async fn session(&self, connection: &str) -> Result<Arc<Mutex<Session>>, ToolError> {
+    pub async fn session(&self, connection: &str) -> Result<SessionGuard, ToolError> {
         let params = dbeaver::find_connection(&self.config, connection)?;
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get(connection) {
-            return Ok(session.clone());
-        }
-        let session = pg::connect(&connect_options(&params))
+        let options = connect_options(&params);
+        let slot = self.slot(connection).await;
+        let mut cached = slot.lock_owned().await;
+        let session = match cached.take() {
+            Some(session) if session.options() == &options => session,
+            _ => pg::connect_within(&options, self.connect_deadline)
+                .await
+                .map_err(|error| {
+                    ToolError::new(
+                        ErrorCategory::ConnectionUnavailable,
+                        "connection_failed",
+                        format!("could not connect to {connection}: {error}"),
+                    )
+                    .with_hint("check that the database is reachable from this machine, then retry")
+                    .retryable()
+                })?,
+        };
+        Ok(OwnedMutexGuard::map(cached, |slot| slot.insert(session)))
+    }
+
+    async fn slot(&self, connection: &str) -> SessionSlot {
+        self.sessions
+            .lock()
             .await
-            .map_err(|error| {
-                ToolError::new(
-                    ErrorCategory::ConnectionUnavailable,
-                    "connection_failed",
-                    format!("could not connect to {connection}: {error}"),
-                )
-                .with_hint("check that the database is reachable from this machine, then retry")
-                .retryable()
-            })?;
-        let session = Arc::new(Mutex::new(session));
-        sessions.insert(connection.to_string(), session.clone());
-        Ok(session)
+            .entry(connection.to_string())
+            .or_default()
+            .clone()
+    }
+
+    #[cfg(test)]
+    fn cache_for_tests(&self, connection: &str, session: Session) {
+        let slot = self
+            .sessions
+            .try_lock()
+            .expect("idle state")
+            .entry(connection.to_string())
+            .or_default()
+            .clone();
+        *slot.try_lock().expect("idle slot") = Some(session);
     }
 }
 
@@ -116,7 +144,157 @@ pub fn connect_options(params: &ConnectParams) -> ConnectOptions {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    use serde_json::{Map, Value, json};
+    use tokio::net::TcpListener;
+
     use super::*;
+    use crate::dbeaver::credentials::encrypt_for_tests;
+
+    struct Endpoint {
+        name: &'static str,
+        port: u16,
+        password: &'static str,
+    }
+
+    fn write_workspace(root: &Path, endpoints: &[Endpoint]) {
+        let dir = root.join("workspace6").join("General").join(".dbeaver");
+        std::fs::create_dir_all(&dir).expect("workspace dir");
+        let mut connections = Map::new();
+        let mut credentials = Map::new();
+        for endpoint in endpoints {
+            let id = format!("postgres-jdbc-{}", endpoint.name);
+            connections.insert(
+                id.clone(),
+                json!({
+                    "provider": "postgresql",
+                    "driver": "postgres-jdbc",
+                    "name": endpoint.name,
+                    "save-password": true,
+                    "configuration": {
+                        "host": "127.0.0.1",
+                        "port": endpoint.port.to_string(),
+                        "database": "app",
+                        "type": "dev",
+                        "auth-model": "native",
+                        "provider-properties": { "sslmode": "disable" }
+                    }
+                }),
+            );
+            credentials.insert(
+                id,
+                json!({ "#connection": { "user": "reader", "password": endpoint.password } }),
+            );
+        }
+        let sources = json!({ "folders": {}, "connections": Value::Object(connections) });
+        std::fs::write(dir.join("data-sources.json"), sources.to_string()).expect("sources");
+        std::fs::write(
+            dir.join("credentials-config.json"),
+            encrypt_for_tests(&Value::Object(credentials).to_string(), [7u8; 16]),
+        )
+        .expect("credentials");
+    }
+
+    fn state_for(root: &Path) -> AppState {
+        AppState::with_pseudonymizer(
+            AppConfig {
+                dbeaver_home: Some(root.to_path_buf()),
+                data_dir: None,
+            },
+            Err("unused".into()),
+        )
+    }
+
+    async fn stalled_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        port
+    }
+
+    async fn refused_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        listener.local_addr().expect("address").port()
+    }
+
+    #[tokio::test]
+    async fn a_server_stalling_after_the_socket_opens_neither_hangs_nor_blocks_other_connections() {
+        let root = tempfile::tempdir().expect("dbeaver dir");
+        write_workspace(
+            root.path(),
+            &[
+                Endpoint {
+                    name: "stalled",
+                    port: stalled_port().await,
+                    password: "p",
+                },
+                Endpoint {
+                    name: "refused",
+                    port: refused_port().await,
+                    password: "p",
+                },
+            ],
+        );
+        let mut state = state_for(root.path());
+        state.connect_deadline = Duration::from_millis(500);
+        let state = Arc::new(state);
+        let started = Instant::now();
+        let stalled = tokio::spawn({
+            let state = state.clone();
+            async move { state.session("stalled").await.map(|_| ()) }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let other = tokio::time::timeout(Duration::from_secs(1), state.session("refused"))
+            .await
+            .expect("another connection is not blocked by the stalled one");
+        assert!(other.is_err());
+        let stalled = tokio::time::timeout(Duration::from_secs(3), stalled)
+            .await
+            .expect("the stalled connection gives up within its bound")
+            .expect("task");
+        let error = stalled.expect_err("stalled connection fails");
+        assert!(error.message.contains("timed out"), "{}", error.message);
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn a_changed_password_in_dbeaver_replaces_the_cached_session() {
+        let root = tempfile::tempdir().expect("dbeaver dir");
+        let port = refused_port().await;
+        write_workspace(
+            root.path(),
+            &[Endpoint {
+                name: "app",
+                port,
+                password: "old",
+            }],
+        );
+        let state = state_for(root.path());
+        let params = dbeaver::find_connection(&state.config, "app").expect("params");
+        state.cache_for_tests("app", Session::idle(connect_options(&params)));
+        assert!(state.session("app").await.is_ok());
+        write_workspace(
+            root.path(),
+            &[Endpoint {
+                name: "app",
+                port,
+                password: "new",
+            }],
+        );
+        let error = state
+            .session("app")
+            .await
+            .map(|_| ())
+            .expect_err("the stale session is not reused");
+        assert_eq!(error.code, "connection_failed");
+    }
 
     #[test]
     fn empty_or_relative_directories_fall_back_to_defaults() {

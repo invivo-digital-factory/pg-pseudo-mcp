@@ -10,8 +10,7 @@ async fn ask(harness: &Harness, sql: &str) -> (bool, String) {
         QueryArgs {
             connection: CONNECTION.to_string(),
             sql: sql.to_string(),
-            max_rows: None,
-            timeout_ms: None,
+            ..QueryArgs::default()
         },
     )
     .await;

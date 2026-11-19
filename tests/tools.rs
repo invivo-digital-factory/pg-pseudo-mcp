@@ -10,16 +10,20 @@ async fn run(harness: &Harness, sql: &str) -> (bool, String) {
 }
 
 async fn run_with(harness: &Harness, sql: &str, max_rows: Option<u64>) -> (bool, String) {
-    let result = query(
-        &harness.state,
+    run_args(
+        harness,
         QueryArgs {
             connection: CONNECTION.to_string(),
             sql: sql.to_string(),
             max_rows,
-            timeout_ms: None,
+            ..QueryArgs::default()
         },
     )
-    .await;
+    .await
+}
+
+async fn run_args(harness: &Harness, args: QueryArgs) -> (bool, String) {
+    let result = query(&harness.state, args).await;
     let text = text_of(&result);
     assert_no_canary(&text);
     (is_error(&result), text)
@@ -247,11 +251,151 @@ async fn an_unknown_connection_is_a_structured_error() {
         QueryArgs {
             connection: "nope".into(),
             sql: "SELECT 1".into(),
-            max_rows: None,
-            timeout_ms: None,
+            ..QueryArgs::default()
         },
     )
     .await;
     assert!(is_error(&result));
     assert!(text_of(&result).contains("unknown_connection"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_long_cell_is_read_in_contiguous_pseudonymized_slices() {
+    let harness = Harness::new();
+    let (_, single) = run(&harness, "SELECT body FROM notes WHERE id = 100").await;
+    let note = rows(&single)[0][0].as_str().unwrap().to_string();
+    let phone = note
+        .split_once(" au ")
+        .and_then(|(_, rest)| rest.split_once(','))
+        .map(|(phone, _)| phone.to_string())
+        .unwrap();
+    let sql = "SELECT string_agg(body, ' / ') AS notes FROM notes, generate_series(1, 20) WHERE notes.id = 100";
+    let mut whole = String::new();
+    let mut total = None;
+    let mut offset = None;
+    loop {
+        let (error, text) = run_args(
+            &harness,
+            QueryArgs {
+                connection: CONNECTION.to_string(),
+                sql: sql.to_string(),
+                cell_offset: offset,
+                ..QueryArgs::default()
+            },
+        )
+        .await;
+        assert!(!error, "{text}");
+        let cell = rows(&text)[0][0].as_str().unwrap().to_string();
+        let (kept, rest) = match cell.split_once("…[+") {
+            Some((kept, rest)) => (kept.to_string(), Some(rest.to_string())),
+            None => (cell, None),
+        };
+        if total.is_none() {
+            let remaining: usize = rest
+                .as_deref()
+                .and_then(|rest| rest.strip_suffix(" chars]"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            total = Some(kept.chars().count() + remaining);
+        }
+        whole.push_str(&kept);
+        let response: Value = serde_json::from_str(&text).unwrap();
+        let Some(cut) = response["truncated"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["by"] == "cell").cloned())
+        else {
+            break;
+        };
+        let hint = cut["hint"].as_str().unwrap();
+        assert!(!hint.contains("substr"), "{hint}");
+        let next = offset.unwrap_or(0) + cut["limit"].as_u64().unwrap();
+        assert!(hint.contains(&format!("cell_offset={next}")), "{hint}");
+        offset = Some(next);
+    }
+    assert!(offset.is_some(), "the aggregate must span several slices");
+    assert_no_canary(&whole);
+    assert_eq!(Some(whole.chars().count()), total, "{whole}");
+    assert!(
+        whole.starts_with(&note[..note.find(&phone).unwrap()]),
+        "{whole}"
+    );
+    assert_eq!(whole.matches(&phone).count(), 20, "{whole}");
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_same_column_name_twice_keeps_one_flag_per_column() {
+    let harness = Harness::new();
+    let (error, text) = run(
+        &harness,
+        "SELECT a.email, b.email, a.id FROM customers a JOIN customers b ON a.id = b.id ORDER BY a.id",
+    )
+    .await;
+    assert!(!error, "{text}");
+    let response: Value = serde_json::from_str(&text).unwrap();
+    let columns = response["columns"].as_array().unwrap();
+    for column in &columns[..2] {
+        assert_eq!(column["pseudonymized"]["kind"], "email", "{text}");
+        assert_eq!(column["pseudonymized"]["why"], "dictionary", "{text}");
+    }
+    assert!(columns[2].get("pseudonymized").is_none(), "{text}");
+    assert_eq!(response["pseudonymized"]["email"]["kind"], "email");
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_larger_byte_budget_can_be_requested_up_to_the_ceiling() {
+    let harness = Harness::new();
+    let sql = "SELECT id, array_fill(7, ARRAY[200]) AS pad FROM big_numbers ORDER BY id";
+    let (_, text) = run(&harness, sql).await;
+    let default: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(default["truncated"][0]["by"], "bytes", "{text}");
+    assert_eq!(default["truncated"][0]["limit"], 16384);
+    let (_, text) = run_args(
+        &harness,
+        QueryArgs {
+            connection: CONNECTION.to_string(),
+            sql: sql.to_string(),
+            max_rows: Some(500),
+            max_bytes: Some(1_000_000),
+            ..QueryArgs::default()
+        },
+    )
+    .await;
+    let response: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(response["truncated"][0]["limit"], 65536);
+    assert!(
+        response["row_count"].as_u64().unwrap() > default["row_count"].as_u64().unwrap(),
+        "{text}"
+    );
+    assert_eq!(response["warnings"][0]["code"], "max_bytes_clamped");
+}
+
+#[tokio::test]
+#[ignore]
+async fn explain_in_json_format_returns_a_plan() {
+    let harness = Harness::new();
+    let (_, first) = run(&harness, "SELECT email FROM customers WHERE id = 1").await;
+    let pseudonym = rows(&first)[0][0].as_str().unwrap().to_string();
+    for format in ["JSON", "YAML"] {
+        let result = explain(
+            &harness.state,
+            ExplainArgs {
+                connection: CONNECTION.to_string(),
+                sql: format!(
+                    "EXPLAIN (FORMAT {format}) SELECT * FROM customers WHERE email = '{pseudonym}'"
+                ),
+            },
+        )
+        .await;
+        let text = text_of(&result);
+        assert_no_canary(&text);
+        let response = body(&result);
+        let plan = response["plan"].as_array().unwrap();
+        assert!(plan.len() > 1, "{format}: {text}");
+        assert!(text.contains(&pseudonym), "{format}: {text}");
+        assert!(response.get("truncated").is_none(), "{format}: {text}");
+    }
 }

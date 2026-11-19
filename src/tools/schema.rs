@@ -202,8 +202,7 @@ struct Catalog<'a> {
 impl Catalog<'_> {
     async fn fetch(&self, sql: &str, max_rows: usize) -> Result<QueryOutput, ToolError> {
         let limits = QueryLimits::default();
-        let session = self.state.session(self.connection).await?;
-        let mut session = session.lock().await;
+        let mut session = self.state.session(self.connection).await?;
         session
             .run_read_only(sql, max_rows, limits.timeout_ms)
             .await

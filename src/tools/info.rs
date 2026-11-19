@@ -84,6 +84,7 @@ pub const KNOWN_LIMITS: &[&str] = &[
     "protection targets accidental disclosure by a cooperative agent",
     "character-by-character probing through SQL predicates is not prevented",
     "names absent from the built-in lists inside long free text may pass",
+    "intervals computed from birth dates (age(), date differences) are exact and reveal the real birth date",
 ];
 
 #[cfg(test)]

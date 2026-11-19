@@ -14,7 +14,7 @@ use crate::state::AppState;
 use crate::tools::errors::{ErrorCategory, ToolError};
 use crate::tools::result::{TruncatedBy, Truncation, Warning, json_result};
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct QueryArgs {
     #[schemars(description = "Connection name as returned by list_connections")]
     pub connection: String,
@@ -22,8 +22,16 @@ pub struct QueryArgs {
     pub sql: String,
     #[schemars(description = "Maximum rows returned (default 50, maximum 500)")]
     pub max_rows: Option<u64>,
+    #[schemars(
+        description = "Maximum size of the returned rows in bytes (default 16384, maximum 65536)"
+    )]
+    pub max_bytes: Option<u64>,
     #[schemars(description = "Statement timeout in milliseconds (default 10000, maximum 60000)")]
     pub timeout_ms: Option<u64>,
+    #[schemars(
+        description = "Characters to skip at the start of every text cell before the 500-character cap; repeat a query with the offset given in a cell truncation to read the rest of a long value"
+    )]
+    pub cell_offset: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -48,6 +56,8 @@ pub struct ColumnOut {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pseudonymized: Option<ColumnFlag>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,11 +79,12 @@ async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolErr
     let started = Instant::now();
     let pseudonymizer = state.pseudonymizer()?;
     let guarded = guard::prepare(&args.sql, pseudonymizer.as_ref())?;
-    let (limits, clamps) = QueryLimits::from_request(args.max_rows, args.timeout_ms);
-    let session = state.session(&args.connection).await?;
+    let (limits, clamps) =
+        QueryLimits::from_request(args.max_rows, args.max_bytes, args.timeout_ms);
+    let cell_offset = usize::try_from(args.cell_offset.unwrap_or(0)).unwrap_or(usize::MAX);
     let anonymizer = Anonymizer::new(&pseudonymizer, &guarded.injected);
     let output = {
-        let mut session = session.lock().await;
+        let mut session = state.session(&args.connection).await?;
         session
             .run_read_only(&guarded.sql, limits.max_rows, limits.timeout_ms)
             .await
@@ -89,17 +100,31 @@ async fn run(state: &AppState, args: QueryArgs) -> Result<QueryResponse, ToolErr
             ),
         )
     }));
+    if cell_offset > 0 {
+        warnings.push(Warning::new(
+            "cell_offset_applied",
+            format!("every text cell starts at character {cell_offset}; shorter values are empty"),
+        ));
+    }
+    let anonymized = anonymizer.rows(&output.columns, output.rows);
     let columns: Vec<ColumnOut> = output
         .columns
         .iter()
-        .map(|column| ColumnOut {
+        .zip(&anonymized.per_column)
+        .map(|(column, flag)| ColumnOut {
             name: column.name.clone(),
             type_name: column.type_name.clone(),
+            pseudonymized: flag.clone(),
         })
         .collect();
-    let anonymized = anonymizer.rows(&output.columns, output.rows);
     let mut truncated = Vec::new();
-    let rows = bound_rows(anonymized.rows, &output.columns, &limits, &mut truncated);
+    let rows = bound_rows(
+        anonymized.rows,
+        &output.columns,
+        &limits,
+        cell_offset,
+        &mut truncated,
+    );
     if output.more_rows && !truncated.iter().any(|item| item.by == TruncatedBy::Bytes) {
         truncated.push(Truncation {
             by: TruncatedBy::Rows,
@@ -179,6 +204,7 @@ fn bound_rows(
     rows: Vec<Vec<Value>>,
     columns: &[crate::pg::ColumnMeta],
     limits: &QueryLimits,
+    cell_offset: usize,
     truncated: &mut Vec<Truncation>,
 ) -> Vec<Vec<Value>> {
     let mut kept = Vec::with_capacity(rows.len());
@@ -186,7 +212,7 @@ fn bound_rows(
     let mut cut_column: Option<String> = None;
     for mut row in rows {
         for (index, value) in row.iter_mut().enumerate() {
-            if cut_cell(value, limits.max_cell_chars) && cut_column.is_none() {
+            if cut_cell(value, cell_offset, limits.max_cell_chars) && cut_column.is_none() {
                 cut_column = columns.get(index).map(|column| column.name.clone());
             }
         }
@@ -208,30 +234,81 @@ fn bound_rows(
             by: TruncatedBy::Cell,
             limit: limits.max_cell_chars as u64,
             column: Some(column),
-            hint: "long values are cut; select substr(column, start, length) to read a slice"
-                .into(),
+            hint: format!(
+                "long values are cut; repeat the same query with cell_offset={} to read the rest",
+                cell_offset.saturating_add(limits.max_cell_chars)
+            ),
         });
     }
     kept
 }
 
-fn cut_cell(value: &mut Value, max_chars: usize) -> bool {
+fn cut_cell(value: &mut Value, offset: usize, max_chars: usize) -> bool {
     match value {
         Value::String(text) => {
-            let length = text.chars().count();
-            if length <= max_chars {
-                return false;
-            }
-            let kept: String = text.chars().take(max_chars).collect();
-            *text = format!("{kept}…[+{} chars]", length - max_chars);
-            true
+            let remaining = text.chars().count().saturating_sub(offset);
+            let kept: String = text.chars().skip(offset).take(max_chars).collect();
+            *text = if remaining > max_chars {
+                format!("{kept}…[+{} chars]", remaining - max_chars)
+            } else {
+                kept
+            };
+            remaining > max_chars
         }
         Value::Array(items) => items
             .iter_mut()
-            .fold(false, |cut, item| cut_cell(item, max_chars) || cut),
+            .fold(false, |cut, item| cut_cell(item, offset, max_chars) || cut),
         Value::Object(entries) => entries
             .values_mut()
-            .fold(false, |cut, item| cut_cell(item, max_chars) || cut),
+            .fold(false, |cut, item| cut_cell(item, offset, max_chars) || cut),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn column(name: &str) -> crate::pg::ColumnMeta {
+        crate::pg::ColumnMeta {
+            name: name.into(),
+            type_name: "text".into(),
+            type_oid: 25,
+            source: None,
+        }
+    }
+
+    #[test]
+    fn an_offset_reads_the_next_slice_of_every_text_cell() {
+        let long: String = ('a'..='z').cycle().take(1200).collect();
+        let rows = vec![vec![json!(long), json!("short"), json!(7)]];
+        let columns = [column("body"), column("label"), column("id")];
+        let mut truncated = Vec::new();
+        let kept = bound_rows(rows, &columns, &QueryLimits::default(), 500, &mut truncated);
+        let expected: String = long.chars().skip(500).take(500).collect();
+        assert_eq!(kept[0][0], json!(format!("{expected}…[+200 chars]")));
+        assert_eq!(kept[0][1], json!(""));
+        assert_eq!(kept[0][2], json!(7));
+        assert_eq!(truncated.len(), 1);
+        assert_eq!(truncated[0].column.as_deref(), Some("body"));
+        assert!(truncated[0].hint.contains("cell_offset=1000"));
+        assert!(!truncated[0].hint.contains("substr"));
+    }
+
+    #[test]
+    fn the_last_slice_is_not_reported_as_cut() {
+        let long: String = "x".repeat(1200);
+        let mut truncated = Vec::new();
+        let kept = bound_rows(
+            vec![vec![json!(long)]],
+            &[column("body")],
+            &QueryLimits::default(),
+            1000,
+            &mut truncated,
+        );
+        assert_eq!(kept[0][0], json!("x".repeat(200)));
+        assert!(truncated.is_empty());
     }
 }
