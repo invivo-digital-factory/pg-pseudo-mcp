@@ -55,11 +55,15 @@ pub const REVERSIBLE_KINDS: &[&str] = &[
     "siren",
     "siret",
     "nir",
+    "card_number",
+    "ip_address",
     "person_name",
+    "last_name",
 ];
 
 pub const NON_REVERSIBLE_KINDS: &[&str] = &[
     "first_name",
+    "address",
     "city",
     "postal_code",
     "civility",
@@ -92,5 +96,19 @@ mod tests {
         assert_eq!(info.defaults.max_rows, limits::DEFAULT_MAX_ROWS);
         assert_eq!(info.maxima.max_rows, limits::MAX_ROWS_CEILING);
         assert_eq!(info.maxima.max_bytes, limits::MAX_BYTES_CEILING);
+    }
+
+    #[test]
+    fn advertised_kinds_match_their_reversibility() {
+        use crate::kind::Kind;
+        let mut advertised = 0;
+        for (names, reversible) in [(REVERSIBLE_KINDS, true), (NON_REVERSIBLE_KINDS, false)] {
+            for name in names {
+                let kind = Kind::parse(name).expect("advertised kind exists");
+                assert_eq!(kind.is_reversible(), reversible, "{name}");
+                advertised += 1;
+            }
+        }
+        assert_eq!(advertised, Kind::ALL.len());
     }
 }
