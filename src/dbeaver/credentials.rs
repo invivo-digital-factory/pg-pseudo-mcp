@@ -130,6 +130,17 @@ pub fn encrypt_for_tests(json: &str, iv: [u8; IV_LEN]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    const OPENSSL_VECTOR: &str = "000102030405060708090a0b0c0d0e0f01206c1fba1deb1880f6f3bc45b67a80918cd4e2fddadd690911b53efe445e9654443db46135c89f6509e4a6df3ee1fc41919692ccf62c9b933e206891ab01a3c41644f9b5111bf30355f7fc1d36d46d";
+
+    #[test]
+    fn decrypts_a_ciphertext_produced_by_openssl() {
+        let bytes = hex::decode(OPENSSL_VECTOR).unwrap();
+        let store = CredentialStore::from_encrypted(&bytes).unwrap();
+        let saved = store.get("conn-x").unwrap();
+        assert_eq!(saved.user.as_deref(), Some("vector_user"));
+        assert_eq!(saved.password.as_ref().unwrap().expose(), "vector_pass");
+    }
+
     #[test]
     fn round_trips_connection_credentials() {
         let json = r##"{"c1":{"#connection":{"user":"u","password":"p"},"network/ssh_tunnel":{"user":"x"}},"c2":{}}"##;
