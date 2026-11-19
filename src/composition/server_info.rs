@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn advertised_kinds_match_their_reversibility() {
-        use crate::kind::Kind;
+        use crate::contexts::anonymization::domain::types::Kind;
         let mut advertised = 0;
         for (names, reversible) in [(REVERSIBLE_KINDS, true), (NON_REVERSIBLE_KINDS, false)] {
             for name in names {

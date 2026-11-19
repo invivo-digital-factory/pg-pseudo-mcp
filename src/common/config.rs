@@ -31,3 +31,33 @@ impl AppConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn empty_or_relative_directories_fall_back_to_defaults() {
+        let config = AppConfig::from_vars(
+            Some(OsString::new()),
+            Some(OsString::from("relative")),
+            Some(OsString::from("known_hosts")),
+        );
+        assert_eq!(config.dbeaver_home, None);
+        assert_eq!(config.data_dir, None);
+        assert_eq!(config.ssh_known_hosts, None);
+        let config = AppConfig::from_vars(
+            None,
+            Some(OsString::from("/tmp/pg-pseudo")),
+            Some(OsString::from("/tmp/known_hosts")),
+        );
+        assert_eq!(config.data_dir, Some(PathBuf::from("/tmp/pg-pseudo")));
+        assert_eq!(
+            config.ssh_known_hosts,
+            Some(PathBuf::from("/tmp/known_hosts"))
+        );
+    }
+}

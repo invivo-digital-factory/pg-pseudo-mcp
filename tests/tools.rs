@@ -1,8 +1,9 @@
 mod common;
 
-use common::{CONNECTION, Harness, assert_no_canary, body, is_error, text_of};
-use pg_pseudo_mcp::tools::explain::{ExplainArgs, explain};
-use pg_pseudo_mcp::tools::query::{QueryArgs, query};
+use common::{
+    CONNECTION, ExplainArgs, Harness, QueryArgs, assert_no_canary, body, explain, is_error, query,
+    text_of,
+};
 use serde_json::{Value, json};
 
 async fn run(harness: &Harness, sql: &str) -> (bool, String) {

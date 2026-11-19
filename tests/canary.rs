@@ -1,11 +1,9 @@
 mod common;
 
-use common::{CONNECTION, Harness, assert_no_canary, body, is_error, text_of};
-use pg_pseudo_mcp::tools::connections::list_connections;
-use pg_pseudo_mcp::tools::explain::{ExplainArgs, explain};
-use pg_pseudo_mcp::tools::query::{QueryArgs, query};
-use pg_pseudo_mcp::tools::schema::{
-    DescribeTableArgs, ListTablesArgs, SearchSchemaArgs, describe_table, list_tables, search_schema,
+use common::{
+    CONNECTION, DescribeTableArgs, ExplainArgs, Harness, ListTablesArgs, QueryArgs,
+    SearchSchemaArgs, assert_no_canary, body, describe_table, explain, is_error, list_connections,
+    list_tables, query, search_schema, text_of,
 };
 use rmcp::model::CallToolResult;
 use serde_json::Value;
@@ -40,7 +38,7 @@ async fn an_agent_investigation_never_receives_a_seeded_value() {
         responses: Vec::new(),
     };
 
-    let connections = transcript.record(&list_connections(&state.config).await);
+    let connections = transcript.record(&list_connections(state).await);
     assert_eq!(connections["connections"][0]["status"], "available");
 
     transcript.record(

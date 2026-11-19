@@ -1,8 +1,8 @@
 mod common;
 
-use common::{CONNECTION, Harness, assert_no_canary, body, is_error, text_of};
-use pg_pseudo_mcp::tools::schema::{
-    DescribeTableArgs, ListTablesArgs, SearchSchemaArgs, describe_table, list_tables, search_schema,
+use common::{
+    CONNECTION, DescribeTableArgs, Harness, ListTablesArgs, SearchSchemaArgs, assert_no_canary,
+    body, describe_table, is_error, list_tables, search_schema, text_of,
 };
 use rmcp::model::CallToolResult;
 use serde_json::Value;

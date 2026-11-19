@@ -5,11 +5,19 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
+use std::process::ExitCode;
 use std::sync::Arc;
 
-use crate::contexts::querying::presentation::json_result;
-use crate::state::{AppConfig, AppState};
-use crate::tools::{connections, explain, info, query, schema};
+use rmcp::{ServiceExt, transport::stdio};
+
+use super::contexts::Contexts;
+use super::server_info::server_info;
+use crate::common::AppConfig;
+use crate::contexts::connections::presentation::list_connections;
+use crate::contexts::querying::presentation::{
+    DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs, describe_table,
+    explain, json_result, list_tables, query, search_schema,
+};
 
 pub const INSTRUCTIONS: &str = "\
 pg-pseudo-mcp gives read-only access to the PostgreSQL databases configured in the developer's DBeaver.
@@ -26,7 +34,7 @@ server_info returns the live limits and known limitations.";
 
 #[derive(Clone)]
 pub struct PgPseudoServer {
-    state: Arc<AppState>,
+    contexts: Arc<Contexts>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
@@ -34,12 +42,12 @@ pub struct PgPseudoServer {
 #[tool_router]
 impl PgPseudoServer {
     pub fn new(config: AppConfig) -> Self {
-        Self::with_state(Arc::new(AppState::new(config)))
+        Self::with_contexts(Arc::new(Contexts::new(&config)))
     }
 
-    pub fn with_state(state: Arc<AppState>) -> Self {
+    pub fn with_contexts(contexts: Arc<Contexts>) -> Self {
         Self {
-            state,
+            contexts,
             tool_router: Self::tool_router(),
         }
     }
@@ -49,7 +57,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_connections(&self) -> CallToolResult {
-        connections::list_connections(&self.state.config).await
+        list_connections(&self.contexts.connections.list_connections).await
     }
 
     #[tool(
@@ -58,20 +66,17 @@ impl PgPseudoServer {
     )]
     async fn search_schema(
         &self,
-        Parameters(args): Parameters<schema::SearchSchemaArgs>,
+        Parameters(args): Parameters<SearchSchemaArgs>,
     ) -> CallToolResult {
-        schema::search_schema(&self.state, args).await
+        search_schema(&self.contexts.querying.search_schema, args).await
     }
 
     #[tool(
         description = "List tables and views of a connection, one compact line each with kind, estimated rows and column count. Paginated with limit.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    async fn list_tables(
-        &self,
-        Parameters(args): Parameters<schema::ListTablesArgs>,
-    ) -> CallToolResult {
-        schema::list_tables(&self.state, args).await
+    async fn list_tables(&self, Parameters(args): Parameters<ListTablesArgs>) -> CallToolResult {
+        list_tables(&self.contexts.querying.list_tables, args).await
     }
 
     #[tool(
@@ -80,25 +85,25 @@ impl PgPseudoServer {
     )]
     async fn describe_table(
         &self,
-        Parameters(args): Parameters<schema::DescribeTableArgs>,
+        Parameters(args): Parameters<DescribeTableArgs>,
     ) -> CallToolResult {
-        schema::describe_table(&self.state, args).await
+        describe_table(&self.contexts.querying.describe_table, args).await
     }
 
     #[tool(
         description = "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    async fn query(&self, Parameters(args): Parameters<query::QueryArgs>) -> CallToolResult {
-        query::query(&self.state, args).await
+    async fn query(&self, Parameters(args): Parameters<QueryArgs>) -> CallToolResult {
+        query(&self.contexts.querying.run_query, args).await
     }
 
     #[tool(
         description = "Show the execution plan of one read-only SQL statement (EXPLAIN without ANALYZE, FORMAT TEXT, JSON or YAML). Literals in the plan are pseudonymized.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    async fn explain(&self, Parameters(args): Parameters<explain::ExplainArgs>) -> CallToolResult {
-        explain::explain(&self.state, args).await
+    async fn explain(&self, Parameters(args): Parameters<ExplainArgs>) -> CallToolResult {
+        explain(&self.contexts.querying.explain_query, args).await
     }
 
     #[tool(
@@ -106,7 +111,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn server_info(&self) -> CallToolResult {
-        json_result(&info::server_info())
+        json_result(&server_info())
     }
 }
 
@@ -116,5 +121,23 @@ impl ServerHandler for PgPseudoServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
             .with_instructions(INSTRUCTIONS)
+    }
+}
+
+pub async fn serve() -> ExitCode {
+    let server = PgPseudoServer::new(AppConfig::from_env());
+    let running = match server.serve(stdio()).await {
+        Ok(running) => running,
+        Err(error) => {
+            tracing::error!(%error, "failed to start the MCP server");
+            return ExitCode::FAILURE;
+        }
+    };
+    match running.waiting().await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(%error, "MCP server stopped with an error");
+            ExitCode::FAILURE
+        }
     }
 }

@@ -1,9 +1,7 @@
 use std::process::ExitCode;
 
-use pg_pseudo_mcp::contexts::anonymization::injector::mapping_purge_handler;
-use pg_pseudo_mcp::state::AppConfig;
-use pg_pseudo_mcp::tools::server::PgPseudoServer;
-use rmcp::{ServiceExt, transport::stdio};
+use pg_pseudo_mcp::composition::mapping_purge::mapping_purge;
+use pg_pseudo_mcp::composition::server::serve;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -31,34 +29,6 @@ async fn main() -> ExitCode {
         _ => {
             eprintln!("usage: pg-pseudo-mcp [serve | mapping purge [--yes] | --version]");
             ExitCode::from(2)
-        }
-    }
-}
-
-async fn serve() -> ExitCode {
-    let server = PgPseudoServer::new(AppConfig::from_env());
-    let running = match server.serve(stdio()).await {
-        Ok(running) => running,
-        Err(error) => {
-            tracing::error!(%error, "failed to start the MCP server");
-            return ExitCode::FAILURE;
-        }
-    };
-    match running.waiting().await {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(error) => {
-            tracing::error!(%error, "MCP server stopped with an error");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn mapping_purge(confirmed: bool) -> ExitCode {
-    match mapping_purge_handler(&AppConfig::from_env()) {
-        Ok(handler) => handler.run(confirmed),
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
         }
     }
 }
