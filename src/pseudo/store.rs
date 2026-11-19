@@ -1,14 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, TransactionBehavior, params};
 
 use super::PseudoError;
 use super::secret::{create_private_file, restrict_permissions};
 use crate::kind::Kind;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
+const BUSY_RETRY_PAUSE: Duration = Duration::from_millis(10);
 const KEY_CHECK: &str = "key_check";
 pub(crate) const CURRENT_KEY_ID: i64 = 1;
 
@@ -44,17 +45,21 @@ impl Store {
         create_private_file(path)?;
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(BUSY_TIMEOUT)?;
-        let mode: String =
-            connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
+        let started = Instant::now();
+        let mode: String = retry_busy(started, || {
+            connection.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))
+        })?;
         if !mode.eq_ignore_ascii_case("wal") {
             return Err(PseudoError::WalUnavailable {
                 store: path.to_path_buf(),
                 mode,
             });
         }
-        connection.pragma_update(None, "synchronous", "NORMAL")?;
-        connection.execute_batch(SCHEMA)?;
-        verify_key(&mut connection, path, key_check)?;
+        retry_busy(started, || {
+            connection.pragma_update(None, "synchronous", "NORMAL")
+        })?;
+        retry_busy(started, || create_schema(&mut connection))?;
+        verify_key(&connection, started, path, key_check)?;
         for companion in companion_files(path) {
             if companion.exists() {
                 restrict_permissions(&companion)?;
@@ -132,35 +137,56 @@ impl Store {
     }
 }
 
+fn create_schema(connection: &mut Connection) -> rusqlite::Result<()> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(SCHEMA)?;
+    transaction.commit()
+}
+
 fn verify_key(
-    connection: &mut Connection,
+    connection: &Connection,
+    started: Instant,
     path: &Path,
     key_check: &[u8; 32],
 ) -> Result<(), PseudoError> {
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let stored: Option<Vec<u8>> = transaction
-        .query_row(
+    let stored: Vec<u8> = retry_busy(started, || {
+        connection.execute(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES (?1, ?2)",
+            params![KEY_CHECK, key_check.as_slice()],
+        )?;
+        connection.query_row(
             "SELECT value FROM meta WHERE key = ?1",
             params![KEY_CHECK],
             |row| row.get(0),
         )
-        .optional()?;
-    match stored {
-        Some(stored) if stored.as_slice() != key_check.as_slice() => {
-            return Err(PseudoError::SecretMismatch {
-                store: path.to_path_buf(),
-            });
-        }
-        Some(_) => {}
-        None => {
-            transaction.execute(
-                "INSERT INTO meta (key, value) VALUES (?1, ?2)",
-                params![KEY_CHECK, key_check.as_slice()],
-            )?;
+    })?;
+    if stored.as_slice() != key_check.as_slice() {
+        return Err(PseudoError::SecretMismatch {
+            store: path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+fn retry_busy<T>(
+    started: Instant,
+    mut step: impl FnMut() -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    loop {
+        match step() {
+            Err(error) if is_busy(&error) && started.elapsed() < BUSY_TIMEOUT => {
+                std::thread::sleep(BUSY_RETRY_PAUSE);
+            }
+            outcome => return outcome,
         }
     }
-    transaction.commit()?;
-    Ok(())
+}
+
+fn is_busy(error: &rusqlite::Error) -> bool {
+    matches!(
+        error.sqlite_error_code(),
+        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+    )
 }
 
 pub(crate) fn companion_files(path: &Path) -> [PathBuf; 2] {
