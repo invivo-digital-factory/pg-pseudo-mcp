@@ -1,6 +1,8 @@
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{Expr, ObjectName, Query, Select, SetExpr, Statement, Visit, Visitor};
+use sqlparser::ast::{
+    Expr, ObjectName, Query, Select, SetExpr, Statement, UtilityOption, Visit, Visitor,
+};
 
 use crate::tools::errors::{ErrorCategory, ToolError};
 
@@ -46,6 +48,19 @@ const DENIED_FUNCTIONS: &[&str] = &[
     "nextval",
     "setval",
     "pg_notify",
+    "current_setting",
+    "pg_show_all_settings",
+    "pg_show_all_file_settings",
+    "pg_hba_file_rules",
+    "pg_ident_file_mappings",
+];
+
+const DENIED_INFORMATION_SCHEMA: &[&str] = &[
+    "user_mapping_options",
+    "user_mappings",
+    "foreign_server_options",
+    "foreign_data_wrapper_options",
+    "foreign_table_options",
 ];
 
 const ALLOWED_CATALOG_RELATIONS: &[&str] = &[
@@ -69,9 +84,12 @@ pub fn validate(statement: &Statement) -> Result<(), ToolError> {
     match statement {
         Statement::Query(_) => {}
         Statement::Explain {
-            analyze, statement, ..
+            analyze,
+            statement,
+            options,
+            ..
         } => {
-            if *analyze {
+            if *analyze || options.as_deref().is_some_and(requests_analyze) {
                 return Err(refused(
                     "explain_analyze",
                     "EXPLAIN ANALYZE executes the statement and is not allowed",
@@ -107,6 +125,9 @@ impl Visitor for Checker {
                 "locking_clause",
                 "row locking clauses (FOR UPDATE, FOR SHARE) are not allowed",
             ));
+        }
+        if let Some(error) = check_table_shorthand(&query.body) {
+            return ControlFlow::Break(error);
         }
         ControlFlow::Continue(())
     }
@@ -151,6 +172,37 @@ fn contains_write(body: &SetExpr) -> bool {
     }
 }
 
+fn check_table_shorthand(body: &SetExpr) -> Option<ToolError> {
+    match body {
+        SetExpr::Table(table) => {
+            let name = table.table_name.as_ref()?.value.to_lowercase();
+            let schema = table
+                .schema_name
+                .as_ref()
+                .map(|schema| schema.value.to_lowercase());
+            check_function(&name).or_else(|| check_relation(schema.as_deref(), &name))
+        }
+        SetExpr::SetOperation { left, right, .. } => {
+            check_table_shorthand(left).or_else(|| check_table_shorthand(right))
+        }
+        _ => None,
+    }
+}
+
+fn requests_analyze(options: &[UtilityOption]) -> bool {
+    options.iter().any(|option| {
+        option.name.value.eq_ignore_ascii_case("analyze")
+            && !matches!(
+                &option.arg,
+                Some(Expr::Value(value)) if matches!(value.value, sqlparser::ast::Value::Boolean(false))
+            )
+            && !matches!(
+                &option.arg,
+                Some(Expr::Identifier(ident)) if ident.value.eq_ignore_ascii_case("false") || ident.value.eq_ignore_ascii_case("off")
+            )
+    })
+}
+
 fn split_name(name: &ObjectName) -> (Option<String>, String) {
     let parts: Vec<String> = name
         .0
@@ -182,12 +234,13 @@ fn check_function(name: &str) -> Option<ToolError> {
 }
 
 fn check_relation(schema: Option<&str>, name: &str) -> Option<ToolError> {
-    let catalog = match schema {
-        Some("pg_catalog") => true,
+    let refused_relation = match schema {
+        Some("pg_catalog") => !ALLOWED_CATALOG_RELATIONS.contains(&name),
+        Some("information_schema") => DENIED_INFORMATION_SCHEMA.contains(&name),
         Some(_) => false,
-        None => name.starts_with("pg_"),
+        None => name.starts_with("pg_") && !ALLOWED_CATALOG_RELATIONS.contains(&name),
     };
-    (catalog && !ALLOWED_CATALOG_RELATIONS.contains(&name)).then(|| {
+    refused_relation.then(|| {
         refused(
             "relation_not_allowed",
             format!("catalog relation {name} can expose real values or server secrets"),

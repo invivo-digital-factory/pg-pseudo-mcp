@@ -1,6 +1,8 @@
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{Statement, Value, ValueWithSpan, VisitMut, VisitorMut};
+use sqlparser::ast::{
+    BinaryOperator, Expr, InTarget, Statement, Value, ValueWithSpan, VisitMut, VisitorMut,
+};
 
 use crate::guard::PseudonymLookup;
 use crate::tools::result::Warning;
@@ -32,30 +34,50 @@ struct Rewriter<'a> {
 impl VisitorMut for Rewriter<'_> {
     type Break = ();
 
+    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<()> {
+        match expr {
+            Expr::BinaryOp { left, op, right } if is_comparison(op) => {
+                self.translate_operand(left);
+                self.translate_operand(right);
+            }
+            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
+                self.translate_operand(left);
+                self.translate_operand(right);
+            }
+            Expr::In {
+                target: InTarget::List(list),
+                ..
+            } => {
+                for item in list {
+                    self.translate_operand(item);
+                }
+            }
+            Expr::Between { low, high, .. } => {
+                self.translate_operand(low);
+                self.translate_operand(high);
+            }
+            Expr::Like { pattern, .. }
+            | Expr::ILike { pattern, .. }
+            | Expr::SimilarTo { pattern, .. } => self.translate_pattern(pattern),
+            Expr::AnyOp { right, .. } | Expr::AllOp { right, .. } => self.translate_array(right),
+            _ => {}
+        }
+        ControlFlow::Continue(())
+    }
+
     fn pre_visit_value(&mut self, value: &mut ValueWithSpan) -> ControlFlow<()> {
         let Some(text) = literal_text(&value.value) else {
             return ControlFlow::Continue(());
         };
-        let numeric = matches!(value.value, Value::Number(..));
-        if let Some((_, real)) = self.lookup.reverse(&text) {
-            value.value = if numeric && real.chars().all(|c| c.is_ascii_digit()) {
-                Value::Number(real.clone(), false)
-            } else {
-                Value::SingleQuotedString(real.clone())
-            };
-            self.injected.push((real, text));
-            return ControlFlow::Continue(());
-        }
-        if let Some((prefix, core, suffix)) = like_core(&text)
-            && let Some((_, real)) = self.lookup.reverse(core)
-        {
-            value.value =
-                Value::SingleQuotedString(format!("{prefix}{}{suffix}", escape_like(&real)));
-            self.injected.push((real, core.to_string()));
-            return ControlFlow::Continue(());
-        }
         let candidate = like_core(&text).map_or(text.as_str(), |(_, core, _)| core);
-        if self.lookup.looks_like_pseudonym(candidate).is_some() {
+        if self.lookup.reverse(candidate).is_some() {
+            self.warnings.push(Warning::new(
+                "pseudonym_not_translated",
+                format!(
+                    "'{candidate}' is a pseudonym used outside a comparison; it is translated only when compared with a column (=, <>, IN, ANY, LIKE, BETWEEN)"
+                ),
+            ));
+        } else if self.lookup.looks_like_pseudonym(candidate).is_some() {
             self.warnings.push(Warning::new(
                 "unresolved_pseudonym",
                 format!(
@@ -65,6 +87,75 @@ impl VisitorMut for Rewriter<'_> {
         }
         ControlFlow::Continue(())
     }
+}
+
+impl Rewriter<'_> {
+    fn translate_operand(&mut self, expr: &mut Expr) {
+        let Some(value) = literal_slot(expr) else {
+            return;
+        };
+        let Some(text) = literal_text(&value.value) else {
+            return;
+        };
+        let Some((_, real)) = self.lookup.reverse(&text) else {
+            return;
+        };
+        let numeric = matches!(value.value, Value::Number(..));
+        value.value = if numeric && real.chars().all(|c| c.is_ascii_digit()) {
+            Value::Number(real.clone(), false)
+        } else {
+            Value::SingleQuotedString(real.clone())
+        };
+        self.injected.push((real, text));
+    }
+
+    fn translate_pattern(&mut self, expr: &mut Expr) {
+        let Some(value) = literal_slot(expr) else {
+            return;
+        };
+        let Some(text) = literal_text(&value.value) else {
+            return;
+        };
+        let (prefix, core, suffix) = like_core(&text).unwrap_or(("", text.as_str(), ""));
+        let Some((_, real)) = self.lookup.reverse(core) else {
+            return;
+        };
+        let replacement = format!("{prefix}{}{suffix}", escape_like(&real));
+        self.injected.push((real, core.to_string()));
+        value.value = Value::SingleQuotedString(replacement);
+    }
+
+    fn translate_array(&mut self, expr: &mut Expr) {
+        match expr {
+            Expr::Array(array) => {
+                for element in &mut array.elem {
+                    self.translate_operand(element);
+                }
+            }
+            Expr::Nested(inner) | Expr::Cast { expr: inner, .. } => self.translate_array(inner),
+            other => self.translate_operand(other),
+        }
+    }
+}
+
+fn literal_slot(expr: &mut Expr) -> Option<&mut ValueWithSpan> {
+    match expr {
+        Expr::Value(value) => Some(value),
+        Expr::Nested(inner) | Expr::Cast { expr: inner, .. } => literal_slot(inner),
+        _ => None,
+    }
+}
+
+fn is_comparison(op: &BinaryOperator) -> bool {
+    matches!(
+        op,
+        BinaryOperator::Eq
+            | BinaryOperator::NotEq
+            | BinaryOperator::Lt
+            | BinaryOperator::LtEq
+            | BinaryOperator::Gt
+            | BinaryOperator::GtEq
+    )
 }
 
 fn literal_text(value: &Value) -> Option<String> {

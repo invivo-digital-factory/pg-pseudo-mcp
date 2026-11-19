@@ -263,6 +263,99 @@ fn an_unknown_pseudonym_shaped_literal_is_left_and_warned() {
 }
 
 #[test]
+fn the_table_shorthand_cannot_reach_a_refused_catalog() {
+    for sql in [
+        "TABLE pg_stats",
+        "TABLE pg_catalog.pg_authid",
+        "SELECT 1 UNION TABLE pg_stats",
+    ] {
+        let code = refusal(sql);
+        assert!(
+            matches!(code.as_str(), "relation_not_allowed" | "parse_error"),
+            "{sql}: {code}"
+        );
+    }
+}
+
+#[test]
+fn explain_with_the_analyze_option_is_refused() {
+    assert_eq!(
+        refusal("EXPLAIN (ANALYZE) SELECT * FROM orders"),
+        "explain_analyze"
+    );
+    assert_eq!(
+        refusal("EXPLAIN (FORMAT TEXT, ANALYZE true) SELECT * FROM orders"),
+        "explain_analyze"
+    );
+    assert!(
+        prepare(
+            "EXPLAIN (ANALYZE false) SELECT * FROM orders",
+            &FakeStore::default()
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn settings_and_foreign_credentials_are_refused() {
+    assert_eq!(
+        refusal("SELECT * FROM information_schema.user_mapping_options"),
+        "relation_not_allowed"
+    );
+    assert_eq!(
+        refusal("SELECT current_setting('my.secret')"),
+        "function_not_allowed"
+    );
+}
+
+#[test]
+fn a_pseudonym_outside_a_comparison_is_not_translated() {
+    let store = FakeStore::default().with(
+        Kind::Email,
+        "claire.martin@example.net",
+        "ilona.kervadec@canary-mail.fr",
+    );
+    for sql in [
+        "SELECT 'claire.martin@example.net' AS x",
+        "SELECT substr('claire.martin@example.net', 1, 6)",
+        "SELECT md5('claire.martin@example.net') FROM customers",
+    ] {
+        let guarded = prepare(sql, &store).unwrap();
+        assert_eq!(guarded.translated_literals, 0, "{sql}");
+        assert!(!guarded.sql.contains("ilona"), "{sql}: {}", guarded.sql);
+        assert_eq!(
+            guarded.warnings[0].code, "pseudonym_not_translated",
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn pseudonyms_in_comparisons_lists_and_casts_are_translated() {
+    let store = FakeStore::default()
+        .with(
+            Kind::Email,
+            "claire.martin@example.net",
+            "ilona.kervadec@canary-mail.fr",
+        )
+        .with(
+            Kind::Email,
+            "paul.rivet@example.org",
+            "odilon.thaumassin@canary-mail.fr",
+        );
+    for sql in [
+        "SELECT id FROM customers WHERE email IN ('claire.martin@example.net', 'paul.rivet@example.org')",
+        "SELECT id FROM customers WHERE email = ANY(ARRAY['claire.martin@example.net', 'paul.rivet@example.org'])",
+        "SELECT id FROM customers WHERE 'claire.martin@example.net'::text = email OR email = 'paul.rivet@example.org'",
+        "SELECT CASE WHEN email = 'claire.martin@example.net' THEN 1 END, 'x' FROM customers WHERE email <> 'paul.rivet@example.org'",
+    ] {
+        let guarded = prepare(sql, &store).unwrap();
+        assert_eq!(guarded.translated_literals, 2, "{sql}: {}", guarded.sql);
+        assert!(!guarded.sql.contains("example."), "{sql}: {}", guarded.sql);
+    }
+}
+
+#[test]
 fn the_explain_form_wraps_a_validated_query() {
     let guarded = prepare("SELECT * FROM orders", &FakeStore::default()).unwrap();
     assert!(guarded.explain_sql().starts_with("EXPLAIN"));
