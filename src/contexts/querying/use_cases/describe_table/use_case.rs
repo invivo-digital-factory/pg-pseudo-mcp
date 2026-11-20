@@ -155,7 +155,9 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
             DatabaseFailure::Db(message) => {
                 ScrubbedText::Message(ports.anonymizer.message(message, &[]))
             }
-            DatabaseFailure::Connect(text) | DatabaseFailure::Decode(text) => {
+            DatabaseFailure::Connect(text)
+            | DatabaseFailure::Decode(text)
+            | DatabaseFailure::ConnectFailed { reason: text, .. } => {
                 ScrubbedText::Text(ports.anonymizer.free_text(text, &[]))
             }
             _ => ScrubbedText::Nothing,

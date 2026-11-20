@@ -63,9 +63,10 @@ impl QueryingError {
             DatabaseFailure::Unsupported { reason } => Self::ConnectionUnsupported { reason },
             DatabaseFailure::Unavailable { reason } => Self::ConnectionUnavailable { reason },
             DatabaseFailure::MissingParams => Self::MissingConnectParams,
-            DatabaseFailure::ConnectFailed { connection, reason } => {
-                Self::ConnectFailed { connection, reason }
-            }
+            DatabaseFailure::ConnectFailed { connection, reason } => Self::ConnectFailed {
+                connection,
+                reason: scrubbed_text(scrubbed, reason),
+            },
             DatabaseFailure::Timeout => Self::StatementTimeout { timeout_ms },
             DatabaseFailure::Db(original) => {
                 let message = match scrubbed {

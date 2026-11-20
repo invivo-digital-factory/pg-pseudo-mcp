@@ -363,6 +363,59 @@ mod integration {
         assert_eq!(tokens.renewals(), 0);
     }
 
+    #[tokio::test]
+    #[ignore]
+    async fn un_mot_de_passe_refuse_rend_le_code_et_le_message_du_serveur() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let pool = azure_pool(local_params("hunter2-wrong", false), tokens);
+        let error = pool
+            .run_read_only("azure", "SELECT 1", limits())
+            .await
+            .expect_err("the password is refused");
+        let text = error.to_string();
+        assert!(text.contains("28P01"), "{text}");
+        assert!(text.contains("password authentication failed"), "{text}");
+        assert!(!text.contains("hunter2-wrong"), "{text}");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn une_base_absente_rend_le_code_et_le_message_du_serveur() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let mut params = local_params("unused", false);
+        params.password = real_password();
+        params.database = "absent_database_for_test".to_string();
+        let pool = azure_pool(params, tokens);
+        let error = pool
+            .run_read_only("azure", "SELECT 1", limits())
+            .await
+            .expect_err("the database does not exist");
+        let text = error.to_string();
+        assert!(text.contains("3D000"), "{text}");
+        assert!(text.contains("absent_database_for_test"), "{text}");
+        assert!(text.contains("does not exist"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn un_port_ferme_rend_la_cause_reseau_et_pas_seulement_un_libelle_generique() {
+        let root = tempfile::tempdir().expect("dbeaver dir");
+        write_workspace(
+            root.path(),
+            &[Endpoint {
+                name: "closed",
+                port: refused_port().await,
+                password: "p",
+            }],
+        );
+        let pool = pool_for(root.path());
+        let error = pool
+            .run_read_only("closed", "SELECT 1", limits())
+            .await
+            .expect_err("nothing listens");
+        let text = error.to_string().to_lowercase();
+        assert!(text.contains("refused"), "{text}");
+    }
+
     fn limits() -> ExecutionLimits {
         ExecutionLimits {
             max_rows: 10,

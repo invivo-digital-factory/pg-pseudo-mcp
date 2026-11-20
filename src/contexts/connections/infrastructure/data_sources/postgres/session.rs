@@ -20,7 +20,8 @@ use crate::contexts::connections::domain::types::{
     ColumnMeta, ConnectOptions, DbMessage, QueryOutput, SslMode,
 };
 use crate::contexts::connections::infrastructure::mappers::{
-    db_message_from_db_error, session_error_from_handshake, session_error_from_postgres,
+    db_message_from_db_error, describe_postgres_error, session_error_from_handshake,
+    session_error_from_postgres,
 };
 
 const APPLICATION_NAME: &str = "pg-pseudo-mcp";
@@ -141,7 +142,7 @@ async fn execute(
     let healthy = rollback.is_ok() && !result.as_ref().is_err_and(SessionError::breaks_connection);
     let result = match (result, rollback) {
         (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(SessionError::Connect(error.to_string())),
+        (Ok(_), Err(error)) => Err(SessionError::Connect(describe_postgres_error(&error))),
         (Ok(output), Ok(())) => Ok(output),
     };
     Execution { result, healthy }
