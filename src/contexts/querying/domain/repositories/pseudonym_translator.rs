@@ -1,5 +1,5 @@
-pub trait PseudonymTranslator: Send + Sync {
-    fn real_value(&self, text: &str) -> Option<String>;
+use crate::contexts::querying::domain::types::PseudonymLookup;
 
-    fn looks_like_pseudonym(&self, text: &str) -> bool;
+pub trait PseudonymTranslator: Send + Sync {
+    fn lookup(&self, text: &str) -> PseudonymLookup;
 }

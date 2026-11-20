@@ -10,7 +10,7 @@ use crate::contexts::querying::domain::repositories::{
 };
 use crate::contexts::querying::domain::types::{
     AnonymizedRows, Cell, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits, Lineage,
-    QueryOutput,
+    PseudonymLookup, QueryOutput,
 };
 
 pub struct FakeDatabase {
@@ -86,12 +86,15 @@ impl FakeTranslator {
 }
 
 impl PseudonymTranslator for FakeTranslator {
-    fn real_value(&self, text: &str) -> Option<String> {
-        self.pseudonyms.get(text).cloned()
-    }
-
-    fn looks_like_pseudonym(&self, text: &str) -> bool {
-        text.ends_with("@example.net")
+    fn lookup(&self, text: &str) -> PseudonymLookup {
+        if let Some(real) = self.pseudonyms.get(text) {
+            return PseudonymLookup::Known { real: real.clone() };
+        }
+        if text.ends_with("@example.net") {
+            PseudonymLookup::Unknown
+        } else {
+            PseudonymLookup::NotAPseudonym
+        }
     }
 }
 

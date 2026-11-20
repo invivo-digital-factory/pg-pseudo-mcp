@@ -5,7 +5,9 @@ use crate::contexts::querying::domain::errors::Refusal;
 use crate::contexts::querying::domain::repositories::PseudonymTranslator;
 use crate::contexts::querying::domain::services::statement_guard::inspect;
 use crate::contexts::querying::domain::types::Lineage::{self, Clean, Personal, Unknown};
-use crate::contexts::querying::domain::types::{Guarded, PersonalNames, Translations};
+use crate::contexts::querying::domain::types::{
+    Guarded, PersonalNames, PseudonymLookup, Translations,
+};
 
 #[derive(Default)]
 struct FakeStore {
@@ -21,13 +23,16 @@ impl FakeStore {
 }
 
 impl PseudonymTranslator for FakeStore {
-    fn real_value(&self, text: &str) -> Option<String> {
-        self.pseudonyms.get(text).cloned()
-    }
-
-    fn looks_like_pseudonym(&self, text: &str) -> bool {
+    fn lookup(&self, text: &str) -> PseudonymLookup {
+        if let Some(real) = self.pseudonyms.get(text) {
+            return PseudonymLookup::Known { real: real.clone() };
+        }
         let domain = text.rsplit_once('@').map(|(_, domain)| domain);
-        matches!(domain, Some("example.com" | "example.net" | "example.org"))
+        if matches!(domain, Some("example.com" | "example.net" | "example.org")) {
+            PseudonymLookup::Unknown
+        } else {
+            PseudonymLookup::NotAPseudonym
+        }
     }
 }
 
@@ -35,11 +40,7 @@ fn prepare(sql: &str, store: &FakeStore) -> Result<Guarded, Refusal> {
     let inspected = inspect(sql)?;
     let mut translations = Translations::default();
     for literal in inspected.literals() {
-        match store.real_value(literal) {
-            Some(real) => translations.insert_real(literal, real),
-            None if store.looks_like_pseudonym(literal) => translations.insert_shaped(literal),
-            None => {}
-        }
+        translations.record(literal, store.lookup(literal));
     }
     let rewritten = inspected.rewrite(&translations)?;
     let mut personal = PersonalNames::default();

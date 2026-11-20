@@ -88,13 +88,7 @@ impl<D: ReadOnlyDatabase> ExplainQuery<D> {
         let inspected = inspect(sql).map_err(QueryingError::Refused)?;
         let mut translations = Translations::default();
         for literal in inspected.literals() {
-            match ports.translator.real_value(literal) {
-                Some(real) => translations.insert_real(literal, real),
-                None if ports.translator.looks_like_pseudonym(literal) => {
-                    translations.insert_shaped(literal)
-                }
-                None => {}
-            }
+            translations.record(literal, ports.translator.lookup(literal));
         }
         let rewritten = inspected
             .rewrite(&translations)

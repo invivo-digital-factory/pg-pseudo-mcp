@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use super::PseudonymLookup;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Translations {
     real: HashMap<String, String>,
@@ -13,6 +15,14 @@ impl Translations {
 
     pub fn insert_shaped(&mut self, text: &str) {
         self.shaped.insert(text.to_string());
+    }
+
+    pub fn record(&mut self, text: &str, lookup: PseudonymLookup) {
+        match lookup {
+            PseudonymLookup::Known { real } => self.insert_real(text, real),
+            PseudonymLookup::Unknown => self.insert_shaped(text),
+            PseudonymLookup::NotAPseudonym => {}
+        }
     }
 
     pub fn real(&self, text: &str) -> Option<&str> {
