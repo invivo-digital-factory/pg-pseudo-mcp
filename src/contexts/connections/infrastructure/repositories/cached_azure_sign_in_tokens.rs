@@ -110,9 +110,7 @@ mod unit {
         fn fetch(&self) -> Result<FetchedToken, AccessTokenError> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             if self.failing.load(Ordering::SeqCst) {
-                return Err(AccessTokenError::SignInRequired {
-                    detail: "ERROR: Please run 'az login'".into(),
-                });
+                return Err(AccessTokenError::SignInRequired);
             }
             Ok(FetchedToken {
                 token: Secret::new(format!("token-{call}")),
@@ -193,13 +191,13 @@ mod unit {
         fetcher.failing.store(true, Ordering::SeqCst);
         assert!(matches!(
             tokens.access_token(),
-            Err(AccessTokenError::SignInRequired { .. })
+            Err(AccessTokenError::SignInRequired)
         ));
         fetcher.failing.store(false, Ordering::SeqCst);
         advance(&clock, FAILURE_MEMORY_SECONDS - 1);
         assert!(matches!(
             tokens.access_token(),
-            Err(AccessTokenError::SignInRequired { .. })
+            Err(AccessTokenError::SignInRequired)
         ));
         assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
         advance(&clock, 1);

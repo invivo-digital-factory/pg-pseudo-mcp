@@ -145,7 +145,8 @@ fn list_connections_demande_az_login_quand_az_echoue_et_que_pgpass_ne_correspond
     let reason = connection["reason"].as_str().unwrap();
     assert!(reason.contains("az login"), "{reason}");
     assert!(!reason.contains(&home_dir), "{reason}");
-    assert!(reason.contains("~/.azure"), "{reason}");
+    assert!(!reason.contains("msal_token_cache"), "{reason}");
+    assert!(!reason.contains("cannot read"), "{reason}");
     assert!(!text.contains("second-line-canary"), "{text}");
     assert!(!text.contains("shop.privatelink"), "{text}");
 }
@@ -330,7 +331,7 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
     );
     let use_case = &context.list_connections;
     let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
+        .enable_all()
         .build()
         .unwrap();
     let stall = runtime.block_on(async {
@@ -369,7 +370,7 @@ fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que
         tokens,
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
+        .enable_all()
         .build()
         .unwrap();
     let ticks = runtime.block_on(async {

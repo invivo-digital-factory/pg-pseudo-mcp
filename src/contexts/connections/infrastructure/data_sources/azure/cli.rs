@@ -13,7 +13,6 @@ use crate::contexts::connections::domain::types::Secret;
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
-const MAX_DETAIL_CHARS: usize = 200;
 
 pub struct AzureCli {
     command: Option<PathBuf>,
@@ -45,9 +44,7 @@ impl AccessTokenFetcher for AzureCli {
         };
         let output = run(command)?;
         if !output.success {
-            return Err(AccessTokenError::SignInRequired {
-                detail: first_error_line(&output.stderr, output.code),
-            });
+            return Err(AccessTokenError::SignInRequired);
         }
         let answer: CliAnswer =
             serde_json::from_slice(&output.stdout).map_err(|_| AccessTokenError::Unreadable)?;
@@ -67,9 +64,7 @@ impl AccessTokenFetcher for AzureCli {
 
 struct CommandOutput {
     success: bool,
-    code: Option<i32>,
     stdout: Vec<u8>,
-    stderr: Vec<u8>,
 }
 
 fn run(command: &Path) -> Result<CommandOutput, AccessTokenError> {
@@ -84,16 +79,13 @@ fn run(command: &Path) -> Result<CommandOutput, AccessTokenError> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => AccessTokenError::CliNotInstalled,
-            _ => AccessTokenError::SignInRequired {
-                detail: "the az command could not be started".to_string(),
-            },
+            _ => AccessTokenError::SignInRequired,
         })?;
     let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -102,20 +94,13 @@ fn run(command: &Path) -> Result<CommandOutput, AccessTokenError> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(AccessTokenError::SignInRequired {
-                    detail: format!(
-                        "az did not answer within {} seconds",
-                        COMMAND_DEADLINE.as_secs()
-                    ),
-                });
+                return Err(AccessTokenError::SignInRequired);
             }
         }
     };
     Ok(CommandOutput {
         success: status.success(),
-        code: status.code(),
         stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
     })
 }
 
@@ -127,17 +112,6 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8
         }
         buffer
     })
-}
-
-fn first_error_line(stderr: &[u8], code: Option<i32>) -> String {
-    let text = String::from_utf8_lossy(stderr);
-    match text.lines().map(str::trim).find(|line| !line.is_empty()) {
-        Some(line) => line.chars().take(MAX_DETAIL_CHARS).collect(),
-        None => match code {
-            Some(code) => format!("az exited with status {code}"),
-            None => "az was interrupted".to_string(),
-        },
-    }
 }
 
 fn parse_expiry(text: &str) -> Option<u64> {
@@ -226,14 +200,16 @@ echo '{"accessToken":"tok-abc","expires_on":1900000000,"expiresOn":"2030-03-17 1
     }
 
     #[test]
-    fn un_echec_de_az_rend_la_premiere_ligne_d_erreur_sans_le_reste() {
+    fn un_echec_de_az_ne_laisse_fuiter_aucune_sortie_d_erreur() {
         let error = fetch_with(
             "echo \"ERROR: Please run 'az login' to setup account.\" >&2\necho 'second line with tok-leak' >&2\necho '{\"accessToken\":\"tok-leak\"}'\nexit 1",
         )
         .err()
         .unwrap();
+        assert_eq!(error, AccessTokenError::SignInRequired);
         let shown = error.to_string();
         assert!(shown.contains("az login"), "{shown}");
+        assert!(!shown.contains("ERROR"), "{shown}");
         assert!(!shown.contains("second line"), "{shown}");
         assert!(!shown.contains("tok-leak"), "{shown}");
     }

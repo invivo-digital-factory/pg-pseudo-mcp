@@ -61,36 +61,35 @@ impl PostgresSessionPool {
         options: ConnectOptions,
         renewable_password: bool,
     ) -> Result<Session, ConnectionError> {
-        let outcome = match connect_within(&options, self.connect_deadline).await {
-            Err(refused) if renewable_password && refused.is_authentication_failure() => {
-                self.retry_with_renewed_token(options, refused).await
-            }
-            other => other,
-        };
-        outcome.map_err(|source| ConnectionError::ConnectFailed {
+        let connect_failed = |source| ConnectionError::ConnectFailed {
             connection: connection.to_string(),
             source,
-        })
+        };
+        match connect_within(&options, self.connect_deadline).await {
+            Err(refused) if renewable_password && refused.is_authentication_failure() => self
+                .retry_with_renewed_token(options)
+                .await?
+                .map_err(connect_failed),
+            other => other.map_err(connect_failed),
+        }
     }
 
     async fn retry_with_renewed_token(
         &self,
         options: ConnectOptions,
-        refused: SessionError,
-    ) -> Result<Session, SessionError> {
+    ) -> Result<Result<Session, SessionError>, ConnectionError> {
         let tokens = self.tokens.clone();
-        let renewed = tokio::task::spawn_blocking(move || tokens.renewed_access_token())
+        let token = tokio::task::spawn_blocking(move || tokens.renewed_access_token())
             .await
-            .ok()
-            .and_then(Result::ok);
-        let Some(token) = renewed else {
-            return Err(refused);
-        };
+            .map_err(|_| ConnectionError::discovery_interrupted())?
+            .map_err(|error| ConnectionError::Unavailable {
+                reason: error.to_string(),
+            })?;
         let options = ConnectOptions {
             password: token.expose().to_string(),
             ..options
         };
-        connect_within(&options, self.connect_deadline).await
+        Ok(connect_within(&options, self.connect_deadline).await)
     }
 
     #[cfg(test)]
@@ -334,8 +333,8 @@ mod integration {
 
     #[tokio::test]
     #[ignore]
-    async fn un_renouvellement_impossible_rend_l_echec_d_authentification_d_origine() {
-        let tokens = ScriptedTokens::new(Err(AccessTokenError::CliNotInstalled));
+    async fn un_renouvellement_impossible_rend_l_indication_de_connexion_az() {
+        let tokens = ScriptedTokens::new(Err(AccessTokenError::SignInRequired));
         let pool = azure_pool(local_params("expired-token", true), tokens.clone());
         let error = pool
             .run_read_only("azure", "SELECT 1", limits())
@@ -344,7 +343,7 @@ mod integration {
         assert!(
             matches!(
                 &error,
-                ConnectionError::ConnectFailed { source, .. } if source.is_authentication_failure()
+                ConnectionError::Unavailable { reason } if reason.contains("az login")
             ),
             "{error:?}"
         );
