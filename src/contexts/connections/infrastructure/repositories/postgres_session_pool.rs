@@ -113,7 +113,11 @@ impl SessionPool for PostgresSessionPool {
         sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
-        let params = resolve_connection(&self.catalog.discover(), connection)?;
+        let catalog = self.catalog.clone();
+        let discovery = tokio::task::spawn_blocking(move || catalog.discover())
+            .await
+            .map_err(|_| ConnectionError::discovery_interrupted())?;
+        let params = resolve_connection(&discovery, connection)?;
         let options = connect_options(&params, self.known_hosts.as_deref());
         let slot = self.slot(connection).await;
         let mut cached = slot.lock_owned().await;

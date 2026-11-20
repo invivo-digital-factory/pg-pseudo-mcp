@@ -21,3 +21,11 @@ pub enum ConnectionError {
     #[error(transparent)]
     Session(#[from] SessionError),
 }
+
+impl ConnectionError {
+    pub fn discovery_interrupted() -> Self {
+        Self::Unavailable {
+            reason: "connection discovery was interrupted".to_string(),
+        }
+    }
+}

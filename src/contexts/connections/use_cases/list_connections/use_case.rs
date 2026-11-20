@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::repositories::ConnectionCatalog;
 use crate::contexts::connections::domain::types::Discovery;
 
@@ -12,7 +13,10 @@ impl ListConnections {
         Self { catalog }
     }
 
-    pub fn execute(&self) -> Discovery {
-        self.catalog.discover()
+    pub async fn execute(&self) -> Result<Discovery, ConnectionError> {
+        let catalog = self.catalog.clone();
+        tokio::task::spawn_blocking(move || catalog.discover())
+            .await
+            .map_err(|_| ConnectionError::discovery_interrupted())
     }
 }

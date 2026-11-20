@@ -1,8 +1,10 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
+use crate::common::AppConfig;
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::repositories::CachedAzureSignInTokens;
+use crate::contexts::connections::injector::ConnectionsContext;
 
 const AZURE_HOST: &str = "shop.privatelink.postgres.database.azure.com";
 const WORKING_AZ: &str = r#"echo '{"accessToken":"entra-token-1","expires_on":4102444800}'"#;
@@ -293,4 +295,99 @@ fn deux_decouvertes_rapprochees_apres_un_echec_de_az_n_appellent_az_qu_une_fois(
     );
     let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
     assert_eq!(count.lines().count(), 1);
+}
+
+const SLOW_AZ: &str = "sleep 1\nexit 1";
+
+fn mixed_workspace(setup: &Setup) {
+    write_project(
+        setup.home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": connection_json(AZURE_HOST, "Shop", pgpass_model()),
+            "pg-2": connection_json("127.0.0.1", "Plain", json!({
+                "configuration": { "password": "native-secret", "port": "1" }
+            }))
+        })),
+        None,
+    );
+}
+
+#[test]
+fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
+    use_pgpass(&setup);
+    mixed_workspace(&setup);
+    let context = ConnectionsContext::with_azure_command(
+        &AppConfig {
+            dbeaver_home: Some(setup.home.path().to_path_buf()),
+            data_dir: None,
+            ssh_known_hosts: None,
+        },
+        Some(setup.bin.path().join("az")),
+    );
+    let use_case = &context.list_connections;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let stall = runtime.block_on(async {
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        presentation::list_connections(use_case).await;
+        ticker.abort();
+        ticks.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert!(stall >= 20, "ticks while az was running: {stall}");
+}
+
+#[test]
+fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
+    use crate::contexts::connections::domain::repositories::SessionPool;
+    use crate::contexts::connections::domain::types::ExecutionLimits;
+    use crate::contexts::connections::infrastructure::repositories::PostgresSessionPool;
+
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
+    use_pgpass(&setup);
+    mixed_workspace(&setup);
+    let tokens = tokens(&setup);
+    let pool = PostgresSessionPool::new(
+        Arc::new(DbeaverConnectionCatalog::new(
+            Some(setup.home.path().to_path_buf()),
+            tokens.clone(),
+        )),
+        None,
+        tokens,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let ticks = runtime.block_on(async {
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let limits = ExecutionLimits {
+            max_rows: 1,
+            timeout_ms: 1_000,
+        };
+        let _ = pool.run_read_only("Plain", "SELECT 1", limits).await;
+        ticker.abort();
+        ticks.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert!(ticks >= 20, "ticks while az was running: {ticks}");
 }
