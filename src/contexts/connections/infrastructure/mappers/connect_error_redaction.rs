@@ -15,7 +15,11 @@ pub fn redact_connection_identity(error: SessionError, options: &ConnectOptions)
 fn identifying_values(options: &ConnectOptions) -> Vec<&str> {
     let mut values = vec![options.user.as_str(), options.host.as_str()];
     if let Some(tunnel) = &options.tunnel {
-        values.push(tunnel.host.as_str());
+        values.extend([
+            tunnel.host.as_str(),
+            tunnel.user.as_str(),
+            tunnel.remote_host.as_str(),
+        ]);
     }
     values.retain(|value| !value.is_empty());
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
@@ -70,6 +74,35 @@ mod unit {
         assert!(!text.contains("db.internal.example"), "{text}");
         assert!(!text.contains("bastion.corp"), "{text}");
         assert!(redacted.is_authentication_failure());
+    }
+
+    fn tunnel_options() -> ConnectOptions {
+        let mut options = options("pgpseudo", "db.internal.example", Some("bastion.corp"));
+        if let Some(tunnel) = options.tunnel.as_mut() {
+            tunnel.user = "etienne.bernoux".into();
+            tunnel.remote_host = "pg-prod.private.example".into();
+        }
+        options
+    }
+
+    #[test]
+    fn un_refus_d_authentification_ssh_ne_rend_pas_l_utilisateur_du_tunnel() {
+        let error = SessionError::Connect(
+            "ssh authentication rejected for etienne.bernoux at bastion.corp".into(),
+        );
+        let text = redact_connection_identity(error, &tunnel_options()).to_string();
+        assert!(text.contains("ssh authentication rejected"), "{text}");
+        assert!(!text.contains("etienne.bernoux"), "{text}");
+        assert!(!text.contains("bastion.corp"), "{text}");
+    }
+
+    #[test]
+    fn un_refus_de_redirection_du_bastion_ne_rend_pas_l_hote_distant() {
+        let error =
+            SessionError::Connect("bastion refused forward to pg-prod.private.example:5432".into());
+        let text = redact_connection_identity(error, &tunnel_options()).to_string();
+        assert!(text.contains("refused forward"), "{text}");
+        assert!(!text.contains("pg-prod.private.example"), "{text}");
     }
 
     #[test]
