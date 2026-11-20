@@ -295,6 +295,18 @@ mod unit {
     }
 
     #[test]
+    fn une_valeur_reelle_en_forme_de_pseudonyme_n_est_jamais_citee_dans_un_avertissement() {
+        let store = FakeStore::default().with("anne.lorin7@example.net", "qa@example.org");
+        let guarded = prepare(
+            "SELECT id FROM customers WHERE email = 'anne.lorin7@example.net'",
+            &store,
+        )
+        .unwrap();
+        assert_eq!(guarded.translated_literals, 1);
+        assert!(guarded.warnings.is_empty(), "{:?}", guarded.warnings);
+    }
+
+    #[test]
     fn le_raccourci_table_ne_donne_pas_acces_a_un_catalogue_refuse() {
         for sql in [
             "TABLE pg_stats",
