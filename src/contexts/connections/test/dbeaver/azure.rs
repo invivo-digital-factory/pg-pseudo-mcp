@@ -1,8 +1,10 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
+use crate::common::AppConfig;
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::repositories::CachedAzureSignInTokens;
+use crate::contexts::connections::injector::ConnectionsContext;
 
 const AZURE_HOST: &str = "shop.privatelink.postgres.database.azure.com";
 const WORKING_AZ: &str = r#"echo '{"accessToken":"entra-token-1","expires_on":4102444800}'"#;
@@ -143,7 +145,8 @@ fn list_connections_demande_az_login_quand_az_echoue_et_que_pgpass_ne_correspond
     let reason = connection["reason"].as_str().unwrap();
     assert!(reason.contains("az login"), "{reason}");
     assert!(!reason.contains(&home_dir), "{reason}");
-    assert!(reason.contains("~/.azure"), "{reason}");
+    assert!(!reason.contains("msal_token_cache"), "{reason}");
+    assert!(!reason.contains("cannot read"), "{reason}");
     assert!(!text.contains("second-line-canary"), "{text}");
     assert!(!text.contains("shop.privatelink"), "{text}");
 }
@@ -214,4 +217,178 @@ fn un_seul_appel_a_az_sert_toutes_les_connexions_azure_d_une_decouverte() {
     assert_eq!(discovery.connections.len(), 2);
     let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
     assert_eq!(count.lines().count(), 1);
+}
+
+fn azure_pgpass_sslmode(extra: Value) -> SslMode {
+    let mut model = pgpass_model();
+    merge(&mut model, extra);
+    let setup = setup(AZURE_HOST, model, None, WORKING_AZ);
+    use_pgpass(&setup);
+    let params = shop(&setup).params.expect("available");
+    assert!(params.password_is_azure_token);
+    params.sslmode
+}
+
+#[test]
+fn un_jeton_azure_sans_sslmode_impose_tls() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(azure_pgpass_sslmode(json!({})), SslMode::Require);
+}
+
+#[test]
+fn un_jeton_azure_avec_sslmode_disable_allow_ou_prefer_impose_tls() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    for mode in ["disable", "allow", "prefer"] {
+        let extra = json!({ "configuration": { "provider-properties": { "sslmode": mode } } });
+        assert_eq!(azure_pgpass_sslmode(extra), SslMode::Require, "{mode}");
+    }
+}
+
+#[test]
+fn un_jeton_azure_garde_une_verification_plus_stricte_que_require() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let extra = json!({ "configuration": { "provider-properties": { "sslmode": "verify-full" } } });
+    assert_eq!(azure_pgpass_sslmode(extra), SslMode::VerifyFull);
+}
+
+#[test]
+fn un_mot_de_passe_pgpass_hors_azure_garde_prefer() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(
+        "db.internal.example",
+        pgpass_model(),
+        Some("db.internal.example:5433:shop:dev@corp.example:plain-secret\n"),
+        WORKING_AZ,
+    );
+    use_pgpass(&setup);
+    assert_eq!(shop(&setup).params.unwrap().sslmode, SslMode::Prefer);
+}
+
+#[test]
+fn deux_decouvertes_rapprochees_apres_un_echec_de_az_n_appellent_az_qu_une_fois() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(
+        AZURE_HOST,
+        pgpass_model(),
+        None,
+        "echo x >> \"$0.count\"\nexit 1",
+    );
+    use_pgpass(&setup);
+    write_project(
+        setup.home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": connection_json(AZURE_HOST, "Shop", pgpass_model()),
+            "pg-2": connection_json("db.internal.example", "Plain", json!({
+                "configuration": { "password": "native-secret" }
+            }))
+        })),
+        None,
+    );
+    let tokens = tokens(&setup);
+    let first = discover_with(Some(setup.home.path()), tokens.as_ref());
+    let second = discover_with(Some(setup.home.path()), tokens.as_ref());
+    assert_eq!(by_name(&first, "Plain").status, ConnectionStatus::Available);
+    assert_eq!(
+        by_name(&second, "Plain").status,
+        ConnectionStatus::Available
+    );
+    let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
+    assert_eq!(count.lines().count(), 1);
+}
+
+const SLOW_AZ: &str = "sleep 1\nexit 1";
+
+fn mixed_workspace(setup: &Setup) {
+    write_project(
+        setup.home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": connection_json(AZURE_HOST, "Shop", pgpass_model()),
+            "pg-2": connection_json("127.0.0.1", "Plain", json!({
+                "configuration": { "password": "native-secret", "port": "1" }
+            }))
+        })),
+        None,
+    );
+}
+
+#[test]
+fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
+    use_pgpass(&setup);
+    mixed_workspace(&setup);
+    let context = ConnectionsContext::with_azure_command(
+        &AppConfig {
+            dbeaver_home: Some(setup.home.path().to_path_buf()),
+            data_dir: None,
+            ssh_known_hosts: None,
+        },
+        Some(setup.bin.path().join("az")),
+    );
+    let use_case = &context.list_connections;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let stall = runtime.block_on(async {
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        presentation::list_connections(use_case).await;
+        ticker.abort();
+        ticks.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert!(stall >= 20, "ticks while az was running: {stall}");
+}
+
+#[test]
+fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
+    use crate::contexts::connections::domain::repositories::SessionPool;
+    use crate::contexts::connections::domain::types::ExecutionLimits;
+    use crate::contexts::connections::infrastructure::repositories::PostgresSessionPool;
+
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
+    use_pgpass(&setup);
+    mixed_workspace(&setup);
+    let tokens = tokens(&setup);
+    let pool = PostgresSessionPool::new(
+        Arc::new(DbeaverConnectionCatalog::new(
+            Some(setup.home.path().to_path_buf()),
+            tokens.clone(),
+        )),
+        None,
+        tokens,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let ticks = runtime.block_on(async {
+        let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = ticks.clone();
+        let ticker = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let limits = ExecutionLimits {
+            max_rows: 1,
+            timeout_ms: 1_000,
+        };
+        let _ = pool.run_read_only("Plain", "SELECT 1", limits).await;
+        ticker.abort();
+        ticks.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert!(ticks >= 20, "ticks while az was running: {ticks}");
 }

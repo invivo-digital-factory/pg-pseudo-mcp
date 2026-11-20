@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::common::AppConfig;
@@ -23,7 +22,11 @@ impl ConnectionsContext {
         Self::with_azure_cli(config, AzureCli::from_path())
     }
 
-    pub fn with_azure_command(config: &AppConfig, command: Option<PathBuf>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_azure_command(
+        config: &AppConfig,
+        command: Option<std::path::PathBuf>,
+    ) -> Self {
         Self::with_azure_cli(config, AzureCli::new(command))
     }
 

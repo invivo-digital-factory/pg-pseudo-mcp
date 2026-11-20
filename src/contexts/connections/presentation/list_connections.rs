@@ -6,7 +6,14 @@ use crate::contexts::connections::domain::types::{ConnectionEntry, ConnectionSta
 use crate::contexts::connections::use_cases::ListConnections;
 
 pub async fn list_connections(use_case: &ListConnections) -> CallToolResult {
-    let discovery = use_case.execute();
+    let discovery = match use_case.execute().await {
+        Ok(discovery) => discovery,
+        Err(error) => {
+            return CallToolResult::error(vec![ContentBlock::text(
+                json!({ "error": error.to_string() }).to_string(),
+            )]);
+        }
+    };
     let connections: Vec<Value> = discovery.connections.iter().map(describe).collect();
     let mut body = Map::new();
     body.insert("connections".to_string(), Value::Array(connections));

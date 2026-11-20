@@ -310,12 +310,11 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let from_pgpass = || {
+        let from_pgpass = || -> Result<Option<Secret>, ConnectionStatus> {
             match pgpass::default_path() {
-                Some(path) => pgpass::lookup(&path, &target).map_err(unavailable)?,
-                None => None,
+                Some(path) => pgpass::lookup(&path, &target).map_err(unavailable),
+                None => Ok(None),
             }
-            .ok_or_else(|| unavailable(PGPASS_REASON))
         };
         let password = if is_azure_postgres_host(&host) {
             match sign_in.token() {
@@ -323,15 +322,12 @@ fn evaluate(
                     password_is_azure_token = true;
                     token
                 }
-                Err(sign_in_error) => from_pgpass().map_err(|status| match status {
-                    ConnectionStatus::Unavailable { reason } if reason == PGPASS_REASON => {
-                        unavailable(sign_in_error.to_string())
-                    }
-                    other => other,
-                })?,
+                Err(sign_in_error) => {
+                    from_pgpass()?.ok_or_else(|| unavailable(sign_in_error.to_string()))?
+                }
             }
         } else {
-            from_pgpass()?
+            from_pgpass()?.ok_or_else(|| unavailable(PGPASS_REASON))?
         };
         (user, password)
     } else {
@@ -359,7 +355,11 @@ fn evaluate(
         user,
         password,
         password_is_azure_token,
-        sslmode,
+        sslmode: if password_is_azure_token {
+            sslmode.at_least_require()
+        } else {
+            sslmode
+        },
         tunnel,
     })
 }

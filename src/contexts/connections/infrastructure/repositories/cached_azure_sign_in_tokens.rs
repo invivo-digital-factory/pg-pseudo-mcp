@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::contexts::connections::domain::errors::AccessTokenError;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
@@ -8,11 +8,23 @@ use crate::contexts::connections::infrastructure::data_sources::azure::{
 };
 
 pub const EXPIRY_MARGIN_SECONDS: u64 = 300;
+pub const FAILURE_MEMORY_SECONDS: u64 = 30;
+
+#[derive(Default)]
+struct State {
+    token: Option<FetchedToken>,
+    failure: Option<RememberedFailure>,
+}
+
+struct RememberedFailure {
+    error: AccessTokenError,
+    until: u64,
+}
 
 pub struct CachedAzureSignInTokens {
     fetcher: Arc<dyn AccessTokenFetcher>,
     clock: Arc<dyn Clock>,
-    cached: Mutex<Option<FetchedToken>>,
+    state: Mutex<State>,
 }
 
 impl CachedAzureSignInTokens {
@@ -20,21 +32,29 @@ impl CachedAzureSignInTokens {
         Self {
             fetcher,
             clock,
-            cached: Mutex::new(None),
+            state: Mutex::new(State::default()),
         }
     }
-}
 
-impl CachedAzureSignInTokens {
-    fn replace(&self, cached: &mut Option<FetchedToken>) -> Result<Secret, AccessTokenError> {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn replace(&self, state: &mut State, now: u64) -> Result<Secret, AccessTokenError> {
         match self.fetcher.fetch() {
             Ok(fetched) => {
                 let token = fetched.token.clone();
-                *cached = Some(fetched);
+                state.token = Some(fetched);
+                state.failure = None;
                 Ok(token)
             }
             Err(error) => {
-                *cached = None;
+                state.failure = Some(RememberedFailure {
+                    error: error.clone(),
+                    until: now + FAILURE_MEMORY_SECONDS,
+                });
                 Err(error)
             }
         }
@@ -43,25 +63,25 @@ impl CachedAzureSignInTokens {
 
 impl AzureSignInTokenProvider for CachedAzureSignInTokens {
     fn access_token(&self) -> Result<Secret, AccessTokenError> {
-        let mut cached = self
-            .cached
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock();
         let now = self.clock.now_epoch_seconds();
-        if let Some(fetched) = cached.as_ref()
+        if let Some(fetched) = state.token.as_ref()
             && fetched.expires_at > now + EXPIRY_MARGIN_SECONDS
         {
             return Ok(fetched.token.clone());
         }
-        self.replace(&mut cached)
+        if let Some(failure) = state.failure.as_ref()
+            && now < failure.until
+        {
+            return Err(failure.error.clone());
+        }
+        self.replace(&mut state, now)
     }
 
     fn renewed_access_token(&self) -> Result<Secret, AccessTokenError> {
-        let mut cached = self
-            .cached
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.replace(&mut cached)
+        let mut state = self.lock();
+        let now = self.clock.now_epoch_seconds();
+        self.replace(&mut state, now)
     }
 }
 
@@ -90,9 +110,7 @@ mod unit {
         fn fetch(&self) -> Result<FetchedToken, AccessTokenError> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             if self.failing.load(Ordering::SeqCst) {
-                return Err(AccessTokenError::SignInRequired {
-                    detail: "ERROR: Please run 'az login'".into(),
-                });
+                return Err(AccessTokenError::SignInRequired);
             }
             Ok(FetchedToken {
                 token: Secret::new(format!("token-{call}")),
@@ -166,16 +184,43 @@ mod unit {
     }
 
     #[test]
-    fn un_echec_n_est_pas_memorise_et_l_appel_suivant_reessaie() {
+    fn un_echec_est_memorise_pendant_la_fenetre_puis_l_appel_suivant_reessaie() {
         let (tokens, clock, fetcher) = provider(3_600);
         tokens.access_token().unwrap();
         advance(&clock, 7_200);
         fetcher.failing.store(true, Ordering::SeqCst);
         assert!(matches!(
             tokens.access_token(),
-            Err(AccessTokenError::SignInRequired { .. })
+            Err(AccessTokenError::SignInRequired)
         ));
         fetcher.failing.store(false, Ordering::SeqCst);
+        advance(&clock, FAILURE_MEMORY_SECONDS - 1);
+        assert!(matches!(
+            tokens.access_token(),
+            Err(AccessTokenError::SignInRequired)
+        ));
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
+        advance(&clock, 1);
         assert_eq!(tokens.access_token().unwrap().expose(), "token-3");
+    }
+
+    #[test]
+    fn un_renouvellement_force_ignore_l_echec_memorise() {
+        let (tokens, _, fetcher) = provider(3_600);
+        fetcher.failing.store(true, Ordering::SeqCst);
+        assert!(tokens.access_token().is_err());
+        fetcher.failing.store(false, Ordering::SeqCst);
+        assert_eq!(tokens.renewed_access_token().unwrap().expose(), "token-2");
+        assert_eq!(tokens.access_token().unwrap().expose(), "token-2");
+    }
+
+    #[test]
+    fn un_renouvellement_force_en_echec_garde_le_jeton_encore_valide() {
+        let (tokens, _, fetcher) = provider(3_600);
+        tokens.access_token().unwrap();
+        fetcher.failing.store(true, Ordering::SeqCst);
+        assert!(tokens.renewed_access_token().is_err());
+        assert_eq!(tokens.access_token().unwrap().expose(), "token-1");
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
     }
 }
