@@ -120,9 +120,17 @@ impl PseudonymTranslator for FakeTranslator {
 #[derive(Default)]
 pub struct FakeAnonymizer {
     injected_seen: Mutex<Vec<Vec<(String, String)>>>,
+    masks: Vec<(String, String)>,
 }
 
 impl FakeAnonymizer {
+    pub fn masking(real: &str, pseudonym: &str) -> Arc<Self> {
+        Arc::new(Self {
+            injected_seen: Mutex::default(),
+            masks: vec![(real.to_string(), pseudonym.to_string())],
+        })
+    }
+
     pub fn injected_seen(&self) -> Vec<Vec<(String, String)>> {
         self.injected_seen.lock().unwrap().clone()
     }
@@ -131,6 +139,7 @@ impl FakeAnonymizer {
         self.injected_seen.lock().unwrap().push(injected.to_vec());
         injected
             .iter()
+            .chain(self.masks.iter())
             .fold(text.to_string(), |text, (real, pseudonym)| {
                 text.replace(real, pseudonym)
             })
