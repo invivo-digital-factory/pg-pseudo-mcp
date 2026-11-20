@@ -20,6 +20,10 @@ mod suivi_par_pseudonyme;
 #[path = "../src/contexts/connections/test/steps/tunnel_ssh.rs"]
 mod tunnel_ssh;
 
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use cucumber::gherkin::{Feature, Rule, Scenario};
 use cucumber::writer::Stats;
 use cucumber::{World, cli};
@@ -30,6 +34,65 @@ use crate::connections_world::ConnectionsWorld;
 use crate::querying_world::QueryingWorld;
 
 const FEATURES: &str = "src/contexts";
+const CONTEXTS: [&str; 3] = ["connections", "anonymization", "querying"];
+
+fn feature_files(dir: &Path, found: &mut Vec<PathBuf>) {
+    let entries =
+        fs::read_dir(dir).unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("cannot read directory entry").path();
+        if path.is_dir() {
+            feature_files(&path, found);
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "feature")
+        {
+            found.push(path);
+        }
+    }
+}
+
+fn context_tags(path: &Path) -> BTreeSet<String> {
+    let content = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('@'))
+        .flat_map(str::split_whitespace)
+        .filter_map(|tag| tag.strip_prefix('@'))
+        .filter(|tag| CONTEXTS.contains(tag))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn orphan_features() -> Vec<String> {
+    let root = Path::new(FEATURES);
+    let mut files = Vec::new();
+    feature_files(root, &mut files);
+    files.sort();
+    files
+        .iter()
+        .filter_map(|path| {
+            let owner = path
+                .strip_prefix(root)
+                .ok()
+                .and_then(|relative| relative.components().next())
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let tags = context_tags(path);
+            let expected = BTreeSet::from([owner.clone()]);
+            (tags != expected).then(|| {
+                format!(
+                    "{}: lives under context `{owner}` but carries context tags {:?}; expected exactly @{owner} (known contexts: {})",
+                    path.display(),
+                    tags,
+                    CONTEXTS.join(", ")
+                )
+            })
+        })
+        .collect()
+}
 
 fn has_tag(tag: &str, feature: &Feature, rule: Option<&Rule>, scenario: &Scenario) -> bool {
     feature.tags.iter().any(|candidate| candidate == tag)
@@ -61,6 +124,14 @@ macro_rules! run_context {
 
 #[tokio::main]
 async fn main() {
+    let orphans = orphan_features();
+    if !orphans.is_empty() {
+        eprintln!("feature files that no World would run:");
+        for orphan in &orphans {
+            eprintln!("  {orphan}");
+        }
+        std::process::exit(1);
+    }
     let integration_available = std::env::var(DATABASE_URL_VAR).is_ok();
     if !integration_available {
         println!(
