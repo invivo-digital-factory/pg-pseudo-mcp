@@ -14,6 +14,7 @@ use crate::contexts::connections::domain::types::{ConnectOptions, ExecutionLimit
 use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect_within,
 };
+use crate::contexts::connections::infrastructure::mappers::redact_connection_identity;
 use crate::contexts::connections::infrastructure::repositories::session_cache::{
     SessionCache, Slot,
 };
@@ -75,11 +76,11 @@ impl PostgresSessionPool {
     ) -> Result<Session, ConnectionError> {
         let connect_failed = |source| ConnectionError::ConnectFailed {
             connection: connection.to_string(),
-            source,
+            source: redact_connection_identity(source, &options),
         };
         match connect_within(&options, self.connect_deadline).await {
             Err(refused) if renewable_password && refused.is_authentication_failure() => self
-                .retry_with_renewed_token(options)
+                .retry_with_renewed_token(&options)
                 .await?
                 .map_err(connect_failed),
             other => other.map_err(connect_failed),
@@ -88,7 +89,7 @@ impl PostgresSessionPool {
 
     async fn retry_with_renewed_token(
         &self,
-        options: ConnectOptions,
+        options: &ConnectOptions,
     ) -> Result<Result<Session, SessionError>, ConnectionError> {
         let tokens = self.tokens.clone();
         let token = tokio::task::spawn_blocking(move || tokens.renewed_access_token())
@@ -99,7 +100,7 @@ impl PostgresSessionPool {
             })?;
         let options = ConnectOptions {
             password: token.expose().to_string(),
-            ..options
+            ..options.clone()
         };
         Ok(connect_within(&options, self.connect_deadline).await)
     }

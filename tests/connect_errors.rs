@@ -30,18 +30,19 @@ mod e2e {
         let text = refused_login("pgpseudo").await;
         assert!(text.contains("28P01"), "{text}");
         assert!(text.contains("password authentication failed"), "{text}");
+        assert!(!text.contains("pgpseudo"), "{text}");
         assert!(!text.contains(WRONG_PASSWORD), "{text}");
     }
 
     #[tokio::test]
     #[ignore]
-    async fn le_nom_d_utilisateur_d_un_refus_d_authentification_est_pseudonymise() {
+    async fn le_nom_d_utilisateur_d_un_refus_d_authentification_est_masque() {
         let text = refused_login(ENTRA_USER).await;
         let body: Value = serde_json::from_str(&text).expect("json error body");
         assert!(text.contains("password authentication failed"), "{text}");
         assert!(!text.contains(ENTRA_USER), "{text}");
         assert!(!text.contains("yourcompany"), "{text}");
-        assert!(body.to_string().contains("@example."), "{text}");
+        assert!(body.is_object(), "{text}");
         assert!(!text.contains(WRONG_PASSWORD), "{text}");
     }
 }
