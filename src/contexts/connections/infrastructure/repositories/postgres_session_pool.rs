@@ -523,7 +523,16 @@ mod integration {
     #[tokio::test]
     async fn une_commande_en_echec_rend_un_motif_fixe_avec_le_statut_et_sans_sa_sortie() {
         let commands = ScriptedCommand::new(vec![Err(PasswordCommandError::ExitStatus(44))]);
-        let pool = command_pool(command_params(&["pw"]), commands);
+        let offline = ConnectParams {
+            host: "localhost".to_string(),
+            port: 5432,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["pw".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let pool = command_pool(offline, commands);
         let error = pool
             .run_read_only("azure", None, "SELECT 1", limits())
             .await

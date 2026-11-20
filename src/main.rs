@@ -1,5 +1,6 @@
 use std::process::ExitCode;
 
+use pg_pseudo_mcp::composition::connections_import::import_dbeaver;
 use pg_pseudo_mcp::composition::mapping_purge::mapping_purge;
 use pg_pseudo_mcp::composition::server::serve;
 use tracing_subscriber::EnvFilter;
@@ -22,12 +23,16 @@ async fn main() -> ExitCode {
         [] | ["serve"] => serve().await,
         ["mapping", "purge"] => mapping_purge(false),
         ["mapping", "purge", "--yes"] => mapping_purge(true),
+        ["connections", "import-dbeaver"] => import_dbeaver(false),
+        ["connections", "import-dbeaver", "--force"] => import_dbeaver(true),
         ["--version"] => {
             println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("usage: pg-pseudo-mcp [serve | mapping purge [--yes] | --version]");
+            eprintln!(
+                "usage: pg-pseudo-mcp [serve | mapping purge [--yes] | connections import-dbeaver [--force] | --version]"
+            );
             ExitCode::from(2)
         }
     }

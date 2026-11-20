@@ -15,6 +15,8 @@ mod colonnes_derivees;
 mod decouverte_des_connexions;
 #[path = "../src/contexts/connections/test/steps/fichier_de_connexions.rs"]
 mod fichier_de_connexions;
+#[path = "../src/contexts/connections/test/steps/import_dbeaver.rs"]
+mod import_dbeaver;
 #[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
 mod lecture_seule;
 #[path = "../src/contexts/anonymization/test/steps/pseudonymisation.rs"]

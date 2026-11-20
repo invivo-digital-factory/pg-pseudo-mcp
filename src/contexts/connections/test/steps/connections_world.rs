@@ -15,6 +15,7 @@ pub struct ConnectionsWorld {
     pub ssh_config: Option<PathBuf>,
     pub listing: Option<Value>,
     pub outcome: Option<Result<(), String>>,
+    pub import_outcome: Option<Result<String, String>>,
 }
 
 impl std::fmt::Debug for ConnectionsWorld {
@@ -37,6 +38,7 @@ impl ConnectionsWorld {
             ssh_config: None,
             listing: None,
             outcome: None,
+            import_outcome: None,
         };
         std::fs::write(world.connections_file(), "").expect("empty connection file");
         world
@@ -46,14 +48,18 @@ impl ConnectionsWorld {
         self.config_dir.path().join("connections.toml")
     }
 
-    pub fn context(&self) -> ConnectionsContext {
-        ConnectionsContext::new(&AppConfig {
+    pub fn config(&self) -> AppConfig {
+        AppConfig {
             dbeaver_home: Some(self.workspace.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: self.known_hosts.clone(),
             ssh_config: self.ssh_config.clone(),
             connections_file: Some(self.connections_file()),
-        })
+        }
+    }
+
+    pub fn context(&self) -> ConnectionsContext {
+        ConnectionsContext::new(&self.config())
     }
 
     pub fn write_known_hosts(&mut self, contents: &str) {
