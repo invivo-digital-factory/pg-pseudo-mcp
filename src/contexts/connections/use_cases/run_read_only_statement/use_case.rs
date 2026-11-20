@@ -16,9 +16,12 @@ impl<P: SessionPool> RunReadOnlyStatement<P> {
     pub async fn execute(
         &self,
         connection: &str,
+        database: Option<&str>,
         sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
-        self.pool.run_read_only(connection, sql, limits).await
+        self.pool
+            .run_read_only(connection, database, sql, limits)
+            .await
     }
 }

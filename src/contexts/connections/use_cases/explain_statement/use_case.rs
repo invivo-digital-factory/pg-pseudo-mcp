@@ -16,11 +16,12 @@ impl<P: SessionPool> ExplainStatement<P> {
     pub async fn execute(
         &self,
         connection: &str,
+        database: Option<&str>,
         explain_sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
         self.pool
-            .run_read_only(connection, explain_sql, limits)
+            .run_read_only(connection, database, explain_sql, limits)
             .await
     }
 }

@@ -5,7 +5,7 @@ use crate::contexts::connections::domain::repositories::{
     AzureSignInTokenProvider, ConnectionCatalog,
 };
 use crate::contexts::connections::domain::types::Discovery;
-use crate::contexts::connections::infrastructure::data_sources::dbeaver::discover;
+use crate::contexts::connections::infrastructure::data_sources::dbeaver::discover_in;
 
 pub struct DbeaverConnectionCatalog {
     dbeaver_home: Option<PathBuf>,
@@ -22,7 +22,7 @@ impl DbeaverConnectionCatalog {
 }
 
 impl ConnectionCatalog for DbeaverConnectionCatalog {
-    fn discover(&self) -> Discovery {
-        discover(self.dbeaver_home.as_deref(), self.tokens.as_ref())
+    fn discover_in(&self, database: Option<&str>) -> Discovery {
+        discover_in(self.dbeaver_home.as_deref(), self.tokens.as_ref(), database)
     }
 }

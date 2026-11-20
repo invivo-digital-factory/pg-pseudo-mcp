@@ -29,6 +29,7 @@ async fn search(harness: &Harness, pattern: &str) -> Response {
             &harness.state,
             SearchSchemaArgs {
                 connection: CONNECTION.to_string(),
+                database: None,
                 pattern: pattern.to_string(),
             },
         )
@@ -42,6 +43,7 @@ async fn describe(harness: &Harness, table: &str) -> Response {
             &harness.state,
             DescribeTableArgs {
                 connection: CONNECTION.to_string(),
+                database: None,
                 table: table.to_string(),
             },
         )
@@ -56,6 +58,7 @@ async fn list(harness: &Harness, args: ListTablesArgs) -> Response {
 fn list_args() -> ListTablesArgs {
     ListTablesArgs {
         connection: CONNECTION.to_string(),
+        database: None,
         schema: None,
         name_like: None,
         limit: None,

@@ -3,6 +3,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchSchemaRequest {
     pub connection: String,
+    pub database: Option<String>,
     pub pattern: String,
 }
 

@@ -4,7 +4,9 @@ use cucumber::World;
 use pg_pseudo_mcp::common::AppConfig;
 use pg_pseudo_mcp::composition::contexts::Contexts;
 use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
-use pg_pseudo_mcp::contexts::querying::presentation::{QueryArgs, query};
+use pg_pseudo_mcp::contexts::querying::presentation::{
+    ListDatabasesArgs, QueryArgs, list_databases, query,
+};
 use serde_json::Value;
 
 use crate::bdd_support::{CONNECTION, database_target, is_error, text_of, write_workspace};
@@ -74,6 +76,28 @@ impl QueryingWorld {
     }
 
     pub async fn ask(&mut self, sql: &str) {
+        self.ask_in(sql, None).await;
+    }
+
+    pub async fn list_databases(&mut self) {
+        let contexts = self
+            .contexts
+            .as_ref()
+            .expect("connected to the test database");
+        let result = list_databases(
+            &contexts.querying.list_databases,
+            ListDatabasesArgs {
+                connection: CONNECTION.to_string(),
+            },
+        )
+        .await;
+        self.answer = Some(Answer {
+            refused: is_error(&result),
+            text: text_of(&result),
+        });
+    }
+
+    pub async fn ask_in(&mut self, sql: &str, database: Option<&str>) {
         let contexts = self
             .contexts
             .as_ref()
@@ -83,6 +107,7 @@ impl QueryingWorld {
             QueryArgs {
                 connection: CONNECTION.to_string(),
                 sql: sql.to_string(),
+                database: database.map(str::to_string),
                 ..QueryArgs::default()
             },
         )

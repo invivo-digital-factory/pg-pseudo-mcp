@@ -15,7 +15,7 @@ use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
 pub use pg_pseudo_mcp::contexts::querying::presentation::{
-    DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
+    DescribeTableArgs, ExplainArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
 };
 
 pub const DATABASE_URL_VAR: &str = "PG_PSEUDO_TEST_DATABASE_URL";
@@ -63,8 +63,25 @@ pub struct Harness {
 
 impl Harness {
     pub fn new() -> Self {
+        Self::with_workspace(write_workspace_for_test_database)
+    }
+
+    pub fn with_login(user: &str, password: &str) -> Self {
+        Self::with_workspace(|root| {
+            let url = database_url();
+            let (_, location) = url
+                .strip_prefix("postgres://")
+                .and_then(|rest| rest.split_once('@'))
+                .expect("user:password@host");
+            let (address, database) = location.split_once('/').expect("host:port/database");
+            let (host, port) = address.split_once(':').expect("host:port");
+            write_workspace(root, host, port, database, user, password);
+        })
+    }
+
+    fn with_workspace(write: impl FnOnce(&Path)) -> Self {
         let dbeaver = tempfile::tempdir().expect("dbeaver dir");
-        write_workspace_for_test_database(dbeaver.path());
+        write(dbeaver.path());
         let data = tempfile::tempdir().expect("data dir");
         let config = AppConfig {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
@@ -94,6 +111,10 @@ pub async fn explain(contexts: &Contexts, args: ExplainArgs) -> CallToolResult {
 
 pub async fn search_schema(contexts: &Contexts, args: SearchSchemaArgs) -> CallToolResult {
     querying::search_schema(&contexts.querying.search_schema, args).await
+}
+
+pub async fn list_databases(contexts: &Contexts, args: ListDatabasesArgs) -> CallToolResult {
+    querying::list_databases(&contexts.querying.list_databases, args).await
 }
 
 pub async fn list_tables(contexts: &Contexts, args: ListTablesArgs) -> CallToolResult {

@@ -386,7 +386,7 @@ fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que
             max_rows: 1,
             timeout_ms: 1_000,
         };
-        let _ = pool.run_read_only("Plain", "SELECT 1", limits).await;
+        let _ = pool.run_read_only("Plain", None, "SELECT 1", limits).await;
         ticker.abort();
         ticks.load(std::sync::atomic::Ordering::SeqCst)
     });

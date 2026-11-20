@@ -77,7 +77,7 @@ mod e2e {
     use super::*;
 
     #[test]
-    fn le_serveur_expose_sept_outils_en_lecture_seule_sur_stdio() {
+    fn le_serveur_expose_huit_outils_en_lecture_seule_sur_stdio() {
         let mut server = McpProcess::start();
         server.initialize();
         server.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
@@ -94,6 +94,7 @@ mod e2e {
                 "describe_table",
                 "explain",
                 "list_connections",
+                "list_databases",
                 "list_tables",
                 "query",
                 "search_schema",

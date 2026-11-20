@@ -16,11 +16,12 @@ impl<P: SessionPool> ReadCatalog<P> {
     pub async fn execute(
         &self,
         connection: &str,
+        database: Option<&str>,
         catalog_sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
         self.pool
-            .run_read_only(connection, catalog_sql, limits)
+            .run_read_only(connection, database, catalog_sql, limits)
             .await
     }
 }

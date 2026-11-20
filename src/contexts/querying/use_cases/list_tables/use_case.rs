@@ -39,6 +39,7 @@ impl<D: ReadOnlyDatabase> ListTables<D> {
             .database
             .read_catalog(
                 &request.connection,
+                request.database.as_deref(),
                 &list_sql(
                     request.schema.as_deref(),
                     request.name_like.as_deref(),
@@ -69,7 +70,9 @@ impl<D: ReadOnlyDatabase> ListTables<D> {
             DatabaseFailure::Db(message) => {
                 ScrubbedText::Message(ports.anonymizer.message(message, &[]))
             }
-            DatabaseFailure::Connect(text) | DatabaseFailure::Decode(text) => {
+            DatabaseFailure::Connect(text)
+            | DatabaseFailure::Decode(text)
+            | DatabaseFailure::ConnectFailed { reason: text, .. } => {
                 ScrubbedText::Text(ports.anonymizer.free_text(text, &[]))
             }
             _ => ScrubbedText::Nothing,

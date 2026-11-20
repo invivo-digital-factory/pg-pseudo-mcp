@@ -37,6 +37,7 @@ impl<D: ReadOnlyDatabase> SearchSchema<D> {
             .database
             .read_catalog(
                 &request.connection,
+                request.database.as_deref(),
                 &search_sql(&request.pattern),
                 ExecutionLimits {
                     max_rows: SEARCH_LIMIT,
@@ -61,7 +62,9 @@ impl<D: ReadOnlyDatabase> SearchSchema<D> {
             DatabaseFailure::Db(message) => {
                 ScrubbedText::Message(ports.anonymizer.message(message, &[]))
             }
-            DatabaseFailure::Connect(text) | DatabaseFailure::Decode(text) => {
+            DatabaseFailure::Connect(text)
+            | DatabaseFailure::Decode(text)
+            | DatabaseFailure::ConnectFailed { reason: text, .. } => {
                 ScrubbedText::Text(ports.anonymizer.free_text(text, &[]))
             }
             _ => ScrubbedText::Nothing,

@@ -56,7 +56,7 @@ async fn agent_runs_read_through_tunnel(world: &mut ConnectionsWorld) {
     world.outcome = Some(
         context
             .run_read_only_statement
-            .execute(CONNECTION, "SELECT 1", limits)
+            .execute(CONNECTION, None, "SELECT 1", limits)
             .await
             .map(|_| ())
             .map_err(|error| error.to_string()),

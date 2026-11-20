@@ -7,6 +7,7 @@ pub trait SessionPool: Send + Sync {
     fn run_read_only(
         &self,
         connection: &str,
+        database: Option<&str>,
         sql: &str,
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<QueryOutput, ConnectionError>> + Send;

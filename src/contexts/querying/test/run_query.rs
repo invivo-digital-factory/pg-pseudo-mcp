@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::fakes::{FakeAnonymizer, FakeDatabase, FakeTranslator, empty_output, ports, sql_error};
-use crate::contexts::querying::domain::errors::QueryingError;
+use crate::contexts::querying::domain::errors::{DatabaseFailure, QueryingError};
 use crate::contexts::querying::domain::types::{ExplainRequest, QueryRequest};
 use crate::contexts::querying::use_cases::{ExplainQuery, RunQuery};
 
@@ -63,6 +63,7 @@ mod unit {
         let error = use_case
             .execute(ExplainRequest {
                 connection: "Shop".into(),
+                database: None,
                 sql: "SELECT 1".into(),
             })
             .await
@@ -148,5 +149,30 @@ mod unit {
                 .injected_seen()
                 .contains(&vec![("Dupont".to_string(), "Kalin Torvo".to_string())])
         );
+    }
+
+    #[tokio::test]
+    async fn un_echec_de_connexion_citant_une_valeur_reelle_revient_avec_son_pseudonyme() {
+        let database = FakeDatabase::failing(DatabaseFailure::ConnectFailed {
+            connection: "Shop".into(),
+            reason: "SQLSTATE 28P01: password authentication failed for user \"Dupont\"".into(),
+        });
+        let translator = FakeTranslator::default().with("Kalin Torvo", "Dupont");
+        let use_case = RunQuery::new(Arc::clone(&database), ports(translator, Arc::default()));
+
+        let error = use_case
+            .execute(request(
+                "SELECT id FROM customers WHERE last_name = 'Kalin Torvo'",
+            ))
+            .await
+            .unwrap_err();
+
+        match error {
+            QueryingError::ConnectFailed { reason, .. } => {
+                assert!(reason.contains("Kalin Torvo"), "{reason}");
+                assert!(!reason.contains("Dupont"), "{reason}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

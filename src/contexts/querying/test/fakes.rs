@@ -8,6 +8,7 @@ use crate::contexts::querying::domain::repositories::{
     AnonymizationPorts, PersonalColumnDictionary, PseudonymTranslator, ReadOnlyDatabase,
     ResultAnonymizer,
 };
+use crate::contexts::querying::domain::types::DatabaseListing;
 use crate::contexts::querying::domain::types::{
     AnonymizedRows, Cell, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits, Lineage,
     PseudonymLookup, QueryOutput,
@@ -15,6 +16,7 @@ use crate::contexts::querying::domain::types::{
 
 pub struct FakeDatabase {
     response: Result<QueryOutput, DatabaseFailure>,
+    listing: Result<DatabaseListing, DatabaseFailure>,
     statements: Mutex<Vec<String>>,
 }
 
@@ -22,13 +24,23 @@ impl FakeDatabase {
     pub fn returning(output: QueryOutput) -> Arc<Self> {
         Arc::new(Self {
             response: Ok(output),
+            listing: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
         })
     }
 
     pub fn failing(failure: DatabaseFailure) -> Arc<Self> {
         Arc::new(Self {
-            response: Err(failure),
+            response: Err(failure.clone()),
+            listing: Err(failure),
+            statements: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn listing(listing: DatabaseListing) -> Arc<Self> {
+        Arc::new(Self {
+            response: Ok(empty_output()),
+            listing: Ok(listing),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -47,6 +59,7 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn run(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
@@ -56,6 +69,7 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn explain(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         explain_sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
@@ -65,10 +79,15 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn read_catalog(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         catalog_sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
         self.answer(catalog_sql)
+    }
+
+    async fn list_databases(&self, _connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
+        self.listing.clone()
     }
 }
 
@@ -101,9 +120,17 @@ impl PseudonymTranslator for FakeTranslator {
 #[derive(Default)]
 pub struct FakeAnonymizer {
     injected_seen: Mutex<Vec<Vec<(String, String)>>>,
+    masks: Vec<(String, String)>,
 }
 
 impl FakeAnonymizer {
+    pub fn masking(real: &str, pseudonym: &str) -> Arc<Self> {
+        Arc::new(Self {
+            injected_seen: Mutex::default(),
+            masks: vec![(real.to_string(), pseudonym.to_string())],
+        })
+    }
+
     pub fn injected_seen(&self) -> Vec<Vec<(String, String)>> {
         self.injected_seen.lock().unwrap().clone()
     }
@@ -112,6 +139,7 @@ impl FakeAnonymizer {
         self.injected_seen.lock().unwrap().push(injected.to_vec());
         injected
             .iter()
+            .chain(self.masks.iter())
             .fold(text.to_string(), |text, (real, pseudonym)| {
                 text.replace(real, pseudonym)
             })

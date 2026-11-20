@@ -13,7 +13,9 @@ use crate::contexts::connections::domain::types::{
     TunnelParams,
 };
 use crate::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
-use crate::contexts::connections::infrastructure::data_sources::dbeaver::discover as discover_with;
+use crate::contexts::connections::infrastructure::data_sources::dbeaver::{
+    discover as discover_with, discover_in as discover_in_with,
+};
 use crate::contexts::connections::infrastructure::repositories::DbeaverConnectionCatalog;
 use crate::contexts::connections::presentation;
 use crate::contexts::connections::use_cases::ListConnections;
@@ -37,7 +39,11 @@ impl AzureSignInTokenProvider for NoTokens {
 static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn discover(home: Option<&Path>) -> Discovery {
-    discover_with(home, &NoTokens)
+    discover_in(home, None)
+}
+
+fn discover_in(home: Option<&Path>, database: Option<&str>) -> Discovery {
+    discover_in_with(home, &NoTokens, database)
 }
 
 fn write_project(root: &Path, project: &str, suffix: &str, sources: &Value, creds: Option<&Value>) {
@@ -947,6 +953,43 @@ mod integration {
                 reason: "no matching entry in the pgpass file".to_string()
             }
         );
+    }
+
+    #[test]
+    fn pgpass_est_cherche_avec_la_base_demandee_et_non_celle_de_dbeaver() {
+        let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let home = TempDir::new().unwrap();
+        let pgpass = home.path().join("pgpass-database-test");
+        fs::write(
+            &pgpass,
+            "db.internal.example:5433:billing:reader:billing-pw\ndb.internal.example:5433:shop:reader:shop-pw\n",
+        )
+        .unwrap();
+        set_mode(&pgpass, 0o600);
+        write_project(
+            home.path(),
+            "General",
+            "",
+            &sources(json!({
+                "pg-1": pg_connection("Shop", json!({
+                    "configuration": { "auth-model": "postgres_pgpass" }
+                }))
+            })),
+            Some(&json!({ "pg-1": { "#connection": { "user": "reader" } } })),
+        );
+        unsafe { std::env::set_var("PGPASSFILE", &pgpass) };
+
+        let default = resolve_connection(&discover(Some(home.path())), "Shop").unwrap();
+        assert_eq!(default.database, "shop");
+        assert_eq!(default.password.expose(), "shop-pw");
+
+        let billing =
+            resolve_connection(&discover_in(Some(home.path()), Some("billing")), "Shop").unwrap();
+        assert_eq!(billing.database, "billing");
+        assert_eq!(billing.password.expose(), "billing-pw");
+
+        let unknown = resolve_connection(&discover_in(Some(home.path()), Some("absent")), "Shop");
+        assert!(matches!(unknown, Err(ConnectionError::Unavailable { .. })));
     }
 
     #[cfg(unix)]

@@ -3,6 +3,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTablesRequest {
     pub connection: String,
+    pub database: Option<String>,
     pub schema: Option<String>,
     pub name_like: Option<String>,
     pub limit: Option<u32>,

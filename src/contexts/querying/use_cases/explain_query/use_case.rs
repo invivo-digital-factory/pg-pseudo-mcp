@@ -35,6 +35,7 @@ impl<D: ReadOnlyDatabase> ExplainQuery<D> {
             .database
             .explain(
                 &request.connection,
+                request.database.as_deref(),
                 &guarded.explain_sql(),
                 ExecutionLimits {
                     max_rows: MAX_PLAN_LINES,
@@ -107,7 +108,9 @@ impl<D: ReadOnlyDatabase> ExplainQuery<D> {
             DatabaseFailure::Db(message) => {
                 ScrubbedText::Message(ports.anonymizer.message(message, injected))
             }
-            DatabaseFailure::Connect(text) | DatabaseFailure::Decode(text) => {
+            DatabaseFailure::Connect(text)
+            | DatabaseFailure::Decode(text)
+            | DatabaseFailure::ConnectFailed { reason: text, .. } => {
                 ScrubbedText::Text(ports.anonymizer.free_text(text, injected))
             }
             _ => ScrubbedText::Nothing,

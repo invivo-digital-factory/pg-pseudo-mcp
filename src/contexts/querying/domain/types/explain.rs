@@ -5,6 +5,7 @@ use super::Warning;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplainRequest {
     pub connection: String,
+    pub database: Option<String>,
     pub sql: String,
 }
 

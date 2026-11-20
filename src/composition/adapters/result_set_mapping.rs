@@ -66,6 +66,14 @@ pub fn query_output(output: connections::QueryOutput) -> querying::QueryOutput {
     }
 }
 
+pub fn database_listing(listing: connections::DatabaseListing) -> querying::DatabaseListing {
+    querying::DatabaseListing {
+        databases: listing.databases,
+        default: listing.default,
+        truncated: listing.truncated,
+    }
+}
+
 pub fn execution_limits(limits: querying::ExecutionLimits) -> connections::ExecutionLimits {
     connections::ExecutionLimits {
         max_rows: limits.max_rows,

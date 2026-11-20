@@ -41,12 +41,17 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 | Tool | What it does |
 |---|---|
 | `list_connections` | DBeaver PostgreSQL connections with status (available, unavailable, unsupported), reason and type (dev, test, prod). Never hosts or credentials. |
+| `list_databases` | The databases of the server behind a connection, ordered by name (connectable, not templates), and the connection's default database, the one DBeaver points at. The fixed query is run by the server itself; `SELECT ... FROM pg_database` sent through `query` stays refused. |
 | `search_schema` | Tables and columns whose name matches a pattern. |
 | `list_tables` | Tables and views with kind, estimated rows and column count. |
 | `describe_table` | Columns, keys in both directions, indexes, estimates, and which columns will be pseudonymized. |
 | `query` | One read-only statement; rows with pseudonymized values, the list of pseudonymized columns and why, translated literals, warnings, structured truncation. |
 | `explain` | The plan of one statement, without executing it; literals in the plan are pseudonymized. |
 | `server_info` | Live limits, reversible and non-reversible kinds, known limitations. |
+
+### Choosing the database
+
+A DBeaver connection points at one database, often `postgres`, while the application databases live on the same server. `query`, `explain`, `search_schema`, `list_tables` and `describe_table` accept an optional `database` argument; its names come from `list_databases`. It keeps the host, port, SSH tunnel, credentials, Azure token handling and `sslmode` of the connection and only changes the database name, including the one matched in `~/.pgpass`. Sessions are kept per connection and database. Without the argument the connection's own database is used. The read-only guard and the pseudonymization are the same for every database. Database names are returned as they are, since they are the value of the argument. A database that does not exist is reported with the server message and SQLSTATE `3D000`.
 
 ## Azure Database for PostgreSQL
 

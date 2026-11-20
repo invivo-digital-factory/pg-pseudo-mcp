@@ -15,13 +15,14 @@ use super::server_info::server_info;
 use crate::common::AppConfig;
 use crate::contexts::connections::presentation::list_connections;
 use crate::contexts::querying::presentation::{
-    DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs, describe_table,
-    explain, json_result, list_tables, query, search_schema,
+    DescribeTableArgs, ExplainArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
+    describe_table, explain, json_result, list_databases, list_tables, query, search_schema,
 };
 
 pub const INSTRUCTIONS: &str = "\
 pg-pseudo-mcp gives read-only access to the PostgreSQL databases configured in the developer's DBeaver.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query.
+A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
 A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived).
 You may reuse a pseudonym verbatim in a later query: emails, phones, IBAN, SIREN, SIRET, NIR, card numbers, IP addresses, full person names and last names are translated back to the real value before execution. Check translated_literals and warnings to confirm.
@@ -58,6 +59,17 @@ impl PgPseudoServer {
     )]
     async fn list_connections(&self) -> CallToolResult {
         list_connections(&self.contexts.connections.list_connections).await
+    }
+
+    #[tool(
+        description = "List the databases of the server behind one connection, with the connection's default database (the one DBeaver points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn list_databases(
+        &self,
+        Parameters(args): Parameters<ListDatabasesArgs>,
+    ) -> CallToolResult {
+        list_databases(&self.contexts.querying.list_databases, args).await
     }
 
     #[tool(
