@@ -103,13 +103,13 @@ pub fn encrypt_for_tests(json: &str, iv: [u8; IV_LEN]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     const OPENSSL_VECTOR: &str = "000102030405060708090a0b0c0d0e0f01206c1fba1deb1880f6f3bc45b67a80918cd4e2fddadd690911b53efe445e9654443db46135c89f6509e4a6df3ee1fc41919692ccf62c9b933e206891ab01a3c41644f9b5111bf30355f7fc1d36d46d";
 
     #[test]
-    fn decrypts_a_ciphertext_produced_by_openssl() {
+    fn dechiffre_un_texte_chiffre_produit_par_openssl() {
         let bytes = hex::decode(OPENSSL_VECTOR).unwrap();
         let store = CredentialStore::from_encrypted(&bytes).unwrap();
         let saved = store.get("conn-x").unwrap();
@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_connection_credentials() {
+    fn les_identifiants_de_connexion_survivent_a_un_aller_retour_chiffre() {
         let json = r##"{"c1":{"#connection":{"user":"u","password":"p"},"network/ssh_tunnel":{"user":"x"}},"c2":{}}"##;
         let bytes = encrypt_for_tests(json, [7; 16]);
         let store = CredentialStore::from_encrypted(&bytes).unwrap();
@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_ssh_tunnel_credentials_even_without_a_connection_node() {
+    fn les_identifiants_du_tunnel_sont_lus_meme_sans_noeud_de_connexion() {
         let json = r##"{"c1":{"#connection":{"user":"u"},"network/ssh_tunnel":{"user":"ssh-u","password":"ssh-p"}},"c2":{"network/ssh_tunnel":{"user":"only-ssh"}}}"##;
         let store = CredentialStore::from_encrypted(&encrypt_for_tests(json, [3; 16])).unwrap();
         let ssh = store.ssh("c1").unwrap();
@@ -142,13 +142,13 @@ mod tests {
     }
 
     #[test]
-    fn garbage_is_an_error() {
+    fn des_donnees_illisibles_donnent_une_erreur() {
         assert!(CredentialStore::from_encrypted(&[1; 8]).is_err());
         assert!(CredentialStore::from_encrypted(&[1; 48]).is_err());
     }
 
     #[test]
-    fn secret_never_prints() {
+    fn un_secret_ne_s_affiche_jamais() {
         let secret = Secret::new("hunter2");
         assert_eq!(format!("{secret:?}{secret}"), "******");
     }

@@ -35,11 +35,11 @@ pub fn estimate(kind: &str, reltuples: Option<f64>) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn long_type_spellings_are_shortened() {
+    fn les_noms_de_types_longs_sont_abreges() {
         assert_eq!(short_type("timestamp with time zone"), "timestamptz");
         assert_eq!(short_type("character varying(255)[]"), "varchar(255)[]");
         assert_eq!(short_type("character(2)"), "char(2)");
@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_or_view_estimates_are_null() {
+    fn l_estimation_inconnue_ou_d_une_vue_est_nulle() {
         assert_eq!(estimate("table", Some(-1.0)), None);
         assert_eq!(estimate("table", Some(0.0)), Some(0));
         assert_eq!(estimate("table", Some(9_999.6)), Some(10_000));

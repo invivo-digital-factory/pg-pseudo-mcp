@@ -155,266 +155,273 @@ async fn connect_error(options: &ConnectOptions) -> String {
     }
 }
 
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn key_authentication_tunnels_queries_to_the_database() {
-    let mut session = connect(&unverified(key_auth()))
-        .await
-        .expect("connect through the tunnel");
-    select_one(&mut session).await;
-    let output = session
-        .run_read_only("SELECT email FROM customers", 100, TIMEOUT_MS)
-        .await
-        .expect("select customers");
-    assert!(!output.rows.is_empty());
-}
+mod integration {
+    use super::*;
 
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_preferred_tls_mode_negotiates_through_the_tunnel() {
-    let mut options = unverified(key_auth());
-    options.sslmode = SslMode::Prefer;
-    let mut session = connect(&options)
-        .await
-        .expect("connect with sslmode prefer through the tunnel");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn an_encrypted_key_opens_with_its_passphrase() {
-    let mut session = connect(&unverified(TunnelAuth::PublicKey {
-        key_path: asset("tunnel_test_ed25519_encrypted"),
-        passphrase: Some(KEY_PASSPHRASE.to_string()),
-    }))
-    .await
-    .expect("connect with the decrypted key");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn an_encrypted_key_without_passphrase_is_refused_clearly() {
-    let message = connect_error(&unverified(TunnelAuth::PublicKey {
-        key_path: asset("tunnel_test_ed25519_encrypted"),
-        passphrase: None,
-    }))
-    .await;
-    assert!(message.contains("encrypted"), "{message}");
-    assert!(message.contains("passphrase"), "{message}");
-    assert!(
-        message.contains("tunnel_test_ed25519_encrypted"),
-        "{message}"
-    );
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_wrong_passphrase_is_refused_without_echoing_it() {
-    let message = connect_error(&unverified(TunnelAuth::PublicKey {
-        key_path: asset("tunnel_test_ed25519_encrypted"),
-        passphrase: Some("not-the-passphrase-7731".to_string()),
-    }))
-    .await;
-    assert!(message.contains("passphrase"), "{message}");
-    assert!(!message.contains("not-the-passphrase-7731"), "{message}");
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn password_authentication_tunnels_queries() {
-    let mut session = connect(&unverified(TunnelAuth::Password(SSH_PASSWORD.to_string())))
-        .await
-        .expect("connect with the ssh password");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_rejected_password_is_reported_without_echoing_it() {
-    let message = connect_error(&unverified(TunnelAuth::Password(
-        "wrong-ssh-secret-5521".to_string(),
-    )))
-    .await;
-    assert!(message.contains("rejected"), "{message}");
-    assert!(message.contains(SSH_USER), "{message}");
-    assert!(!message.contains("wrong-ssh-secret-5521"), "{message}");
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_host_key_listed_in_known_hosts_is_accepted() {
-    let file = listing_container_key();
-    let mut session = connect(&options(key_auth(), true, Some(&file.path)))
-        .await
-        .expect("connect with a verified host key");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn the_host_key_type_already_known_is_negotiated_first() {
-    let file = known_hosts(&format!(
-        "{} {}\n",
-        host_pattern(),
-        public_key_fields("ssh_host_ecdsa_test.pub")
-    ));
-    let mut session = connect(&options(key_auth(), true, Some(&file.path)))
-        .await
-        .expect("connect with only the ecdsa host key recorded");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_hashed_known_hosts_entry_is_accepted() {
-    let file = known_hosts(&format!(
-        "{} {}\n",
-        hashed_host_pattern(),
-        public_key_fields("ssh_host_ed25519_test.pub")
-    ));
-    let mut session = connect(&options(key_auth(), true, Some(&file.path)))
-        .await
-        .expect("connect with a hashed known_hosts entry");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn an_unknown_host_key_is_refused_with_instructions() {
-    let file = known_hosts("");
-    let message = connect_error(&options(key_auth(), true, Some(&file.path))).await;
-    assert!(message.contains("not in known_hosts"), "{message}");
-    assert!(
-        message.contains(&format!("ssh-keyscan -p {} {SSH_HOST}", ssh_port())),
-        "{message}"
-    );
-    assert!(message.contains("SHA256:"), "{message}");
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_changed_host_key_is_refused() {
-    let file = known_hosts(&format!(
-        "{} {}\n",
-        host_pattern(),
-        public_key_fields("other_host_ed25519_test.pub")
-    ));
-    let message = connect_error(&options(key_auth(), true, Some(&file.path))).await;
-    assert!(message.contains("changed"), "{message}");
-    assert!(!message.contains("not in known_hosts"), "{message}");
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn host_verification_can_be_bypassed_without_a_known_hosts_file() {
-    let missing = tempfile::tempdir().expect("dir");
-    let options = options(key_auth(), false, Some(&missing.path().join("absent")));
-    let mut session = connect(&options)
-        .await
-        .expect("connect without verification");
-    select_one(&mut session).await;
-}
-
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_refused_forward_names_the_remote_endpoint() {
-    let mut options = unverified(key_auth());
-    if let Some(tunnel) = options.tunnel.as_mut() {
-        tunnel.remote_port = 1;
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_ssh_ouvre_un_tunnel_vers_la_base() {
+        let mut session = connect(&unverified(key_auth()))
+            .await
+            .expect("connect through the tunnel");
+        select_one(&mut session).await;
+        let output = session
+            .run_read_only("SELECT email FROM customers", 100, TIMEOUT_MS)
+            .await
+            .expect("select customers");
+        assert!(!output.rows.is_empty());
     }
-    let message = connect_error(&options).await;
-    assert!(message.contains("postgres:1"), "{message}");
-    assert!(message.contains("forward"), "{message}");
-}
 
-#[tokio::test]
-#[ignore = "needs the docker compose ssh and postgres services"]
-async fn a_dropped_ssh_session_is_re_established_on_the_next_query() {
-    let mut options = unverified(key_auth());
-    if let Some(tunnel) = options.tunnel.as_mut() {
-        tunnel.user = DROPPED_USER.to_string();
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn le_mode_tls_prefere_est_negocie_a_travers_le_tunnel() {
+        let mut options = unverified(key_auth());
+        options.sslmode = SslMode::Prefer;
+        let mut session = connect(&options)
+            .await
+            .expect("connect with sslmode prefer through the tunnel");
+        select_one(&mut session).await;
     }
-    let mut session = connect(&options).await.expect("connect through the tunnel");
-    let before = backend_pid(&mut session).await;
-    kill_ssh_sessions_of(DROPPED_USER).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let after = backend_pid(&mut session).await;
-    assert_ne!(
-        before, after,
-        "the query must run on a new tunneled connection"
-    );
-}
 
-#[tokio::test]
-async fn a_stalled_ssh_server_times_out_within_the_connect_deadline() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-    let port = listener.local_addr().expect("address").port();
-    tokio::spawn(async move {
-        let mut held = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
-            held.push(socket);
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_chiffree_s_ouvre_avec_sa_phrase_secrete() {
+        let mut session = connect(&unverified(TunnelAuth::PublicKey {
+            key_path: asset("tunnel_test_ed25519_encrypted"),
+            passphrase: Some(KEY_PASSPHRASE.to_string()),
+        }))
+        .await
+        .expect("connect with the decrypted key");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_chiffree_sans_phrase_secrete_est_refusee_clairement() {
+        let message = connect_error(&unverified(TunnelAuth::PublicKey {
+            key_path: asset("tunnel_test_ed25519_encrypted"),
+            passphrase: None,
+        }))
+        .await;
+        assert!(message.contains("encrypted"), "{message}");
+        assert!(message.contains("passphrase"), "{message}");
+        assert!(
+            message.contains("tunnel_test_ed25519_encrypted"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_phrase_secrete_erronee_est_refusee_sans_etre_affichee() {
+        let message = connect_error(&unverified(TunnelAuth::PublicKey {
+            key_path: asset("tunnel_test_ed25519_encrypted"),
+            passphrase: Some("not-the-passphrase-7731".to_string()),
+        }))
+        .await;
+        assert!(message.contains("passphrase"), "{message}");
+        assert!(!message.contains("not-the-passphrase-7731"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn un_mot_de_passe_ssh_ouvre_un_tunnel_vers_la_base() {
+        let mut session = connect(&unverified(TunnelAuth::Password(SSH_PASSWORD.to_string())))
+            .await
+            .expect("connect with the ssh password");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn un_mot_de_passe_ssh_rejete_est_signale_sans_etre_affiche() {
+        let message = connect_error(&unverified(TunnelAuth::Password(
+            "wrong-ssh-secret-5521".to_string(),
+        )))
+        .await;
+        assert!(message.contains("rejected"), "{message}");
+        assert!(message.contains(SSH_USER), "{message}");
+        assert!(!message.contains("wrong-ssh-secret-5521"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_d_hote_listee_dans_known_hosts_est_acceptee() {
+        let file = listing_container_key();
+        let mut session = connect(&options(key_auth(), true, Some(&file.path)))
+            .await
+            .expect("connect with a verified host key");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn le_type_de_cle_d_hote_deja_connu_est_negocie_en_premier() {
+        let file = known_hosts(&format!(
+            "{} {}\n",
+            host_pattern(),
+            public_key_fields("ssh_host_ecdsa_test.pub")
+        ));
+        let mut session = connect(&options(key_auth(), true, Some(&file.path)))
+            .await
+            .expect("connect with only the ecdsa host key recorded");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_entree_known_hosts_hachee_est_acceptee() {
+        let file = known_hosts(&format!(
+            "{} {}\n",
+            hashed_host_pattern(),
+            public_key_fields("ssh_host_ed25519_test.pub")
+        ));
+        let mut session = connect(&options(key_auth(), true, Some(&file.path)))
+            .await
+            .expect("connect with a hashed known_hosts entry");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_d_hote_inconnue_est_refusee_avec_des_instructions() {
+        let file = known_hosts("");
+        let message = connect_error(&options(key_auth(), true, Some(&file.path))).await;
+        assert!(message.contains("not in known_hosts"), "{message}");
+        assert!(
+            message.contains(&format!("ssh-keyscan -p {} {SSH_HOST}", ssh_port())),
+            "{message}"
+        );
+        assert!(message.contains("SHA256:"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_d_hote_modifiee_est_refusee() {
+        let file = known_hosts(&format!(
+            "{} {}\n",
+            host_pattern(),
+            public_key_fields("other_host_ed25519_test.pub")
+        ));
+        let message = connect_error(&options(key_auth(), true, Some(&file.path))).await;
+        assert!(message.contains("changed"), "{message}");
+        assert!(!message.contains("not in known_hosts"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn la_verification_d_hote_peut_etre_desactivee_sans_fichier_known_hosts() {
+        let missing = tempfile::tempdir().expect("dir");
+        let options = options(key_auth(), false, Some(&missing.path().join("absent")));
+        let mut session = connect(&options)
+            .await
+            .expect("connect without verification");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_redirection_refusee_nomme_la_destination_distante() {
+        let mut options = unverified(key_auth());
+        if let Some(tunnel) = options.tunnel.as_mut() {
+            tunnel.remote_port = 1;
         }
-    });
-    let options = ConnectOptions {
-        host: REMOTE_HOST.to_string(),
-        port: REMOTE_PORT,
-        database: "app".to_string(),
-        user: "reader".to_string(),
-        password: "p".to_string(),
-        sslmode: SslMode::Disable,
-        tunnel: Some(Tunnel {
-            host: "127.0.0.1".to_string(),
-            port,
-            user: SSH_USER.to_string(),
-            auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
-            remote_host: REMOTE_HOST.to_string(),
-            remote_port: REMOTE_PORT,
-            verify_host_key: false,
-            known_hosts: None,
-        }),
-    };
-    let started = Instant::now();
-    let error = match connect_within(&options, Duration::from_millis(400)).await {
-        Ok(_) => panic!("a stalled ssh server cannot open a tunnel"),
-        Err(error) => error.to_string(),
-    };
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert!(error.contains("SSH"), "{error}");
-    assert!(error.contains("timed out"), "{error}");
-    assert!(!error.contains("ssh-secret-0042"), "{error}");
-}
-
-struct AnyHostKey;
-
-impl client::Handler for AnyHostKey {
-    type Error = russh::Error;
-
-    async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
-        Ok(true)
+        let message = connect_error(&options).await;
+        assert!(message.contains("postgres:1"), "{message}");
+        assert!(message.contains("forward"), "{message}");
     }
-}
 
-async fn kill_ssh_sessions_of(user: &str) {
-    let config = Arc::new(client::Config::default());
-    let mut handle = client::connect(config, (SSH_HOST, ssh_port()), AnyHostKey)
-        .await
-        .expect("admin ssh connection");
-    let auth = handle
-        .authenticate_password(user, user)
-        .await
-        .expect("admin ssh authentication");
-    assert!(auth.success());
-    let mut channel = handle
-        .channel_open_session()
-        .await
-        .expect("admin ssh session");
-    channel
-        .exec(false, "kill -KILL -1")
-        .await
-        .expect("exec kill");
-    let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        while channel.wait().await.is_some() {}
-    })
-    .await;
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_session_ssh_coupee_est_retablie_a_la_requete_suivante() {
+        let mut options = unverified(key_auth());
+        if let Some(tunnel) = options.tunnel.as_mut() {
+            tunnel.user = DROPPED_USER.to_string();
+        }
+        let mut session = connect(&options).await.expect("connect through the tunnel");
+        let before = backend_pid(&mut session).await;
+        kill_ssh_sessions_of(DROPPED_USER).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let after = backend_pid(&mut session).await;
+        assert_ne!(
+            before, after,
+            "the query must run on a new tunneled connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn un_serveur_ssh_fige_expire_dans_le_delai_de_connexion() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        let options = ConnectOptions {
+            host: REMOTE_HOST.to_string(),
+            port: REMOTE_PORT,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: "p".to_string(),
+            sslmode: SslMode::Disable,
+            tunnel: Some(Tunnel {
+                host: "127.0.0.1".to_string(),
+                port,
+                user: SSH_USER.to_string(),
+                auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
+                remote_host: REMOTE_HOST.to_string(),
+                remote_port: REMOTE_PORT,
+                verify_host_key: false,
+                known_hosts: None,
+            }),
+        };
+        let started = Instant::now();
+        let error = match connect_within(&options, Duration::from_millis(400)).await {
+            Ok(_) => panic!("a stalled ssh server cannot open a tunnel"),
+            Err(error) => error.to_string(),
+        };
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(error.contains("SSH"), "{error}");
+        assert!(error.contains("timed out"), "{error}");
+        assert!(!error.contains("ssh-secret-0042"), "{error}");
+    }
+
+    struct AnyHostKey;
+
+    impl client::Handler for AnyHostKey {
+        type Error = russh::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    async fn kill_ssh_sessions_of(user: &str) {
+        let config = Arc::new(client::Config::default());
+        let mut handle = client::connect(config, (SSH_HOST, ssh_port()), AnyHostKey)
+            .await
+            .expect("admin ssh connection");
+        let auth = handle
+            .authenticate_password(user, user)
+            .await
+            .expect("admin ssh authentication");
+        assert!(auth.success());
+        let mut channel = handle
+            .channel_open_session()
+            .await
+            .expect("admin ssh session");
+        channel
+            .exec(false, "kill -KILL -1")
+            .await
+            .expect("exec kill");
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while channel.wait().await.is_some() {}
+        })
+        .await;
+    }
 }

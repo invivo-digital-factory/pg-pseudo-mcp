@@ -117,11 +117,11 @@ pub fn numeric_shape_kind(digits: &str, column_hint: Option<Kind>) -> Option<Kin
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn type_families_cover_postgres_spellings() {
+    fn les_familles_de_types_couvrent_les_graphies_postgres() {
         assert_eq!(type_family("int8"), TypeFamily::Numeric);
         assert_eq!(type_family("numeric(12,4)"), TypeFamily::Numeric);
         assert_eq!(type_family("_int4"), TypeFamily::Numeric);
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn numeric_shape_reads_decimal_renderings() {
+    fn la_forme_numerique_lit_les_rendus_decimaux() {
         assert_eq!(
             numeric_shape_kind("33641278395.0000", Some(Kind::Phone)),
             Some(Kind::Phone)

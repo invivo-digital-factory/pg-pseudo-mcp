@@ -7,11 +7,11 @@ pub fn literal(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn literals_cannot_escape_their_quotes() {
+    fn un_litteral_ne_peut_pas_s_echapper_de_ses_guillemets() {
         assert_eq!(literal("it's"), "E'it''s'");
         assert_eq!(literal("a\\'b"), "E'a\\\\''b'");
         assert_eq!(literal("x\0y"), "E'xy'");

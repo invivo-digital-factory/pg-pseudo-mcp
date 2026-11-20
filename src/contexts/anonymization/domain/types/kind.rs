@@ -87,18 +87,18 @@ impl Kind {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn names_round_trip_for_every_kind() {
+    fn les_noms_de_type_font_l_aller_retour_pour_chaque_type() {
         for kind in Kind::ALL {
             assert_eq!(Kind::parse(kind.as_str()), Some(kind));
         }
     }
 
     #[test]
-    fn small_pool_kinds_are_not_reversible() {
+    fn les_types_a_petit_pool_ne_sont_pas_reversibles() {
         for kind in [
             Kind::FirstName,
             Kind::City,

@@ -83,11 +83,11 @@ impl fmt::Debug for TunnelAuth {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn debug_output_never_contains_the_password() {
+    fn l_affichage_debug_des_options_ne_contient_jamais_le_mot_de_passe() {
         let options = ConnectOptions {
             host: "localhost".into(),
             port: 5432,
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_output_never_contains_tunnel_secrets() {
+    fn l_affichage_debug_des_options_ne_contient_jamais_les_secrets_du_tunnel() {
         let options = ConnectOptions {
             host: "db.internal".into(),
             port: 5432,

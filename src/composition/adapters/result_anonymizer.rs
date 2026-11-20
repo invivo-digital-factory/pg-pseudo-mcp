@@ -58,12 +58,12 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
 }
 
 #[cfg(test)]
-mod tests {
+mod integration {
     use super::*;
     use crate::contexts::anonymization::injector::AnonymizationInjector;
 
     #[test]
-    fn json_plan_strings_are_scrubbed_before_escaping() {
+    fn les_chaines_d_un_plan_json_sont_nettoyees_avant_l_echappement() {
         let dir = tempfile::tempdir().unwrap();
         let adapter = ResultAnonymizerAdapter::new(
             AnonymizationInjector::new(dir.path()).use_cases().unwrap(),

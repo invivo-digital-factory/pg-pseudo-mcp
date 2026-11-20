@@ -151,11 +151,11 @@ pub fn dictionary_kind(column_name: &str) -> Option<Kind> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn tokenize_splits_snake_kebab_camel_and_digits() {
+    fn le_decoupage_separe_snake_kebab_camel_et_chiffres() {
         assert_eq!(tokenize("telephonePortable"), vec!["telephone", "portable"]);
         assert_eq!(tokenize("IPAddress"), vec!["ip", "address"]);
         assert_eq!(
@@ -166,21 +166,21 @@ mod tests {
     }
 
     #[test]
-    fn longest_personal_hit_wins() {
+    fn la_correspondance_personnelle_la_plus_longue_l_emporte() {
         assert_eq!(dictionary_kind("email_address"), Some(Kind::Email));
         assert_eq!(dictionary_kind("nom_famille"), Some(Kind::LastName));
         assert_eq!(dictionary_kind("adresse_ip"), Some(Kind::IpAddress));
     }
 
     #[test]
-    fn ignored_categories_shield_the_words_they_contain() {
+    fn une_categorie_ignoree_protege_les_mots_qu_elle_contient() {
         assert_eq!(dictionary_kind("nom_utilisateur"), None);
         assert_eq!(dictionary_kind("mac_address"), None);
         assert_eq!(dictionary_kind("client_id"), None);
     }
 
     #[test]
-    fn every_dictionary_line_has_three_fields() {
+    fn chaque_ligne_du_dictionnaire_a_trois_champs() {
         assert!(
             IDENTIFIERS
                 .lines()

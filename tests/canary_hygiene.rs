@@ -20,21 +20,25 @@ fn words_in_name_pools(values: &[&str]) -> Vec<String> {
     found
 }
 
-#[test]
-fn canary_values_never_share_a_word_with_the_pseudonym_name_pools() {
-    let shared = words_in_name_pools(common::CANARY_VALUES);
-    assert!(
-        shared.is_empty(),
-        "canary words {shared:?} are in the name lists the generator draws pseudonyms from; \
-         a pseudonym can then contain them (flaky leak checks) and name detection masks \
-         leaks that rare real names would reveal; use invented names absent from those lists"
-    );
-}
+mod unit {
+    use super::*;
 
-#[test]
-fn the_hygiene_check_catches_a_common_first_name() {
-    assert_eq!(
-        words_in_name_pools(&["Marie Kervadec", "marie.k@canary-mail.fr"]),
-        vec!["marie".to_string()]
-    );
+    #[test]
+    fn les_valeurs_canari_ne_partagent_aucun_mot_avec_les_noms_des_pseudonymes() {
+        let shared = words_in_name_pools(common::CANARY_VALUES);
+        assert!(
+            shared.is_empty(),
+            "canary words {shared:?} are in the name lists the generator draws pseudonyms from; \
+             a pseudonym can then contain them (flaky leak checks) and name detection masks \
+             leaks that rare real names would reveal; use invented names absent from those lists"
+        );
+    }
+
+    #[test]
+    fn le_controle_d_hygiene_detecte_un_prenom_courant() {
+        assert_eq!(
+            words_in_name_pools(&["Marie Kervadec", "marie.k@canary-mail.fr"]),
+            vec!["marie".to_string()]
+        );
+    }
 }

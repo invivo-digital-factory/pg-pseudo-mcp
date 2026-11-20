@@ -329,17 +329,17 @@ pub fn detect_spans(text: &str) -> Vec<Span> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn luhn_accepts_known_siren_and_rejects_a_typo() {
+    fn luhn_accepte_un_siren_connu_et_refuse_une_faute_de_frappe() {
         assert!(luhn("732829320"));
         assert!(!luhn("732829321"));
     }
 
     #[test]
-    fn iban_checks_country_length_and_mod_97() {
+    fn un_iban_verifie_le_pays_la_longueur_et_le_modulo_97() {
         assert!(iban_valid("FR7630006000011234567890189"));
         assert!(!iban_valid("FR7630006000011234567890188"));
         assert!(!iban_valid("FR763000600001123456789018"));
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn nir_key_is_97_minus_the_body_modulo_97() {
+    fn la_cle_du_nir_est_97_moins_le_corps_modulo_97() {
         assert!(nir_valid("285117512345622"));
         assert!(!nir_valid("285117512345623"));
         let corsica_body: u64 = 1_850_219_012_345;
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn french_phone_digits_accept_lost_leading_zero_and_country_code() {
+    fn un_telephone_francais_accepte_le_zero_perdu_et_l_indicatif_pays() {
         assert!(french_phone_digits("0612345678"));
         assert!(french_phone_digits("612345678"));
         assert!(french_phone_digits("33612345678"));
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn phone_variants_are_detected() {
+    fn les_variantes_de_telephone_sont_detectees() {
         for text in [
             "06 12 34 56 78",
             "06.12.34.56.78",
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_spans_keep_the_longest() {
+    fn des_segments_qui_se_chevauchent_gardent_le_plus_long() {
         let text = "SIRET 732 829 320 00074";
         let spans = detect_spans(text);
         assert_eq!(spans.len(), 1);

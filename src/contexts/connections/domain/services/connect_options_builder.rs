@@ -38,7 +38,7 @@ pub fn connect_options(params: &ConnectParams, known_hosts: Option<&Path>) -> Co
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use std::path::PathBuf;
 
     use super::*;
@@ -65,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dbeaver_ssh_tunnel_maps_to_a_pg_tunnel_with_the_configured_known_hosts() {
+    fn un_tunnel_ssh_dbeaver_devient_un_tunnel_pg_avec_le_known_hosts_configure() {
         let known_hosts = PathBuf::from("/etc/pg-pseudo/known_hosts");
         let options = connect_options(
             &tunneled(SshAuth::PublicKey {

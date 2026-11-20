@@ -50,7 +50,7 @@ pub fn qualified(candidate: &Candidate) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     fn candidate(schema: &str, name: &str, path_rank: Option<i64>) -> Candidate {
@@ -63,7 +63,7 @@ mod tests {
     }
 
     #[test]
-    fn search_path_order_resolves_bare_names() {
+    fn l_ordre_du_search_path_resout_les_noms_sans_schema() {
         let picked = pick(
             vec![
                 candidate("sales", "orders", Some(2)),
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn names_outside_the_search_path_are_ambiguous() {
+    fn un_nom_hors_search_path_present_dans_plusieurs_schemas_est_ambigu() {
         let picked = pick(
             vec![
                 candidate("sales", "orders", None),
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_case_wins_over_case_insensitive_matches() {
+    fn la_casse_exacte_l_emporte_sur_les_correspondances_insensibles() {
         let picked = pick(
             vec![
                 candidate("public", "Orders", Some(1)),

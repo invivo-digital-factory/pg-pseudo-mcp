@@ -67,11 +67,11 @@ fn is_word_char(c: char) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn replaces_every_case_variant_of_the_needle() {
+    fn la_valeur_injectee_est_remplacee_dans_toutes_ses_variantes_de_casse() {
         assert_eq!(
             replace_injected("A b@C.fr and B@c.FR", "b@c.fr", "x@y.org", |_| None).as_deref(),
             Some("A x@y.org and x@y.org")
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn an_injected_value_is_replaced_only_where_it_stands_as_a_whole_word() {
+    fn une_valeur_injectee_n_est_remplacee_que_comme_mot_entier() {
         assert_eq!(replace_injected("Troyes", "Roy", "Zed", |_| None), None);
         assert_eq!(
             replace_injected("leroy.marc@gmail.com", "Roy", "Zed", |_| None),

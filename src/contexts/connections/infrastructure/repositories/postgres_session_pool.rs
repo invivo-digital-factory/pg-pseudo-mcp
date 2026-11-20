@@ -89,7 +89,7 @@ impl SessionPool for PostgresSessionPool {
 }
 
 #[cfg(test)]
-mod tests {
+mod integration {
     use std::path::Path;
     use std::time::Instant;
 
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_server_stalling_after_the_socket_opens_neither_hangs_nor_blocks_other_connections() {
+    async fn un_serveur_qui_cale_apres_l_ouverture_ne_bloque_pas_les_autres_connexions() {
         let root = tempfile::tempdir().expect("dbeaver dir");
         write_workspace(
             root.path(),
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_changed_password_in_dbeaver_replaces_the_cached_session() {
+    async fn un_mot_de_passe_modifie_dans_dbeaver_remplace_la_session_en_cache() {
         let root = tempfile::tempdir().expect("dbeaver dir");
         let port = refused_port().await;
         write_workspace(

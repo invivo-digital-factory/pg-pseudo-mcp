@@ -33,14 +33,14 @@ impl AppConfig {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
     use super::*;
 
     #[test]
-    fn empty_or_relative_directories_fall_back_to_defaults() {
+    fn un_repertoire_vide_ou_relatif_retombe_sur_la_valeur_par_defaut() {
         let config = AppConfig::from_vars(
             Some(OsString::new()),
             Some(OsString::from("relative")),

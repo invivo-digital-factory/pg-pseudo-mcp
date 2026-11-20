@@ -56,12 +56,12 @@ pub struct IndexEntry {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
     use crate::contexts::querying::domain::constants::catalog::DETECTED_PER_VALUE;
 
     #[test]
-    fn a_sixty_column_description_stays_under_four_kilobytes() {
+    fn la_description_d_une_table_de_soixante_colonnes_tient_sous_quatre_ko() {
         let types = [
             "integer",
             "text",

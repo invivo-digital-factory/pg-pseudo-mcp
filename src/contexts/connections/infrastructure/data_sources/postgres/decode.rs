@@ -320,7 +320,7 @@ impl<'a> Reader<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     fn record(fields: &[(u32, Option<&[u8]>)]) -> Vec<u8> {
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_types_become_opaque_with_their_length() {
+    fn les_types_inconnus_deviennent_opaques_avec_leur_longueur() {
         let cell = decode_value(&Type::BYTEA, Some(&[1, 2, 3])).unwrap();
         assert_eq!(
             cell,
@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn anonymous_records_decode_builtin_fields_and_hide_unknown_ones() {
+    fn les_enregistrements_anonymes_decodent_les_champs_natifs_et_masquent_les_inconnus() {
         let int = 7i32.to_be_bytes();
         let raw = record(&[(INT4, Some(&int)), (99_999, Some(b"abc")), (TEXT, None)]);
         let cell = decode_value(&Type::RECORD, Some(&raw)).unwrap();
@@ -372,14 +372,14 @@ mod tests {
     }
 
     #[test]
-    fn truncated_records_are_rejected() {
+    fn les_enregistrements_tronques_sont_rejetes() {
         let mut raw = record(&[(TEXT, Some(b"abc"))]);
         raw.pop();
         assert!(decode_value(&Type::RECORD, Some(&raw)).is_err());
     }
 
     #[test]
-    fn jsonb_requires_the_known_version_byte() {
+    fn jsonb_exige_l_octet_de_version_connu() {
         assert_eq!(
             decode_value(&Type::JSONB, Some(b"\x01{\"a\":1}")).unwrap(),
             Cell::Json(serde_json::json!({"a": 1}))
@@ -388,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn uuids_render_hyphenated_lowercase() {
+    fn les_uuid_sont_rendus_en_minuscules_avec_tirets() {
         let bytes = [
             0xa0, 0xee, 0xbc, 0x99, 0x9c, 0x0b, 0x4e, 0xf8, 0xbb, 0x6d, 0x6b, 0xb9, 0xbd, 0x38,
             0x0a, 0x11,

@@ -66,11 +66,11 @@ impl ToolError {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn serializes_category_in_snake_case_and_omits_empty_fields() {
+    fn l_erreur_serialise_sa_categorie_en_snake_case_sans_champs_vides() {
         let error = ToolError::new(
             ErrorCategory::RefusedReadOnly,
             "dml",
@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn the_home_directory_never_reaches_the_agent() {
+    fn le_repertoire_personnel_n_atteint_jamais_l_agent() {
         let home = std::env::var("HOME").unwrap();
         let error = ToolError::new(
             ErrorCategory::ConnectionUnavailable,

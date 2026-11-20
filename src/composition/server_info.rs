@@ -90,11 +90,11 @@ pub const KNOWN_LIMITS: &[&str] = &[
 ];
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn exposes_the_same_limits_as_the_limits_module() {
+    fn les_infos_serveur_exposent_les_memes_limites_que_le_module_limits() {
         let info = server_info();
         assert_eq!(info.defaults.max_rows, limits::DEFAULT_MAX_ROWS);
         assert_eq!(info.maxima.max_rows, limits::MAX_ROWS_CEILING);
@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn advertised_kinds_match_their_reversibility() {
+    fn les_types_annonces_correspondent_a_leur_reversibilite() {
         use crate::contexts::anonymization::domain::types::Kind;
         let mut advertised = 0;
         for (names, reversible) in [(REVERSIBLE_KINDS, true), (NON_REVERSIBLE_KINDS, false)] {

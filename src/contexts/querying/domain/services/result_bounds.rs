@@ -76,7 +76,7 @@ fn cut_cell(value: &mut Value, offset: usize, max_chars: usize) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use serde_json::json;
 
     use super::*;
@@ -90,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offset_reads_the_next_slice_of_every_text_cell() {
+    fn un_decalage_lit_la_tranche_suivante_de_chaque_cellule_texte() {
         let long: String = ('a'..='z').cycle().take(1200).collect();
         let rows = vec![vec![json!(long), json!("short"), json!(7)]];
         let columns = [column("body"), column("label"), column("id")];
@@ -107,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn the_last_slice_is_not_reported_as_cut() {
+    fn la_derniere_tranche_n_est_pas_signalee_comme_tronquee() {
         let long: String = "x".repeat(1200);
         let mut truncated = Vec::new();
         let kept = bound_rows(

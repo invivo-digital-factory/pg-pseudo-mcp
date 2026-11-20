@@ -48,11 +48,11 @@ fn edit_distance(left: &str, right: &str) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn suggestions_prefer_substrings_then_small_edits() {
+    fn les_suggestions_privilegient_les_sous_chaines_puis_les_petites_fautes() {
         let known = vec![
             ("public".to_string(), "customers".to_string()),
             ("public".to_string(), "orders".to_string()),

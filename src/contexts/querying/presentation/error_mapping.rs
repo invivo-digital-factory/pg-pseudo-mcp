@@ -131,11 +131,11 @@ pub fn tool_error(error: QueryingError) -> ToolError {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn an_unknown_connection_lists_the_available_ones() {
+    fn une_connexion_inconnue_liste_les_connexions_disponibles() {
         let error = tool_error(QueryingError::UnknownConnection {
             name: "Nope".into(),
             available: vec!["Shop".into()],
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unavailable_connection_asks_the_developer_to_fix_dbeaver() {
+    fn une_connexion_indisponible_demande_de_corriger_dbeaver() {
         let error = tool_error(QueryingError::ConnectionUnavailable {
             reason: "no saved password".into(),
         });

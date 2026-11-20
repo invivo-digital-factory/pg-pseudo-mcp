@@ -554,53 +554,61 @@ fn parse_jdbc_url(url: &str) -> Result<UrlParts, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_url_with_ipv6_and_query() {
-        let parts = parse_jdbc_url("jdbc:postgresql://[::1]:5555/app?sslmode=disable").unwrap();
-        assert_eq!(parts.host, "::1");
-        assert_eq!(parts.port, Some(5555));
-        assert_eq!(parts.database.as_deref(), Some("app"));
-        assert_eq!(
-            parts.query,
-            vec![("sslmode".to_string(), "disable".to_string())]
-        );
-    }
+    mod integration {
+        use super::*;
 
-    #[test]
-    fn url_without_port_or_database() {
-        let parts = parse_jdbc_url("jdbc:postgresql://h.example/").unwrap();
-        assert_eq!(parts.host, "h.example");
-        assert_eq!(parts.port, None);
-        assert_eq!(parts.database, None);
-    }
-
-    #[test]
-    fn multi_host_url_is_rejected() {
-        assert!(parse_jdbc_url("jdbc:postgresql://a:1,b:2/db").is_err());
-    }
-
-    #[test]
-    fn unknown_sslmode_is_refused() {
-        assert!(parse_sslmode(Some("bogus")).is_err());
-        assert_eq!(parse_sslmode(None).unwrap(), SslMode::Prefer);
-    }
-
-    #[test]
-    fn data_source_suffixes_are_matched() {
-        let dir = tempfile::TempDir::new().unwrap();
-        for name in [
-            "data-sources.json",
-            "data-sources-2.json",
-            "data-sources.json.bak",
-            "data-sourcesx.json",
-            "other.json",
-        ] {
-            fs::write(dir.path().join(name), "{}").unwrap();
+        #[test]
+        fn les_suffixes_de_fichiers_data_sources_sont_reconnus() {
+            let dir = tempfile::TempDir::new().unwrap();
+            for name in [
+                "data-sources.json",
+                "data-sources-2.json",
+                "data-sources.json.bak",
+                "data-sourcesx.json",
+                "other.json",
+            ] {
+                fs::write(dir.path().join(name), "{}").unwrap();
+            }
+            let suffixes: Vec<String> = data_source_files(dir.path())
+                .into_iter()
+                .map(|(suffix, _)| suffix)
+                .collect();
+            assert_eq!(suffixes, vec!["".to_string(), "-2".to_string()]);
         }
-        let suffixes: Vec<String> = data_source_files(dir.path())
-            .into_iter()
-            .map(|(suffix, _)| suffix)
-            .collect();
-        assert_eq!(suffixes, vec!["".to_string(), "-2".to_string()]);
+    }
+
+    mod unit {
+        use super::*;
+
+        #[test]
+        fn une_url_ipv6_avec_requete_est_decomposee() {
+            let parts = parse_jdbc_url("jdbc:postgresql://[::1]:5555/app?sslmode=disable").unwrap();
+            assert_eq!(parts.host, "::1");
+            assert_eq!(parts.port, Some(5555));
+            assert_eq!(parts.database.as_deref(), Some("app"));
+            assert_eq!(
+                parts.query,
+                vec![("sslmode".to_string(), "disable".to_string())]
+            );
+        }
+
+        #[test]
+        fn une_url_sans_port_ni_base_est_acceptee() {
+            let parts = parse_jdbc_url("jdbc:postgresql://h.example/").unwrap();
+            assert_eq!(parts.host, "h.example");
+            assert_eq!(parts.port, None);
+            assert_eq!(parts.database, None);
+        }
+
+        #[test]
+        fn une_url_multi_hotes_est_rejetee() {
+            assert!(parse_jdbc_url("jdbc:postgresql://a:1,b:2/db").is_err());
+        }
+
+        #[test]
+        fn un_sslmode_inconnu_est_refuse() {
+            assert!(parse_sslmode(Some("bogus")).is_err());
+            assert_eq!(parse_sslmode(None).unwrap(), SslMode::Prefer);
+        }
     }
 }

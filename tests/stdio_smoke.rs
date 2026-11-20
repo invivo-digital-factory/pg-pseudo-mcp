@@ -73,62 +73,66 @@ impl Drop for McpProcess {
     }
 }
 
-#[test]
-fn lists_seven_read_only_tools_over_stdio() {
-    let mut server = McpProcess::start();
-    server.initialize();
-    server.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
-    let response = server.receive(2);
-    let tools = response["result"]["tools"].as_array().expect("tools array");
-    let mut names: Vec<&str> = tools
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect();
-    names.sort_unstable();
-    assert_eq!(
-        names,
-        [
-            "describe_table",
-            "explain",
-            "list_connections",
-            "list_tables",
-            "query",
-            "search_schema",
-            "server_info"
-        ]
-    );
-    for tool in tools {
-        assert_eq!(
-            tool["annotations"]["readOnlyHint"],
-            json!(true),
-            "{}",
-            tool["name"]
-        );
-        assert_eq!(
-            tool["annotations"]["openWorldHint"],
-            json!(false),
-            "{}",
-            tool["name"]
-        );
-    }
-}
+mod e2e {
+    use super::*;
 
-#[test]
-fn server_info_reports_the_limits() {
-    let mut server = McpProcess::start();
-    server.initialize();
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": { "name": "server_info", "arguments": {} }
-    }));
-    let response = server.receive(3);
-    let text = response["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text content");
-    let info: Value = serde_json::from_str(text).expect("json body");
-    assert_eq!(info["defaults"]["max_rows"], json!(50));
-    assert_eq!(info["maxima"]["max_rows"], json!(500));
-    assert_eq!(info["maxima"]["max_bytes"], json!(65536));
+    #[test]
+    fn le_serveur_expose_sept_outils_en_lecture_seule_sur_stdio() {
+        let mut server = McpProcess::start();
+        server.initialize();
+        server.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+        let response = server.receive(2);
+        let tools = response["result"]["tools"].as_array().expect("tools array");
+        let mut names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "describe_table",
+                "explain",
+                "list_connections",
+                "list_tables",
+                "query",
+                "search_schema",
+                "server_info"
+            ]
+        );
+        for tool in tools {
+            assert_eq!(
+                tool["annotations"]["readOnlyHint"],
+                json!(true),
+                "{}",
+                tool["name"]
+            );
+            assert_eq!(
+                tool["annotations"]["openWorldHint"],
+                json!(false),
+                "{}",
+                tool["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn server_info_annonce_les_limites_du_serveur() {
+        let mut server = McpProcess::start();
+        server.initialize();
+        server.send(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": { "name": "server_info", "arguments": {} }
+        }));
+        let response = server.receive(3);
+        let text = response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text content");
+        let info: Value = serde_json::from_str(text).expect("json body");
+        assert_eq!(info["defaults"]["max_rows"], json!(50));
+        assert_eq!(info["maxima"]["max_rows"], json!(500));
+        assert_eq!(info["maxima"]["max_bytes"], json!(65536));
+    }
 }

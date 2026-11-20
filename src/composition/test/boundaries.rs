@@ -340,137 +340,141 @@ fn assert_reported(name: &str, expected: &[&str]) {
     assert_eq!(violations(&fixture(name)), expected, "fixture {name}");
 }
 
-#[test]
-fn the_real_tree_respects_the_boundaries() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    assert_eq!(violations(&root), Vec::<String>::new());
-}
+mod integration {
+    use super::*;
 
-#[test]
-fn a_use_of_another_context_is_reported() {
-    assert_reported(
-        "cross_context_use",
-        &[
-            "contexts/connections/infrastructure/client.rs: crate::contexts::querying::Report resolves to crate::contexts::querying::Report",
-        ],
-    );
-}
+    #[test]
+    fn l_arborescence_reelle_respecte_les_frontieres_entre_couches() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        assert_eq!(violations(&root), Vec::<String>::new());
+    }
 
-#[test]
-fn a_brace_grouped_use_of_another_context_is_reported() {
-    assert_reported(
-        "brace_grouped_use",
-        &[
-            "contexts/connections/injector.rs: crate::contexts::anonymization::Kind resolves to crate::contexts::anonymization::Kind",
-        ],
-    );
-}
+    #[test]
+    fn l_usage_d_un_autre_contexte_est_signale() {
+        assert_reported(
+            "cross_context_use",
+            &[
+                "contexts/connections/infrastructure/client.rs: crate::contexts::querying::Report resolves to crate::contexts::querying::Report",
+            ],
+        );
+    }
 
-#[test]
-fn a_nested_brace_group_reports_only_the_forbidden_branch() {
-    assert_reported(
-        "nested_brace_group",
-        &[
-            "contexts/connections/injector.rs: crate::contexts::querying::Report resolves to crate::contexts::querying::Report",
-        ],
-    );
-}
+    #[test]
+    fn un_use_groupe_entre_accolades_vers_un_autre_contexte_est_signale() {
+        assert_reported(
+            "brace_grouped_use",
+            &[
+                "contexts/connections/injector.rs: crate::contexts::anonymization::Kind resolves to crate::contexts::anonymization::Kind",
+            ],
+        );
+    }
 
-#[test]
-fn an_inline_path_to_another_context_is_reported() {
-    assert_reported(
-        "inline_path",
-        &[
-            "contexts/connections/presentation/handler.rs: crate::contexts::anonymization::Kind::is_known resolves to crate::contexts::anonymization::Kind::is_known",
-        ],
-    );
-}
+    #[test]
+    fn un_groupe_imbrique_ne_signale_que_la_branche_interdite() {
+        assert_reported(
+            "nested_brace_group",
+            &[
+                "contexts/connections/injector.rs: crate::contexts::querying::Report resolves to crate::contexts::querying::Report",
+            ],
+        );
+    }
 
-#[test]
-fn a_super_chain_leaving_the_context_is_reported() {
-    assert_reported(
-        "super_escape",
-        &[
-            "contexts/connections/domain/rule.rs: super::super::super::anonymization::Kind resolves to crate::contexts::anonymization::Kind",
-        ],
-    );
-}
+    #[test]
+    fn un_chemin_en_ligne_vers_un_autre_contexte_est_signale() {
+        assert_reported(
+            "inline_path",
+            &[
+                "contexts/connections/presentation/handler.rs: crate::contexts::anonymization::Kind::is_known resolves to crate::contexts::anonymization::Kind::is_known",
+            ],
+        );
+    }
 
-#[test]
-fn a_super_chain_leaving_the_crate_is_reported() {
-    assert_reported(
-        "super_beyond_crate",
-        &["contexts/connections/mod.rs: super::super::super::Anything leaves the crate"],
-    );
-}
+    #[test]
+    fn une_chaine_de_super_sortant_du_contexte_est_signalee() {
+        assert_reported(
+            "super_escape",
+            &[
+                "contexts/connections/domain/rule.rs: super::super::super::anonymization::Kind resolves to crate::contexts::anonymization::Kind",
+            ],
+        );
+    }
 
-#[test]
-fn an_old_path_alias_inside_a_context_is_reported() {
-    assert_reported(
-        "old_path_alias",
-        &[
-            "contexts/connections/presentation/handler.rs: crate::anon::Kind resolves to crate::anon::Kind",
-        ],
-    );
-}
+    #[test]
+    fn une_chaine_de_super_sortant_de_la_crate_est_signalee() {
+        assert_reported(
+            "super_beyond_crate",
+            &["contexts/connections/mod.rs: super::super::super::Anything leaves the crate"],
+        );
+    }
 
-#[test]
-fn a_re_export_of_a_context_through_common_is_reported() {
-    assert_reported(
-        "common_reexport",
-        &[
-            "common/mod.rs: crate::contexts::connections::Session resolves to crate::contexts::connections::Session",
-        ],
-    );
-}
+    #[test]
+    fn un_ancien_alias_de_chemin_dans_un_contexte_est_signale() {
+        assert_reported(
+            "old_path_alias",
+            &[
+                "contexts/connections/presentation/handler.rs: crate::anon::Kind resolves to crate::anon::Kind",
+            ],
+        );
+    }
 
-#[test]
-fn common_importing_composition_is_reported() {
-    assert_reported(
-        "common_imports_composition",
-        &["common/config.rs: crate::composition::wire resolves to crate::composition::wire"],
-    );
-}
+    #[test]
+    fn la_reexportation_d_un_contexte_via_common_est_signalee() {
+        assert_reported(
+            "common_reexport",
+            &[
+                "common/mod.rs: crate::contexts::connections::Session resolves to crate::contexts::connections::Session",
+            ],
+        );
+    }
 
-#[test]
-fn a_context_importing_composition_is_reported() {
-    assert_reported(
-        "composition_import",
-        &[
-            "contexts/querying/presentation/handler.rs: crate::composition::server::Server resolves to crate::composition::server::Server",
-        ],
-    );
-}
+    #[test]
+    fn common_qui_importe_composition_est_signale() {
+        assert_reported(
+            "common_imports_composition",
+            &["common/config.rs: crate::composition::wire resolves to crate::composition::wire"],
+        );
+    }
 
-#[test]
-fn common_is_reported_in_a_use_case_and_accepted_in_an_injector() {
-    assert_reported(
-        "common_in_use_case",
-        &[
-            "contexts/connections/use_cases/open_session/use_case.rs: crate::common::AppConfig resolves to crate::common::AppConfig",
-        ],
-    );
-}
+    #[test]
+    fn un_contexte_qui_importe_composition_est_signale() {
+        assert_reported(
+            "composition_import",
+            &[
+                "contexts/querying/presentation/handler.rs: crate::composition::server::Server resolves to crate::composition::server::Server",
+            ],
+        );
+    }
 
-#[test]
-fn a_use_case_reaching_another_layer_of_its_context_is_reported() {
-    assert_reported(
-        "use_case_reaches_infrastructure",
-        &[
-            "contexts/connections/use_cases/open_session/use_case.rs: crate::contexts::connections::infrastructure::Client resolves to crate::contexts::connections::infrastructure::Client",
-        ],
-    );
-}
+    #[test]
+    fn common_est_signale_dans_un_cas_d_usage_et_accepte_dans_un_injecteur() {
+        assert_reported(
+            "common_in_use_case",
+            &[
+                "contexts/connections/use_cases/open_session/use_case.rs: crate::common::AppConfig resolves to crate::common::AppConfig",
+            ],
+        );
+    }
 
-#[test]
-fn an_infrastructure_crate_in_domain_is_reported_and_accepted_in_infrastructure() {
-    assert_reported(
-        "infrastructure_crate_in_domain",
-        &["contexts/connections/domain/types/session.rs: domain imports rusqlite"],
-    );
-}
+    #[test]
+    fn un_cas_d_usage_qui_atteint_une_autre_couche_de_son_contexte_est_signale() {
+        assert_reported(
+            "use_case_reaches_infrastructure",
+            &[
+                "contexts/connections/use_cases/open_session/use_case.rs: crate::contexts::connections::infrastructure::Client resolves to crate::contexts::connections::infrastructure::Client",
+            ],
+        );
+    }
 
-#[test]
-fn allowed_references_and_test_directories_are_not_reported() {
-    assert_reported("allowed_references", &[]);
+    #[test]
+    fn une_crate_d_infrastructure_dans_le_domaine_est_signalee() {
+        assert_reported(
+            "infrastructure_crate_in_domain",
+            &["contexts/connections/domain/types/session.rs: domain imports rusqlite"],
+        );
+    }
+
+    #[test]
+    fn les_references_autorisees_et_les_dossiers_de_test_ne_sont_pas_signales() {
+        assert_reported("allowed_references", &[]);
+    }
 }

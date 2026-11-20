@@ -28,66 +28,70 @@ fn assert_refused_fail_closed(result: &CallToolResult) {
     assert_eq!(error["retryable"], false);
 }
 
-#[tokio::test]
-async fn a_missing_secret_keeps_the_server_up_but_refuses_every_data_tool() {
-    let (contexts, _dbeaver, _data) = contexts_without_secret();
+mod e2e {
+    use super::*;
 
-    let connections = list_connections(&contexts).await;
-    assert!(!is_error(&connections));
-    assert!(body(&connections)["connections"].is_array());
+    #[tokio::test]
+    async fn un_secret_absent_garde_le_serveur_actif_mais_refuse_tous_les_outils_de_donnees() {
+        let (contexts, _dbeaver, _data) = contexts_without_secret();
 
-    assert_refused_fail_closed(
-        &query(
-            &contexts,
-            QueryArgs {
-                connection: "any".into(),
-                sql: "SELECT 1".into(),
-                ..QueryArgs::default()
-            },
-        )
-        .await,
-    );
-    assert_refused_fail_closed(
-        &explain(
-            &contexts,
-            ExplainArgs {
-                connection: "any".into(),
-                sql: "SELECT 1".into(),
-            },
-        )
-        .await,
-    );
-    assert_refused_fail_closed(
-        &search_schema(
-            &contexts,
-            SearchSchemaArgs {
-                connection: "any".into(),
-                pattern: "user".into(),
-            },
-        )
-        .await,
-    );
-    assert_refused_fail_closed(
-        &list_tables(
-            &contexts,
-            ListTablesArgs {
-                connection: "any".into(),
-                schema: None,
-                name_like: None,
-                limit: None,
-                offset: None,
-            },
-        )
-        .await,
-    );
-    assert_refused_fail_closed(
-        &describe_table(
-            &contexts,
-            DescribeTableArgs {
-                connection: "any".into(),
-                table: "users".into(),
-            },
-        )
-        .await,
-    );
+        let connections = list_connections(&contexts).await;
+        assert!(!is_error(&connections));
+        assert!(body(&connections)["connections"].is_array());
+
+        assert_refused_fail_closed(
+            &query(
+                &contexts,
+                QueryArgs {
+                    connection: "any".into(),
+                    sql: "SELECT 1".into(),
+                    ..QueryArgs::default()
+                },
+            )
+            .await,
+        );
+        assert_refused_fail_closed(
+            &explain(
+                &contexts,
+                ExplainArgs {
+                    connection: "any".into(),
+                    sql: "SELECT 1".into(),
+                },
+            )
+            .await,
+        );
+        assert_refused_fail_closed(
+            &search_schema(
+                &contexts,
+                SearchSchemaArgs {
+                    connection: "any".into(),
+                    pattern: "user".into(),
+                },
+            )
+            .await,
+        );
+        assert_refused_fail_closed(
+            &list_tables(
+                &contexts,
+                ListTablesArgs {
+                    connection: "any".into(),
+                    schema: None,
+                    name_like: None,
+                    limit: None,
+                    offset: None,
+                },
+            )
+            .await,
+        );
+        assert_refused_fail_closed(
+            &describe_table(
+                &contexts,
+                DescribeTableArgs {
+                    connection: "any".into(),
+                    table: "users".into(),
+                },
+            )
+            .await,
+        );
+    }
 }

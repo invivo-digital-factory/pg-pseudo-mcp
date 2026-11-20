@@ -77,11 +77,11 @@ impl QueryLimits {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn requests_above_the_ceiling_are_clamped_with_a_warning() {
+    fn un_nombre_de_lignes_au_dessus_du_plafond_est_ramene_avec_avertissement() {
         let (limits, warnings) = QueryLimits::from_request(Some(900), None, None);
         assert_eq!(limits.max_rows, MAX_ROWS_CEILING);
         assert_eq!(warnings.len(), 1);
@@ -90,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn a_byte_budget_above_the_ceiling_is_clamped_with_a_warning() {
+    fn un_budget_d_octets_hors_bornes_est_ramene_avec_avertissement() {
         let (limits, warnings) = QueryLimits::from_request(None, Some(1_000_000), None);
         assert_eq!(limits.max_bytes, MAX_BYTES_CEILING);
         assert_eq!(warnings.len(), 1);
@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn requests_within_bounds_are_kept_silently() {
+    fn les_demandes_dans_les_bornes_sont_gardees_sans_avertissement() {
         let (limits, warnings) = QueryLimits::from_request(Some(10), Some(32_768), Some(5_000));
         assert_eq!(limits.max_rows, 10);
         assert_eq!(limits.max_bytes, 32_768);
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn no_request_yields_defaults() {
+    fn sans_demande_les_limites_par_defaut_s_appliquent() {
         let (limits, warnings) = QueryLimits::from_request(None, None, None);
         assert_eq!(limits, QueryLimits::default());
         assert!(warnings.is_empty());

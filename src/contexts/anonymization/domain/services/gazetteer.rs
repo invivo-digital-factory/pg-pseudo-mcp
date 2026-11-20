@@ -261,7 +261,7 @@ pub(crate) fn name_hit(word: &str) -> Option<NameHit> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     fn name_kind(word: &str) -> Option<Kind> {
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_ignores_case_and_accents() {
+    fn la_recherche_ignore_la_casse_et_les_accents() {
         assert_eq!(name_kind("DUPONT"), Some(Kind::LastName));
         assert_eq!(name_kind("dupont"), Some(Kind::LastName));
         assert_eq!(name_kind("Lefèvre"), Some(Kind::LastName));
@@ -278,19 +278,19 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_words_match_only_when_capitalised() {
+    fn un_mot_ambigu_ne_correspond_que_capitalise() {
         assert_eq!(name_kind("petit"), None);
         assert_eq!(name_kind("Petit"), Some(Kind::LastName));
     }
 
     #[test]
-    fn hyphenated_names_match_through_their_parts() {
+    fn un_nom_compose_correspond_par_ses_parties() {
         assert!(name_hit("Jean-Luc").is_some_and(|hit| hit.first_name));
         assert_eq!(name_kind("Saint-Martin"), Some(Kind::LastName));
     }
 
     #[test]
-    fn short_entries_and_particles_are_left_out() {
+    fn les_entrees_courtes_et_les_particules_sont_exclues() {
         assert_eq!(name_kind("Le"), None);
         assert_eq!(name_kind("Ly"), None);
         assert_eq!(name_kind("Gall"), Some(Kind::LastName));

@@ -41,7 +41,7 @@ pub fn process_env(name: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     fn none(_: &str) -> Option<String> {
@@ -49,12 +49,12 @@ mod tests {
     }
 
     #[test]
-    fn leaves_plain_text_untouched() {
+    fn un_texte_sans_variable_reste_inchange() {
         assert_eq!(resolve("localhost", none, none).unwrap(), "localhost");
     }
 
     #[test]
-    fn prefers_own_fields_then_env_then_default() {
+    fn une_variable_prend_ses_champs_puis_l_environnement_puis_son_defaut() {
         let own = |name: &str| (name == "host").then(|| "own-host".to_string());
         let env = |name: &str| (name == "region").then(|| "eu".to_string());
         let resolved = resolve("${host}-${region}-${tier:gold}", own, env).unwrap();
@@ -62,13 +62,13 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_without_default_names_the_variable() {
+    fn une_variable_non_resolue_sans_defaut_est_nommee_dans_l_erreur() {
         let error = resolve("db-${MISSING}", none, none).unwrap_err();
         assert_eq!(error, "unresolved variable ${MISSING}");
     }
 
     #[test]
-    fn default_is_used_when_nothing_else_matches() {
+    fn le_defaut_sert_quand_rien_d_autre_ne_correspond() {
         assert_eq!(resolve("${a:b}", none, none).unwrap(), "b");
     }
 }

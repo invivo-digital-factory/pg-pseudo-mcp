@@ -215,11 +215,11 @@ fn is_uuid(value: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn address_runs_to_the_next_punctuation() {
+    fn une_adresse_court_jusqu_a_la_ponctuation_suivante() {
         let text = "livraison au 3 bis avenue de la Gare, merci";
         let spans = address_spans(text);
         assert_eq!(spans.len(), 1);
@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn civility_takes_up_to_three_capitalised_words() {
+    fn une_civilite_prend_jusqu_a_trois_mots_capitalises() {
         let text = "voir Mme Marie-Claire Le Kervadec demain";
         let spans = civility_spans(text);
         assert_eq!(spans.len(), 1);
@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn name_shape_accepts_capitalised_words_only() {
+    fn la_forme_d_un_nom_n_accepte_que_des_mots_capitalises() {
         assert_eq!(name_shape("Kervadec"), Some(Kind::LastName));
         assert_eq!(name_shape("Jean-Luc Le Gall"), Some(Kind::PersonName));
         assert_eq!(name_shape("Jean de La Fontaine"), Some(Kind::PersonName));
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn digest_shapes() {
+    fn les_formes_d_empreinte_sont_reconnues() {
         assert!(is_digest("5d41402abc4b2a76b9719d911017c592"));
         assert!(is_digest(&"a".repeat(40)));
         assert!(is_digest("aGVsbG8gd29ybGQ="));
@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn hex_encodings_of_any_length_are_digests() {
+    fn un_encodage_hexadecimal_de_toute_longueur_est_une_empreinte() {
         let email = "ylwenna.kervadec@canary-mail.fr";
         assert!(is_digest(&hex::encode(email.as_bytes())));
         assert!(is_digest(&hex::encode(email.as_bytes()).to_uppercase()));
@@ -285,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn short_base64_encodings_are_digests_but_plain_words_are_not() {
+    fn un_court_encodage_base64_est_une_empreinte_mais_pas_un_mot_ordinaire() {
         assert!(is_digest("S2VydmFkZWM="));
         assert!(is_digest("SWxvbmE="));
         assert!(is_digest("T2RpbG9u"));

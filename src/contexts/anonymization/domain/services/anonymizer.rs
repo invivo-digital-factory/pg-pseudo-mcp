@@ -477,7 +477,7 @@ fn field_type(cell: &Cell) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+mod integration {
     use super::*;
     use crate::contexts::anonymization::domain::types::Lineage::{Clean, Personal, Unknown};
     use crate::contexts::anonymization::domain::types::{ColumnSource, GeneratorConfig};
@@ -514,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn a_short_injected_name_leaves_longer_words_containing_it_untouched() {
+    fn un_nom_injecte_court_laisse_intacts_les_mots_plus_longs_qui_le_contiennent() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let pseudonym = "Zabulon".to_string();
         let injected = [("Roy".to_string(), pseudonym.clone())];
@@ -562,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn an_injected_value_embedded_in_a_longer_token_turns_the_whole_token_opaque() {
+    fn une_valeur_injectee_noyee_dans_un_jeton_plus_long_rend_tout_le_jeton_opaque() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
         let injected = [
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn an_embedded_injected_value_inside_a_known_pseudonym_is_left_alone() {
+    fn une_valeur_injectee_dans_un_pseudonyme_connu_est_laissee_telle_quelle() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let injected = [
             ("Kervadec".to_string(), "Zabulon".to_string()),
@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn same_named_columns_each_get_their_own_flag() {
+    fn des_colonnes_homonymes_ont_chacune_leur_propre_indicateur() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [
@@ -646,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_input_messages_quote_opaque_tokens_instead_of_values() {
+    fn les_messages_d_entree_invalide_citent_des_jetons_opaques_et_non_les_valeurs() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let masked = anonymizer.message(&message(
@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn unique_violation_details_mask_the_key_value_unless_it_is_a_pseudonym() {
+    fn le_detail_d_une_violation_d_unicite_masque_la_cle_sauf_si_c_est_un_pseudonyme() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let injected_pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
         let injected = [("Kervadec".to_string(), injected_pseudonym.clone())];
@@ -722,7 +722,8 @@ mod tests {
     }
 
     #[test]
-    fn a_derived_value_with_personal_lineage_turns_opaque_when_no_detector_recognises_it() {
+    fn une_valeur_derivee_de_lignee_personnelle_devient_opaque_si_aucun_detecteur_ne_la_reconnait()
+    {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let mut length = text_column("length", None);
@@ -773,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tainted_value_nested_in_json_or_arrays_turns_opaque_too() {
+    fn une_valeur_souillee_imbriquee_dans_du_json_ou_un_tableau_devient_opaque() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [
@@ -794,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn every_derived_column_from_an_unknown_position_on_is_tainted() {
+    fn toute_colonne_derivee_a_partir_d_une_position_inconnue_est_souillee() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [
@@ -825,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn known_items_beyond_the_columns_taint_every_derived_column() {
+    fn des_elements_connus_au_dela_des_colonnes_souillent_toute_colonne_derivee() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [text_column("upper", None)];
@@ -838,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tainted_value_shaped_like_a_pseudonym_is_not_trusted_unless_it_is_a_known_one() {
+    fn une_valeur_souillee_en_forme_de_pseudonyme_n_est_crue_que_si_elle_est_connue() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let known = pseudonymizer
             .pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr")
@@ -871,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn without_lineage_derived_values_keep_the_value_by_value_judgement() {
+    fn sans_lignee_une_valeur_derivee_garde_le_jugement_valeur_par_valeur() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [text_column("split_part", None), text_column("label", None)];
@@ -888,7 +889,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lineage_that_does_not_match_the_columns_taints_every_derived_column() {
+    fn une_lignee_qui_ne_correspond_pas_aux_colonnes_souille_toute_colonne_derivee() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let columns = [

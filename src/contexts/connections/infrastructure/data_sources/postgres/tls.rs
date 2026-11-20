@@ -16,11 +16,11 @@ pub(crate) fn verified_connector() -> Result<MakeRustlsConnect, rustls::Error> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn builds_a_verifying_connector_without_a_process_default_provider() {
+    fn le_connecteur_verificateur_se_construit_sans_fournisseur_par_defaut() {
         assert!(verified_connector().is_ok());
     }
 }

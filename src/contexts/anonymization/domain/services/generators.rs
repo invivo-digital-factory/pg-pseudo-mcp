@@ -801,7 +801,7 @@ fn birth_date<R: Rng + ?Sized>(value: &str, rng: &mut R) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
@@ -811,13 +811,13 @@ mod tests {
     }
 
     #[test]
-    fn luhn_check_digit_matches_known_numbers() {
+    fn le_chiffre_de_controle_luhn_correspond_aux_numeros_connus() {
         assert_eq!(luhn_check_digit("7992739871"), '3');
         assert_eq!(luhn_check_digit("73282932"), '0');
     }
 
     #[test]
-    fn a_valid_rib_key_yields_the_french_iban_check_76() {
+    fn une_cle_rib_valide_donne_le_controle_iban_francais_76() {
         for seed in 0..50 {
             let text = iban("FR7630004000031234567890143", &mut rng(seed));
             assert!(text.starts_with("FR76"), "{text}");
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn nir_key_completes_the_body_to_a_multiple_of_97() {
+    fn la_cle_nir_complete_le_corps_a_un_multiple_de_97() {
         let text = nir("185057800608436", &mut rng(3));
         let body: u64 = text[..13].parse().unwrap();
         let key: u64 = text[13..].parse().unwrap();
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn civil_dates_round_trip_through_day_numbers() {
+    fn les_dates_civiles_font_l_aller_retour_par_numero_de_jour() {
         for days in -40_000..40_000 {
             let (year, month, day) = civil_from_days(days);
             assert_eq!(days_from_civil(year, month, day), days);
@@ -848,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_dates_are_replaced_by_a_plausible_iso_date() {
+    fn une_date_invalide_est_remplacee_par_une_date_iso_plausible() {
         let text = birth_date("1985-02-30", &mut rng(1));
         let (layout, year, ..) = parse_date(&text).unwrap();
         assert_eq!(layout, DateLayout::Iso);
@@ -857,13 +857,13 @@ mod tests {
     }
 
     #[test]
-    fn birth_dates_keep_a_trailing_time() {
+    fn une_date_de_naissance_garde_l_heure_qui_la_suit() {
         let text = birth_date("1985-03-12 00:00:00", &mut rng(2));
         assert!(text.ends_with(" 00:00:00"), "{text}");
     }
 
     #[test]
-    fn phone_pool_limit_restricts_the_draws() {
+    fn la_limite_du_pool_de_telephones_restreint_les_tirages() {
         let config = GeneratorConfig {
             phone_pool_limit: Some(3),
         };
@@ -878,21 +878,21 @@ mod tests {
     }
 
     #[test]
-    fn short_phone_inputs_get_a_full_fictional_number() {
+    fn une_entree_de_telephone_courte_recoit_un_numero_fictif_complet() {
         let text = phone("1234", &mut rng(4), &GeneratorConfig::default());
         assert_eq!(text.len(), 14, "{text}");
         assert!(is_fictional_phone(&text), "{text}");
     }
 
     #[test]
-    fn ascii_slug_folds_accents_and_ligatures() {
+    fn le_slug_ascii_replie_accents_et_ligatures() {
         assert_eq!(ascii_slug("Maëlouz"), "maelouz");
         assert_eq!(ascii_slug("Jean-Baptiste"), "jean-baptiste");
         assert_eq!(ascii_slug("Œdipe d'Anjou"), "oedipe-d-anjou");
     }
 
     #[test]
-    fn generated_last_names_rarely_collide() {
+    fn les_noms_de_famille_generes_se_heurtent_rarement() {
         let names: std::collections::HashSet<String> = (0..1000u32)
             .map(|n| {
                 let mut seed = [0u8; 32];
@@ -904,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn civility_and_gender_stay_in_the_input_vocabulary() {
+    fn civilite_et_genre_restent_dans_le_vocabulaire_de_l_entree() {
         for seed in 0..20 {
             let civility = pick_in_matching_set("Madame", &CIVILITY_SETS, &mut rng(seed));
             assert!(["Monsieur", "Madame"].contains(&civility.as_str()));
@@ -918,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn addresses_keep_number_street_type_and_postal_layout() {
+    fn une_adresse_garde_numero_type_de_voie_et_code_postal() {
         let text = address("12 Avenue des Lilas, 75011 Paris", &mut rng(5));
         let words: Vec<&str> = text.split_whitespace().collect();
         assert!(words[0].parse::<u32>().is_ok(), "{text}");
@@ -930,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn recognisers_accept_only_reserved_namespaces() {
+    fn les_reconnaisseurs_n_acceptent_que_les_espaces_reserves() {
         assert_eq!(recognise("a.b1@EXAMPLE.org"), Some(Kind::Email));
         assert_eq!(recognise("a.b1@example.fr"), None);
         assert_eq!(recognise("0033 7 39 98 00 01"), Some(Kind::Phone));

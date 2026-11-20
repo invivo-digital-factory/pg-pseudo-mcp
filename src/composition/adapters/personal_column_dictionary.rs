@@ -39,7 +39,7 @@ impl PersonalColumnDictionary for PersonalColumnDictionaryAdapter {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
     use crate::contexts::querying::domain::services::column_pseudonymization::pseudonymization;
 
@@ -49,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn pseudonymization_follows_the_query_classifier() {
+    fn la_pseudonymisation_suit_le_classifieur_de_colonnes_de_requete() {
         assert_eq!(label("email", "text").as_deref(), Some("email"));
         assert_eq!(label("id", "integer"), None);
         assert_eq!(label("created_at", "timestamptz"), None);

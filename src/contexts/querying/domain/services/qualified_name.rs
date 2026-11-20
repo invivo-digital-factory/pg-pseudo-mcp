@@ -25,11 +25,11 @@ pub fn split_qualified(input: &str) -> (Option<String>, String) {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn qualified_names_split_on_unquoted_dots() {
+    fn un_nom_qualifie_se_decoupe_sur_les_points_hors_guillemets() {
         assert_eq!(
             split_qualified("public.orders"),
             (Some("public".into()), "orders".into())

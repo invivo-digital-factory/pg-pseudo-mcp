@@ -231,148 +231,156 @@ mod tests {
         )
     }
 
-    #[test]
-    fn a_matching_line_is_accepted_even_after_another_key_of_the_same_type() {
-        let contents = format!(
-            "{p} {other}\n{p} {own}\n",
-            p = pattern(),
-            other = key_line("other_host_ed25519_test.pub"),
-            own = key_line("ssh_host_ed25519_test.pub"),
-        );
-        assert_eq!(check(&contents), Ok(()));
-    }
+    mod integration {
+        use super::*;
 
-    #[test]
-    fn a_revoked_key_is_refused_even_when_also_listed() {
-        let own = key_line("ssh_host_ed25519_test.pub");
-        let contents = format!("{p} {own}\n@revoked {p} {own}\n", p = pattern());
-        let message = check(&contents).unwrap_err();
-        assert!(message.contains("revoked"), "{message}");
-        assert!(message.contains("SHA256:"), "{message}");
-        let contents = format!("@revoked * {own}\n{p} {own}\n", p = pattern());
-        assert_eq!(check(&contents), Ok(()));
-    }
-
-    #[test]
-    fn a_different_key_of_the_same_type_is_reported_as_changed() {
-        let contents = format!(
-            "# comment\n{} {}\n",
-            pattern(),
-            key_line("other_host_ed25519_test.pub")
-        );
-        let message = check(&contents).unwrap_err();
-        assert!(message.contains("changed"), "{message}");
-        assert!(message.contains("line 2"), "{message}");
-        assert!(!message.contains("ssh-keyscan"), "{message}");
-    }
-
-    #[test]
-    fn a_key_of_another_type_already_known_refuses_without_suggesting_keyscan() {
-        let contents = format!("{} {}\n", pattern(), key_line("ssh_host_ecdsa_test.pub"));
-        let message = check(&contents).unwrap_err();
-        assert!(message.contains("another type"), "{message}");
-        assert!(message.contains("interception"), "{message}");
-        assert!(message.contains("refus"), "{message}");
-        assert!(!message.contains("ssh-keyscan"), "{message}");
-        assert!(!message.contains("changed"), "{message}");
-    }
-
-    #[test]
-    fn an_unknown_host_suggests_keyscan() {
-        let contents = format!("other.example {}\n", key_line("ssh_host_ed25519_test.pub"));
-        let message = check(&contents).unwrap_err();
-        assert!(message.contains("not in known_hosts"), "{message}");
-        assert!(
-            message.contains("ssh-keyscan -p 2222 bastion.example"),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn hashed_and_bracketed_port_entries_are_matched() {
-        let own = key_line("ssh_host_ed25519_test.pub");
-        assert_eq!(check(&format!("{} {own}\n", hashed(&pattern()))), Ok(()));
-        assert_eq!(
-            check(&format!("other.example,{}\t{own} comment\n", pattern())),
-            Ok(())
-        );
-        let message = check(&format!("{HOST} {own}\n")).unwrap_err();
-        assert!(message.contains("not in known_hosts"), "{message}");
-        let message = check(&format!("{} {own}\n", hashed(HOST))).unwrap_err();
-        assert!(message.contains("not in known_hosts"), "{message}");
-    }
-
-    #[test]
-    fn cert_authority_lines_are_ignored() {
-        let contents = format!(
-            "@cert-authority {} {}\n",
-            pattern(),
-            key_line("ssh_host_ed25519_test.pub")
-        );
-        let message = check(&contents).unwrap_err();
-        assert!(message.contains("not in known_hosts"), "{message}");
-    }
-
-    #[test]
-    fn a_missing_known_hosts_file_reports_an_unknown_host() {
-        let dir = tempfile::tempdir().unwrap();
-        let message =
-            verify_host_key(HOST, PORT, &server(), &dir.path().join("absent")).unwrap_err();
-        assert!(message.contains("not in known_hosts"), "{message}");
-    }
-
-    #[test]
-    fn revoked_keys_are_not_offered_first() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("known_hosts");
-        std::fs::write(
-            &path,
-            format!(
-                "@revoked {p} {ecdsa}\n{p} {ed}\n",
+        #[test]
+        fn une_ligne_correspondante_est_acceptee_apres_une_autre_cle_du_meme_type() {
+            let contents = format!(
+                "{p} {other}\n{p} {own}\n",
                 p = pattern(),
-                ecdsa = key_line("ssh_host_ecdsa_test.pub"),
-                ed = key_line("ssh_host_ed25519_test.pub"),
-            ),
-        )
-        .unwrap();
-        assert_eq!(
-            recorded_algorithms(HOST, PORT, &path),
-            vec![Algorithm::Ed25519]
-        );
+                other = key_line("other_host_ed25519_test.pub"),
+                own = key_line("ssh_host_ed25519_test.pub"),
+            );
+            assert_eq!(check(&contents), Ok(()));
+        }
+
+        #[test]
+        fn une_cle_revoquee_est_refusee_meme_si_elle_est_aussi_listee() {
+            let own = key_line("ssh_host_ed25519_test.pub");
+            let contents = format!("{p} {own}\n@revoked {p} {own}\n", p = pattern());
+            let message = check(&contents).unwrap_err();
+            assert!(message.contains("revoked"), "{message}");
+            assert!(message.contains("SHA256:"), "{message}");
+            let contents = format!("@revoked * {own}\n{p} {own}\n", p = pattern());
+            assert_eq!(check(&contents), Ok(()));
+        }
+
+        #[test]
+        fn une_cle_differente_du_meme_type_est_signalee_comme_modifiee() {
+            let contents = format!(
+                "# comment\n{} {}\n",
+                pattern(),
+                key_line("other_host_ed25519_test.pub")
+            );
+            let message = check(&contents).unwrap_err();
+            assert!(message.contains("changed"), "{message}");
+            assert!(message.contains("line 2"), "{message}");
+            assert!(!message.contains("ssh-keyscan"), "{message}");
+        }
+
+        #[test]
+        fn une_cle_d_un_autre_type_deja_connu_est_refusee_sans_suggerer_keyscan() {
+            let contents = format!("{} {}\n", pattern(), key_line("ssh_host_ecdsa_test.pub"));
+            let message = check(&contents).unwrap_err();
+            assert!(message.contains("another type"), "{message}");
+            assert!(message.contains("interception"), "{message}");
+            assert!(message.contains("refus"), "{message}");
+            assert!(!message.contains("ssh-keyscan"), "{message}");
+            assert!(!message.contains("changed"), "{message}");
+        }
+
+        #[test]
+        fn un_hote_inconnu_suggere_ssh_keyscan() {
+            let contents = format!("other.example {}\n", key_line("ssh_host_ed25519_test.pub"));
+            let message = check(&contents).unwrap_err();
+            assert!(message.contains("not in known_hosts"), "{message}");
+            assert!(
+                message.contains("ssh-keyscan -p 2222 bastion.example"),
+                "{message}"
+            );
+        }
+
+        #[test]
+        fn les_entrees_hachees_et_avec_port_entre_crochets_correspondent() {
+            let own = key_line("ssh_host_ed25519_test.pub");
+            assert_eq!(check(&format!("{} {own}\n", hashed(&pattern()))), Ok(()));
+            assert_eq!(
+                check(&format!("other.example,{}\t{own} comment\n", pattern())),
+                Ok(())
+            );
+            let message = check(&format!("{HOST} {own}\n")).unwrap_err();
+            assert!(message.contains("not in known_hosts"), "{message}");
+            let message = check(&format!("{} {own}\n", hashed(HOST))).unwrap_err();
+            assert!(message.contains("not in known_hosts"), "{message}");
+        }
+
+        #[test]
+        fn les_lignes_cert_authority_sont_ignorees() {
+            let contents = format!(
+                "@cert-authority {} {}\n",
+                pattern(),
+                key_line("ssh_host_ed25519_test.pub")
+            );
+            let message = check(&contents).unwrap_err();
+            assert!(message.contains("not in known_hosts"), "{message}");
+        }
+
+        #[test]
+        fn un_fichier_known_hosts_absent_signale_un_hote_inconnu() {
+            let dir = tempfile::tempdir().unwrap();
+            let message =
+                verify_host_key(HOST, PORT, &server(), &dir.path().join("absent")).unwrap_err();
+            assert!(message.contains("not in known_hosts"), "{message}");
+        }
+
+        #[test]
+        fn les_cles_revoquees_ne_sont_pas_proposees_en_premier() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("known_hosts");
+            std::fs::write(
+                &path,
+                format!(
+                    "@revoked {p} {ecdsa}\n{p} {ed}\n",
+                    p = pattern(),
+                    ecdsa = key_line("ssh_host_ecdsa_test.pub"),
+                    ed = key_line("ssh_host_ed25519_test.pub"),
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                recorded_algorithms(HOST, PORT, &path),
+                vec![Algorithm::Ed25519]
+            );
+        }
     }
 
-    #[test]
-    fn the_default_known_hosts_needs_a_home_directory() {
-        let configured = PathBuf::from("/etc/ssh/known_hosts_custom");
-        assert_eq!(
-            known_hosts_path(Some(&configured), None).unwrap(),
-            configured
-        );
-        assert_eq!(
-            known_hosts_path(None, Some(PathBuf::from("/home/someone"))).unwrap(),
-            PathBuf::from("/home/someone/.ssh/known_hosts")
-        );
-        let message = known_hosts_path(None, None).unwrap_err();
-        assert!(message.contains("home directory"), "{message}");
-    }
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn host_key_types_recorded_in_known_hosts_are_offered_first() {
-        let preferred = client::Config::default().preferred.key.into_owned();
-        let p256 = Algorithm::Ecdsa {
-            curve: EcdsaCurve::NistP256,
-        };
-        let ordered = known_algorithms_first(&preferred, std::slice::from_ref(&p256));
-        assert_eq!(ordered.first(), Some(&p256));
-        assert_eq!(ordered.len(), preferred.len());
-        let ordered = known_algorithms_first(&preferred, &[Algorithm::Rsa { hash: None }]);
-        assert!(
-            ordered
-                .iter()
-                .take(3)
-                .all(|algorithm| matches!(algorithm, Algorithm::Rsa { .. })),
-            "{ordered:?}"
-        );
-        assert_eq!(known_algorithms_first(&preferred, &[]), preferred);
+        #[test]
+        fn le_known_hosts_par_defaut_exige_un_dossier_personnel() {
+            let configured = PathBuf::from("/etc/ssh/known_hosts_custom");
+            assert_eq!(
+                known_hosts_path(Some(&configured), None).unwrap(),
+                configured
+            );
+            assert_eq!(
+                known_hosts_path(None, Some(PathBuf::from("/home/someone"))).unwrap(),
+                PathBuf::from("/home/someone/.ssh/known_hosts")
+            );
+            let message = known_hosts_path(None, None).unwrap_err();
+            assert!(message.contains("home directory"), "{message}");
+        }
+
+        #[test]
+        fn les_types_de_cle_notes_dans_known_hosts_sont_proposes_en_premier() {
+            let preferred = client::Config::default().preferred.key.into_owned();
+            let p256 = Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP256,
+            };
+            let ordered = known_algorithms_first(&preferred, std::slice::from_ref(&p256));
+            assert_eq!(ordered.first(), Some(&p256));
+            assert_eq!(ordered.len(), preferred.len());
+            let ordered = known_algorithms_first(&preferred, &[Algorithm::Rsa { hash: None }]);
+            assert!(
+                ordered
+                    .iter()
+                    .take(3)
+                    .all(|algorithm| matches!(algorithm, Algorithm::Rsa { .. })),
+                "{ordered:?}"
+            );
+            assert_eq!(known_algorithms_first(&preferred, &[]), preferred);
+        }
     }
 }

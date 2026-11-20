@@ -75,7 +75,7 @@ pub(crate) fn numeric_to_string(raw: &[u8]) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     const POSITIVE: u16 = 0x0000;
@@ -98,48 +98,48 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_declared_scale_with_trailing_zeros() {
+    fn l_echelle_declaree_garde_ses_zeros_finaux() {
         assert_eq!(render(1, POSITIVE, 4, &[1, 2345, 6700]), "12345.6700");
     }
 
     #[test]
-    fn renders_zero_with_and_without_scale() {
+    fn zero_s_affiche_avec_et_sans_echelle() {
         assert_eq!(render(0, POSITIVE, 0, &[]), "0");
         assert_eq!(render(0, POSITIVE, 4, &[]), "0.0000");
     }
 
     #[test]
-    fn renders_negative_fractions_below_one() {
+    fn les_fractions_negatives_inferieures_a_un_sont_rendues() {
         assert_eq!(render(-1, NEGATIVE, 1, &[5000]), "-0.5");
     }
 
     #[test]
-    fn pads_leading_fractional_groups() {
+    fn les_groupes_fractionnaires_de_tete_sont_completes_par_des_zeros() {
         assert_eq!(render(-2, POSITIVE, 6, &[1200]), "0.000012");
         assert_eq!(render(-2, POSITIVE, 8, &[12]), "0.00000012");
         assert_eq!(render(-1, POSITIVE, 5, &[1, 2000]), "0.00012");
     }
 
     #[test]
-    fn restores_integer_groups_stripped_as_trailing_zeros() {
+    fn les_groupes_entiers_omis_sont_restitues_en_zeros_finaux() {
         assert_eq!(render(2, POSITIVE, 0, &[1]), "100000000");
         assert_eq!(render(1, NEGATIVE, 2, &[7, 1]), "-70001.00");
     }
 
     #[test]
-    fn truncates_fraction_digits_beyond_the_scale() {
+    fn les_decimales_au_dela_de_l_echelle_sont_tronquees() {
         assert_eq!(render(0, POSITIVE, 2, &[3, 1400]), "3.14");
     }
 
     #[test]
-    fn renders_special_values() {
+    fn les_valeurs_speciales_sont_rendues() {
         assert_eq!(render(0, 0xC000, 0, &[]), "NaN");
         assert_eq!(render(0, 0xD000, 0, &[]), "Infinity");
         assert_eq!(render(0, 0xF000, 0, &[]), "-Infinity");
     }
 
     #[test]
-    fn rejects_truncated_input() {
+    fn une_entree_tronquee_est_rejetee() {
         let mut buf = encode(1, POSITIVE, 4, &[1, 2345, 6700]);
         buf.truncate(buf.len() - 1);
         assert!(numeric_to_string(&buf).is_err());
@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_out_of_range_digits_and_unknown_signs() {
+    fn les_chiffres_hors_plage_et_signes_inconnus_sont_rejetes() {
         assert!(numeric_to_string(&encode(0, POSITIVE, 0, &[10000])).is_err());
         assert!(numeric_to_string(&encode(0, 0x1234, 0, &[1])).is_err());
     }

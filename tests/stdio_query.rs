@@ -103,63 +103,67 @@ fn body_of(response: &Value) -> Value {
     serde_json::from_str(text).expect("json body")
 }
 
-#[test]
-#[ignore = "needs the docker compose database"]
-fn pseudonymized_query_round_trip_over_real_stdio() {
-    let mut server = McpProcess::start();
-    server.initialize();
+mod e2e {
+    use super::*;
 
-    let connections = server.call(2, "list_connections", json!({}));
-    let listed = body_of(&connections);
-    let entry = listed["connections"]
-        .as_array()
-        .expect("connections array")
-        .iter()
-        .find(|entry| entry["name"] == json!(CONNECTION))
-        .expect("test connection listed");
-    assert_eq!(entry["status"], json!("available"));
+    #[test]
+    #[ignore = "needs the docker compose database"]
+    fn une_requete_pseudonymisee_fait_l_aller_retour_sur_un_vrai_stdio() {
+        let mut server = McpProcess::start();
+        server.initialize();
 
-    let customer = server.call(
-        3,
-        "query",
-        json!({
-            "connection": CONNECTION,
-            "sql": "SELECT email FROM customers WHERE id = 1"
-        }),
-    );
-    assert_ne!(customer["result"]["isError"], json!(true), "{customer}");
-    let customer = body_of(&customer);
-    assert_eq!(customer["row_count"], json!(1));
-    assert!(
-        customer["pseudonymized"].get("email").is_some(),
-        "{customer}"
-    );
-    let email = customer["rows"][0][0].as_str().expect("email cell");
-    assert!(email.contains('@'), "{email}");
+        let connections = server.call(2, "list_connections", json!({}));
+        let listed = body_of(&connections);
+        let entry = listed["connections"]
+            .as_array()
+            .expect("connections array")
+            .iter()
+            .find(|entry| entry["name"] == json!(CONNECTION))
+            .expect("test connection listed");
+        assert_eq!(entry["status"], json!("available"));
 
-    let orders = server.call(
-        4,
-        "query",
-        json!({
-            "connection": CONNECTION,
-            "sql": format!(
-                "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = '{email}' ORDER BY o.id"
-            )
-        }),
-    );
-    assert_ne!(orders["result"]["isError"], json!(true), "{orders}");
-    let orders = body_of(&orders);
-    assert_eq!(orders["translated_literals"], json!(1), "{orders}");
-    assert_eq!(orders["row_count"], json!(2), "{orders}");
+        let customer = server.call(
+            3,
+            "query",
+            json!({
+                "connection": CONNECTION,
+                "sql": "SELECT email FROM customers WHERE id = 1"
+            }),
+        );
+        assert_ne!(customer["result"]["isError"], json!(true), "{customer}");
+        let customer = body_of(&customer);
+        assert_eq!(customer["row_count"], json!(1));
+        assert!(
+            customer["pseudonymized"].get("email").is_some(),
+            "{customer}"
+        );
+        let email = customer["rows"][0][0].as_str().expect("email cell");
+        assert!(email.contains('@'), "{email}");
 
-    let refused = server.call(
-        5,
-        "query",
-        json!({ "connection": CONNECTION, "sql": "DELETE FROM orders" }),
-    );
-    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
-    let error = body_of(&refused);
-    assert_eq!(error["error"]["category"], json!("refused_read_only"));
+        let orders = server.call(
+            4,
+            "query",
+            json!({
+                "connection": CONNECTION,
+                "sql": format!(
+                    "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = '{email}' ORDER BY o.id"
+                )
+            }),
+        );
+        assert_ne!(orders["result"]["isError"], json!(true), "{orders}");
+        let orders = body_of(&orders);
+        assert_eq!(orders["translated_literals"], json!(1), "{orders}");
+        assert_eq!(orders["row_count"], json!(2), "{orders}");
 
-    assert_eq!(server.lines.len(), 5);
+        let refused = server.call(
+            5,
+            "query",
+            json!({ "connection": CONNECTION, "sql": "DELETE FROM orders" }),
+        );
+        assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+        let error = body_of(&refused);
+        assert_eq!(error["error"]["category"], json!("refused_read_only"));
+
+        assert_eq!(server.lines.len(), 5);
+    }
 }

@@ -130,11 +130,11 @@ fn year_label(year: i64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use super::*;
 
     #[test]
-    fn dates_count_from_the_postgres_epoch() {
+    fn les_dates_se_comptent_depuis_l_epoque_postgres() {
         assert_eq!(date_to_string(0), "2000-01-01");
         assert_eq!(date_to_string(-1), "1999-12-31");
         assert_eq!(date_to_string(60), "2000-03-01");
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn timestamps_render_iso_8601_with_trimmed_fractions() {
+    fn les_horodatages_sont_rendus_en_iso_8601_sans_fraction_inutile() {
         assert_eq!(timestamp_to_string(0, true), "2000-01-01T00:00:00Z");
         assert_eq!(timestamp_to_string(-1, false), "1999-12-31T23:59:59.999999");
         assert_eq!(
@@ -153,13 +153,13 @@ mod tests {
     }
 
     #[test]
-    fn times_with_zone_render_the_eastward_offset() {
+    fn les_heures_avec_fuseau_affichent_le_decalage_vers_l_est() {
         assert_eq!(timetz_to_string(MICROS_PER_HOUR, -7200), "01:00:00+02:00");
         assert_eq!(timetz_to_string(0, 19_800), "00:00:00-05:30");
     }
 
     #[test]
-    fn intervals_follow_the_postgres_iso_8601_style() {
+    fn les_intervalles_suivent_le_style_iso_8601_de_postgres() {
         assert_eq!(interval_to_string(0, 0, 0), "PT0S");
         assert_eq!(interval_to_string(0, 0, 14), "P1Y2M");
         assert_eq!(interval_to_string(-1_500_000, 0, 0), "PT-1.5S");
