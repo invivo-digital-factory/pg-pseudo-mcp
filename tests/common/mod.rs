@@ -5,11 +5,18 @@ use std::sync::Arc;
 
 use base64::Engine;
 use md5::{Digest, Md5};
-use pg_pseudo_mcp::dbeaver::credentials::encrypt_for_tests;
-use pg_pseudo_mcp::pseudo::Pseudonymizer;
-use pg_pseudo_mcp::state::{AppConfig, AppState};
+use pg_pseudo_mcp::common::AppConfig;
+use pg_pseudo_mcp::composition::contexts::Contexts;
+use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
+use pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
+use pg_pseudo_mcp::contexts::connections::presentation;
+use pg_pseudo_mcp::contexts::querying::presentation as querying;
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
+
+pub use pg_pseudo_mcp::contexts::querying::presentation::{
+    DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
+};
 
 pub const DATABASE_URL_VAR: &str = "PG_PSEUDO_TEST_DATABASE_URL";
 pub const CONNECTION: &str = "canary-local";
@@ -49,7 +56,7 @@ pub fn database_url() -> String {
 }
 
 pub struct Harness {
-    pub state: Arc<AppState>,
+    pub state: Arc<Contexts>,
     _dbeaver: tempfile::TempDir,
     _data: tempfile::TempDir,
 }
@@ -64,15 +71,37 @@ impl Harness {
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
         };
-        let pseudonymizer = Pseudonymizer::open(data.path())
-            .map(Arc::new)
-            .map_err(|error| error.to_string());
+        let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {
-            state: Arc::new(AppState::with_pseudonymizer(config, pseudonymizer)),
+            state: Arc::new(Contexts::with_anonymization(&config, pseudonymizer)),
             _dbeaver: dbeaver,
             _data: data,
         }
     }
+}
+
+pub async fn list_connections(contexts: &Contexts) -> CallToolResult {
+    presentation::list_connections(&contexts.connections.list_connections).await
+}
+
+pub async fn query(contexts: &Contexts, args: QueryArgs) -> CallToolResult {
+    querying::query(&contexts.querying.run_query, args).await
+}
+
+pub async fn explain(contexts: &Contexts, args: ExplainArgs) -> CallToolResult {
+    querying::explain(&contexts.querying.explain_query, args).await
+}
+
+pub async fn search_schema(contexts: &Contexts, args: SearchSchemaArgs) -> CallToolResult {
+    querying::search_schema(&contexts.querying.search_schema, args).await
+}
+
+pub async fn list_tables(contexts: &Contexts, args: ListTablesArgs) -> CallToolResult {
+    querying::list_tables(&contexts.querying.list_tables, args).await
+}
+
+pub async fn describe_table(contexts: &Contexts, args: DescribeTableArgs) -> CallToolResult {
+    querying::describe_table(&contexts.querying.describe_table, args).await
 }
 
 pub fn write_workspace_for_test_database(root: &Path) {

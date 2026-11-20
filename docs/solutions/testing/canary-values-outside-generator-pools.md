@@ -28,12 +28,12 @@ Two failures followed. A generated pseudonym email such as `odilon.braiblepevill
 
 ## Why This Matters
 
-A canary that detection already knows makes leak tests pass for the wrong reason. Here it hid a real leak through computed columns until the canaries changed, after which the derived-column lineage in `src/guard/lineage.rs` was added.
+A canary that detection already knows makes leak tests pass for the wrong reason. Here it hid a real leak through computed columns until the canaries changed, after which the derived-column lineage in `src/contexts/querying/domain/services/lineage/` was added.
 
 ## When to Apply
 
 - Any change to the canary list or the seed data.
-- Any change to the name lists used by `src/anon/gazetteer.rs` or `src/pseudo/generators.rs`.
+- Any change to the name lists used by `src/contexts/anonymization/domain/services/gazetteer.rs` or `src/contexts/anonymization/domain/services/generators.rs`.
 
 ## Examples
 

@@ -1,7 +1,6 @@
 mod common;
 
-use common::{CONNECTION, Harness, assert_no_canary, is_error, text_of};
-use pg_pseudo_mcp::tools::query::{QueryArgs, query};
+use common::{CONNECTION, Harness, QueryArgs, assert_no_canary, is_error, query, text_of};
 use serde_json::Value;
 
 async fn ask(harness: &Harness, sql: &str) -> (bool, String) {
@@ -75,61 +74,65 @@ const MAY_ERROR: &[&str] = &[
     "SELECT 1/0 FROM customers WHERE email = 'x'",
 ];
 
-#[tokio::test]
-#[ignore]
-async fn write_and_side_effect_statements_are_refused_as_read_only() {
-    let harness = Harness::new();
-    for sql in MUST_BE_REFUSED {
-        let (error, text) = ask(&harness, sql).await;
-        assert_no_canary(&text);
-        assert!(error, "{sql} should be refused: {text}");
-        let body: Value = serde_json::from_str(&text).expect("json error body");
-        assert_eq!(
-            body["error"]["category"], "refused_read_only",
-            "{sql}: {text}"
-        );
+mod e2e {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn les_ecritures_et_effets_de_bord_sont_refuses_en_lecture_seule() {
+        let harness = Harness::new();
+        for sql in MUST_BE_REFUSED {
+            let (error, text) = ask(&harness, sql).await;
+            assert_no_canary(&text);
+            assert!(error, "{sql} should be refused: {text}");
+            let body: Value = serde_json::from_str(&text).expect("json error body");
+            assert_eq!(
+                body["error"]["category"], "refused_read_only",
+                "{sql}: {text}"
+            );
+        }
     }
-}
 
-#[tokio::test]
-#[ignore]
-async fn hostile_reads_succeed_without_any_real_value() {
-    let harness = Harness::new();
-    for sql in MUST_SUCCEED_PSEUDONYMIZED {
-        let (error, text) = ask(&harness, sql).await;
-        assert_no_canary(&text);
-        assert!(!error, "{sql} should succeed: {text}");
+    #[tokio::test]
+    #[ignore]
+    async fn les_lectures_hostiles_reussissent_sans_aucune_valeur_reelle() {
+        let harness = Harness::new();
+        for sql in MUST_SUCCEED_PSEUDONYMIZED {
+            let (error, text) = ask(&harness, sql).await;
+            assert_no_canary(&text);
+            assert!(!error, "{sql} should succeed: {text}");
+        }
     }
-}
 
-#[tokio::test]
-#[ignore]
-async fn failing_casts_and_arithmetic_return_no_real_value() {
-    let harness = Harness::new();
-    for sql in MAY_ERROR {
-        let (_, text) = ask(&harness, sql).await;
-        assert_no_canary(&text);
+    #[tokio::test]
+    #[ignore]
+    async fn les_conversions_et_calculs_en_erreur_ne_renvoient_aucune_valeur_reelle() {
+        let harness = Harness::new();
+        for sql in MAY_ERROR {
+            let (_, text) = ask(&harness, sql).await;
+            assert_no_canary(&text);
+        }
     }
-}
 
-#[tokio::test]
-#[ignore]
-async fn character_level_probing_is_a_documented_limit() {
-    let harness = Harness::new();
-    let (error, text) = ask(
-        &harness,
-        "SELECT ascii(substr(email, 1, 1)) AS first_code FROM customers WHERE id = 1",
-    )
-    .await;
-    assert!(!error, "{text}");
-    let response: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(response["rows"][0][0], Value::from(i64::from(b'y')));
+    #[tokio::test]
+    #[ignore]
+    async fn le_sondage_caractere_par_caractere_est_une_limite_documentee() {
+        let harness = Harness::new();
+        let (error, text) = ask(
+            &harness,
+            "SELECT ascii(substr(email, 1, 1)) AS first_code FROM customers WHERE id = 1",
+        )
+        .await;
+        assert!(!error, "{text}");
+        let response: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(response["rows"][0][0], Value::from(i64::from(b'y')));
 
-    let (_, text) = ask(
-        &harness,
-        "SELECT count(*) FROM customers WHERE email LIKE 'ylwenna%'",
-    )
-    .await;
-    let response: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(response["rows"][0][0], Value::from(1));
+        let (_, text) = ask(
+            &harness,
+            "SELECT count(*) FROM customers WHERE email LIKE 'ylwenna%'",
+        )
+        .await;
+        let response: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(response["rows"][0][0], Value::from(1));
+    }
 }

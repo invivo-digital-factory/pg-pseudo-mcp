@@ -1,0 +1,119 @@
+use serde::Serialize;
+
+use crate::contexts::querying::domain::constants::limits::{
+    DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, DEFAULT_TIMEOUT_MS, MAX_BYTES_CEILING, MAX_CELL_CHARS,
+    MAX_ROWS_CEILING, MAX_TIMEOUT_MS, MIN_BYTES, MIN_TIMEOUT_MS,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct QueryLimits {
+    pub max_rows: usize,
+    pub max_bytes: usize,
+    pub max_cell_chars: usize,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClampWarning {
+    pub code: &'static str,
+    pub requested: u64,
+    pub applied: u64,
+}
+
+impl Default for QueryLimits {
+    fn default() -> Self {
+        Self {
+            max_rows: DEFAULT_MAX_ROWS,
+            max_bytes: DEFAULT_MAX_BYTES,
+            max_cell_chars: MAX_CELL_CHARS,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+        }
+    }
+}
+
+impl QueryLimits {
+    pub fn from_request(
+        max_rows: Option<u64>,
+        max_bytes: Option<u64>,
+        timeout_ms: Option<u64>,
+    ) -> (Self, Vec<ClampWarning>) {
+        let mut limits = Self::default();
+        let mut warnings = Vec::new();
+        if let Some(requested) = max_rows {
+            let applied = requested.clamp(1, MAX_ROWS_CEILING as u64);
+            if applied != requested {
+                warnings.push(ClampWarning {
+                    code: "max_rows_clamped",
+                    requested,
+                    applied,
+                });
+            }
+            limits.max_rows = applied as usize;
+        }
+        if let Some(requested) = max_bytes {
+            let applied = requested.clamp(MIN_BYTES as u64, MAX_BYTES_CEILING as u64);
+            if applied != requested {
+                warnings.push(ClampWarning {
+                    code: "max_bytes_clamped",
+                    requested,
+                    applied,
+                });
+            }
+            limits.max_bytes = applied as usize;
+        }
+        if let Some(requested) = timeout_ms {
+            let applied = requested.clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
+            if applied != requested {
+                warnings.push(ClampWarning {
+                    code: "timeout_clamped",
+                    requested,
+                    applied,
+                });
+            }
+            limits.timeout_ms = applied;
+        }
+        (limits, warnings)
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+
+    #[test]
+    fn un_nombre_de_lignes_au_dessus_du_plafond_est_ramene_avec_avertissement() {
+        let (limits, warnings) = QueryLimits::from_request(Some(900), None, None);
+        assert_eq!(limits.max_rows, MAX_ROWS_CEILING);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "max_rows_clamped");
+        assert_eq!(warnings[0].applied, 500);
+    }
+
+    #[test]
+    fn un_budget_d_octets_hors_bornes_est_ramene_avec_avertissement() {
+        let (limits, warnings) = QueryLimits::from_request(None, Some(1_000_000), None);
+        assert_eq!(limits.max_bytes, MAX_BYTES_CEILING);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "max_bytes_clamped");
+        assert_eq!(warnings[0].applied, 65_536);
+        let (limits, warnings) = QueryLimits::from_request(None, Some(0), None);
+        assert_eq!(limits.max_bytes, MIN_BYTES);
+        assert_eq!(warnings[0].code, "max_bytes_clamped");
+    }
+
+    #[test]
+    fn les_demandes_dans_les_bornes_sont_gardees_sans_avertissement() {
+        let (limits, warnings) = QueryLimits::from_request(Some(10), Some(32_768), Some(5_000));
+        assert_eq!(limits.max_rows, 10);
+        assert_eq!(limits.max_bytes, 32_768);
+        assert_eq!(limits.timeout_ms, 5_000);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn sans_demande_les_limites_par_defaut_s_appliquent() {
+        let (limits, warnings) = QueryLimits::from_request(None, None, None);
+        assert_eq!(limits, QueryLimits::default());
+        assert!(warnings.is_empty());
+    }
+}

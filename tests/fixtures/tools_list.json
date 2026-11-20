@@ -1,0 +1,221 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Describe one table: columns and types, primary key, foreign keys in both directions, indexes, estimated rows, and which columns will be pseudonymized and as which kind.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table name, optionally schema-qualified (schema.table)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "table"
+        ],
+        "type": "object"
+      },
+      "name": "describe_table"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Show the execution plan of one read-only SQL statement (EXPLAIN without ANALYZE, FORMAT TEXT, JSON or YAML). Literals in the plan are pseudonymized.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          },
+          "sql": {
+            "description": "One read-only SQL statement to explain",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "sql"
+        ],
+        "type": "object"
+      },
+      "name": "explain"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List the PostgreSQL connections found in the developer's DBeaver workspace, with status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_connections"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List tables and views of a connection, one compact line each with kind, estimated rows and column count. Paginated with limit.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum number of tables returned (default 100, maximum 500)",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name_like": {
+            "description": "Case-insensitive substring matched against table names",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offset": {
+            "description": "Number of tables to skip, for pagination",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "schema": {
+            "description": "Restrict to one schema",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "type": "object"
+      },
+      "name": "list_tables"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "cell_offset": {
+            "description": "Characters to skip at the start of every text cell before the 500-character cap; repeat a query with the offset given in a cell truncation to read the rest of a long value",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          },
+          "max_bytes": {
+            "description": "Maximum size of the returned rows in bytes (default 16384, maximum 65536)",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_rows": {
+            "description": "Maximum rows returned (default 50, maximum 500)",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sql": {
+            "description": "One read-only SQL statement",
+            "type": "string"
+          },
+          "timeout_ms": {
+            "description": "Statement timeout in milliseconds (default 10000, maximum 60000)",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "connection",
+          "sql"
+        ],
+        "type": "object"
+      },
+      "name": "query"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Find tables and columns whose name matches a pattern (case-insensitive) in one connection. Use it to locate where data lives before writing SQL.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Case-insensitive substring matched against table and column names",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "search_schema"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Return the live limits, the pseudonym kinds that can or cannot be reused in filters, the operations that act on real values, and the known limitations.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "server_info"
+    }
+  ]
+}

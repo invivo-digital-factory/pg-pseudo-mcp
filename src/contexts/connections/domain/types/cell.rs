@@ -1,0 +1,20 @@
+#[derive(Debug, Clone, PartialEq)]
+pub enum Cell {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Numeric(String),
+    Text(String),
+    Json(serde_json::Value),
+    Uuid(String),
+    Date(String),
+    Time(String),
+    Timestamp(String),
+    TimestampTz(String),
+    Interval(String),
+    Inet(String),
+    Array(Vec<Cell>),
+    Composite(Vec<(String, Cell)>),
+    Opaque { type_name: String, len: usize },
+}
