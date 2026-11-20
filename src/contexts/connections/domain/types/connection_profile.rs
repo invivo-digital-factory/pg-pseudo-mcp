@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::password_source::PasswordSource;
 use super::secret::Secret;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,8 +71,7 @@ pub struct ConnectParams {
     pub port: u16,
     pub database: String,
     pub user: String,
-    pub password: Secret,
-    pub password_is_azure_token: bool,
+    pub password: PasswordSource,
     pub sslmode: SslMode,
     pub tunnel: Option<TunnelParams>,
 }
@@ -84,7 +84,6 @@ impl fmt::Debug for ConnectParams {
             .field("database", &self.database)
             .field("user", &self.user)
             .field("password", &self.password)
-            .field("password_is_azure_token", &self.password_is_azure_token)
             .field("sslmode", &self.sslmode)
             .field("tunnel", &self.tunnel)
             .finish()

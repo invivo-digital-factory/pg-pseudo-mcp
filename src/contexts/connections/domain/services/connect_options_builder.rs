@@ -64,7 +64,9 @@ mod unit {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::contexts::connections::domain::types::{Secret, SslMode, TunnelParams};
+    use crate::contexts::connections::domain::types::{
+        PasswordSource, Secret, SslMode, TunnelParams,
+    };
 
     fn tunneled(auth: SshAuth, host_key: HostKeyPolicy) -> ConnectParams {
         ConnectParams {
@@ -72,8 +74,7 @@ mod unit {
             port: 5432,
             database: "app".into(),
             user: "reader".into(),
-            password: Secret::new("db-pass"),
-            password_is_azure_token: false,
+            password: PasswordSource::Resolved(Secret::new("db-pass")),
             sslmode: SslMode::Require,
             tunnel: Some(TunnelParams {
                 hops: vec![SshHop {

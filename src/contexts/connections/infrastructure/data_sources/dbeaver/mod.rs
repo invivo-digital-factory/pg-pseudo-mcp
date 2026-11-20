@@ -1,6 +1,5 @@
 pub mod credentials;
 mod discovery;
-pub mod pgpass;
 pub mod variables;
 mod workspace;
 

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -6,22 +5,23 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::credentials::CredentialStore;
-use super::pgpass;
 use super::variables::{process_env, resolve};
-use crate::contexts::connections::domain::errors::AccessTokenError;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
-    ConnectParams, ConnectionEntry, ConnectionStatus, HostKeyPolicy, Secret, SshAuth, SshHop,
-    SslMode, TunnelParams,
+    ConnectParams, ConnectionEntry, ConnectionStatus, HostKeyPolicy, PasswordSource, Secret,
+    SshAuth, SshHop, SslMode, TunnelParams,
 };
+use crate::contexts::connections::infrastructure::data_sources::password_resolution::{
+    SignIn, pgpass_or_azure_token,
+};
+use crate::contexts::connections::infrastructure::data_sources::pgpass;
 
 static NULL: Value = Value::Null;
 
 const JUMP_SERVER_REASON: &str = "SSH jump servers are not supported yet";
 const SSH_USER_REASON: &str = "SSH user not saved in DBeaver";
 const SSH_PASSWORD_REASON: &str = "no saved SSH password for this connection in DBeaver";
-const PGPASS_REASON: &str = "no matching entry in the pgpass file";
 const NO_USER_REASON: &str = "no saved user name for this connection in DBeaver";
 const PROXY_REASON: &str = "proxy not supported in this version";
 const MASTER_PASSWORD_REASON: &str = "credentials protected by DBeaver master password or secure storage; unlock or re-save them in DBeaver";
@@ -85,27 +85,6 @@ fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
 struct Lookup<'a> {
     sign_in: SignIn<'a>,
     database: Option<&'a str>,
-}
-
-struct SignIn<'a> {
-    tokens: &'a dyn AzureSignInTokenProvider,
-    attempt: RefCell<Option<Result<Secret, AccessTokenError>>>,
-}
-
-impl<'a> SignIn<'a> {
-    fn new(tokens: &'a dyn AzureSignInTokenProvider) -> Self {
-        Self {
-            tokens,
-            attempt: RefCell::new(None),
-        }
-    }
-
-    fn token(&self) -> Result<Secret, AccessTokenError> {
-        self.attempt
-            .borrow_mut()
-            .get_or_insert_with(|| self.tokens.access_token())
-            .clone()
-    }
 }
 
 fn load_file(
@@ -318,7 +297,6 @@ fn evaluate(
         .or_else(|| saved.and_then(|saved| saved.user.clone()))
         .filter(|user| !user.is_empty());
 
-    let mut password_is_azure_token = false;
     let (user, password) = if pgpass_auth {
         let user = user.ok_or_else(|| unavailable(NO_USER_REASON))?;
         let target = pgpass::Target {
@@ -327,25 +305,8 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let from_pgpass = || -> Result<Option<Secret>, ConnectionStatus> {
-            match pgpass::default_path() {
-                Some(path) => pgpass::lookup(&path, &target).map_err(unavailable),
-                None => Ok(None),
-            }
-        };
-        let password = if is_azure_postgres_host(&host) {
-            match lookup.sign_in.token() {
-                Ok(token) => {
-                    password_is_azure_token = true;
-                    token
-                }
-                Err(sign_in_error) => {
-                    from_pgpass()?.ok_or_else(|| unavailable(sign_in_error.to_string()))?
-                }
-            }
-        } else {
-            from_pgpass()?.ok_or_else(|| unavailable(PGPASS_REASON))?
-        };
+        let password =
+            pgpass_or_azure_token(&target, is_azure_postgres_host(&host), &lookup.sign_in)?;
         (user, password)
     } else {
         let password = text(configuration, "password")
@@ -358,7 +319,10 @@ fn evaluate(
                 credentials_problem,
             )));
         };
-        (user.ok_or_else(|| unavailable(NO_USER_REASON))?, password)
+        (
+            user.ok_or_else(|| unavailable(NO_USER_REASON))?,
+            PasswordSource::Resolved(password),
+        )
     };
 
     let tunnel = tunnel_handler
@@ -370,13 +334,12 @@ fn evaluate(
         port,
         database,
         user,
-        password,
-        password_is_azure_token,
-        sslmode: if password_is_azure_token {
+        sslmode: if password.is_azure_token() {
             sslmode.at_least_require()
         } else {
             sslmode
         },
+        password,
         tunnel,
     })
 }

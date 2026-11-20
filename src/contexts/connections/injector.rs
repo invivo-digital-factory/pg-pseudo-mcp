@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use crate::common::AppConfig;
-use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
+use crate::contexts::connections::domain::repositories::{
+    AzureSignInTokenProvider, CommandPasswordProvider,
+};
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
+use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
 use crate::contexts::connections::infrastructure::repositories::{
-    CachedAzureSignInTokens, DbeaverConnectionCatalog, PostgresSessionPool,
+    CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog, PostgresSessionPool,
 };
 use crate::contexts::connections::use_cases::{
     ExplainStatement, ListConnections, ListDatabases, ReadCatalog, RunReadOnlyStatement,
@@ -40,10 +43,14 @@ impl ConnectionsContext {
             config.dbeaver_home.clone(),
             tokens.clone(),
         ));
+        let commands: Arc<dyn CommandPasswordProvider> = Arc::new(CachedCommandPasswords::new(
+            Arc::new(ProcessPasswordCommand::new()),
+        ));
         let pool = Arc::new(PostgresSessionPool::new(
             catalog.clone(),
             config.ssh_known_hosts.clone(),
             tokens,
+            commands,
         ));
         Self {
             list_connections: ListConnections::new(catalog),

@@ -5,6 +5,7 @@ mod connection_profile;
 mod database_listing;
 mod db_message;
 mod execution_limits;
+mod password_source;
 mod query_output;
 mod secret;
 
@@ -17,5 +18,6 @@ pub use connection_profile::{
 pub use database_listing::DatabaseListing;
 pub use db_message::DbMessage;
 pub use execution_limits::ExecutionLimits;
+pub use password_source::PasswordSource;
 pub use query_output::{ColumnMeta, ColumnSource, QueryOutput};
 pub use secret::Secret;
