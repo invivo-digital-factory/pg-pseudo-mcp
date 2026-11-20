@@ -27,7 +27,7 @@ pub struct QueryArgs {
     )]
     pub cell_offset: Option<u64>,
     #[schemars(
-        description = "Database on the same server to use instead of the connection's default database"
+        description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
 }

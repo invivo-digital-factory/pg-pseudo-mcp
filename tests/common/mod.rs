@@ -15,7 +15,7 @@ use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
 pub use pg_pseudo_mcp::contexts::querying::presentation::{
-    DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
+    DescribeTableArgs, ExplainArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
 };
 
 pub const DATABASE_URL_VAR: &str = "PG_PSEUDO_TEST_DATABASE_URL";
@@ -111,6 +111,10 @@ pub async fn explain(contexts: &Contexts, args: ExplainArgs) -> CallToolResult {
 
 pub async fn search_schema(contexts: &Contexts, args: SearchSchemaArgs) -> CallToolResult {
     querying::search_schema(&contexts.querying.search_schema, args).await
+}
+
+pub async fn list_databases(contexts: &Contexts, args: ListDatabasesArgs) -> CallToolResult {
+    querying::list_databases(&contexts.querying.list_databases, args).await
 }
 
 pub async fn list_tables(contexts: &Contexts, args: ListTablesArgs) -> CallToolResult {

@@ -15,7 +15,7 @@ pub struct SearchSchemaArgs {
     #[schemars(description = "Case-insensitive substring matched against table and column names")]
     pub pattern: String,
     #[schemars(
-        description = "Database on the same server to use instead of the connection's default database"
+        description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
 }

@@ -7,7 +7,7 @@ use crate::contexts::connections::infrastructure::repositories::{
     CachedAzureSignInTokens, DbeaverConnectionCatalog, PostgresSessionPool,
 };
 use crate::contexts::connections::use_cases::{
-    ExplainStatement, ListConnections, ReadCatalog, RunReadOnlyStatement,
+    ExplainStatement, ListConnections, ListDatabases, ReadCatalog, RunReadOnlyStatement,
 };
 
 pub struct ConnectionsContext {
@@ -15,6 +15,7 @@ pub struct ConnectionsContext {
     pub run_read_only_statement: RunReadOnlyStatement<PostgresSessionPool>,
     pub explain_statement: ExplainStatement<PostgresSessionPool>,
     pub read_catalog: ReadCatalog<PostgresSessionPool>,
+    pub list_databases: ListDatabases<PostgresSessionPool>,
 }
 
 impl ConnectionsContext {
@@ -48,7 +49,8 @@ impl ConnectionsContext {
             list_connections: ListConnections::new(catalog),
             run_read_only_statement: RunReadOnlyStatement::new(pool.clone()),
             explain_statement: ExplainStatement::new(pool.clone()),
-            read_catalog: ReadCatalog::new(pool),
+            read_catalog: ReadCatalog::new(pool.clone()),
+            list_databases: ListDatabases::new(pool),
         }
     }
 }

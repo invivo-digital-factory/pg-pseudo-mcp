@@ -21,7 +21,7 @@ pub struct ListTablesArgs {
     #[schemars(description = "Number of tables to skip, for pagination")]
     pub offset: Option<u32>,
     #[schemars(
-        description = "Database on the same server to use instead of the connection's default database"
+        description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
 }

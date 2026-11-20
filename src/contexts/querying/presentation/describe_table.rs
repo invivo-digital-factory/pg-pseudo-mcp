@@ -15,7 +15,7 @@ pub struct DescribeTableArgs {
     #[schemars(description = "Table name, optionally schema-qualified (schema.table)")]
     pub table: String,
     #[schemars(
-        description = "Database on the same server to use instead of the connection's default database"
+        description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
 }

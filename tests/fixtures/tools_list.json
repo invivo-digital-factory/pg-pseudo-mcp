@@ -14,7 +14,7 @@
             "type": "string"
           },
           "database": {
-            "description": "Database on the same server to use instead of the connection's default database",
+            "description": "Database of the same server to use instead of the connection's default database; names come from list_databases",
             "type": [
               "string",
               "null"
@@ -47,7 +47,7 @@
             "type": "string"
           },
           "database": {
-            "description": "Database on the same server to use instead of the connection's default database",
+            "description": "Database of the same server to use instead of the connection's default database; names come from list_databases",
             "type": [
               "string",
               "null"
@@ -83,6 +83,27 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
+      "description": "List the databases of the server behind one connection, with the connection's default database (the one DBeaver points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "connection": {
+            "description": "Connection name as returned by list_connections",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "type": "object"
+      },
+      "name": "list_databases"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List tables and views of a connection, one compact line each with kind, estimated rows and column count. Paginated with limit.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -92,7 +113,7 @@
             "type": "string"
           },
           "database": {
-            "description": "Database on the same server to use instead of the connection's default database",
+            "description": "Database of the same server to use instead of the connection's default database; names come from list_databases",
             "type": [
               "string",
               "null"
@@ -161,7 +182,7 @@
             "type": "string"
           },
           "database": {
-            "description": "Database on the same server to use instead of the connection's default database",
+            "description": "Database of the same server to use instead of the connection's default database; names come from list_databases",
             "type": [
               "string",
               "null"
@@ -221,7 +242,7 @@
             "type": "string"
           },
           "database": {
-            "description": "Database on the same server to use instead of the connection's default database",
+            "description": "Database of the same server to use instead of the connection's default database; names come from list_databases",
             "type": [
               "string",
               "null"

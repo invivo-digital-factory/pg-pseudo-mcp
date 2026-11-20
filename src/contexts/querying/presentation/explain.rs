@@ -15,7 +15,7 @@ pub struct ExplainArgs {
     #[schemars(description = "One read-only SQL statement to explain")]
     pub sql: String,
     #[schemars(
-        description = "Database on the same server to use instead of the connection's default database"
+        description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
 }

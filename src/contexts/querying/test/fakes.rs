@@ -8,6 +8,7 @@ use crate::contexts::querying::domain::repositories::{
     AnonymizationPorts, PersonalColumnDictionary, PseudonymTranslator, ReadOnlyDatabase,
     ResultAnonymizer,
 };
+use crate::contexts::querying::domain::types::DatabaseListing;
 use crate::contexts::querying::domain::types::{
     AnonymizedRows, Cell, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits, Lineage,
     PseudonymLookup, QueryOutput,
@@ -15,6 +16,7 @@ use crate::contexts::querying::domain::types::{
 
 pub struct FakeDatabase {
     response: Result<QueryOutput, DatabaseFailure>,
+    listing: Result<DatabaseListing, DatabaseFailure>,
     statements: Mutex<Vec<String>>,
 }
 
@@ -22,13 +24,23 @@ impl FakeDatabase {
     pub fn returning(output: QueryOutput) -> Arc<Self> {
         Arc::new(Self {
             response: Ok(output),
+            listing: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
         })
     }
 
     pub fn failing(failure: DatabaseFailure) -> Arc<Self> {
         Arc::new(Self {
-            response: Err(failure),
+            response: Err(failure.clone()),
+            listing: Err(failure),
+            statements: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn listing(listing: DatabaseListing) -> Arc<Self> {
+        Arc::new(Self {
+            response: Ok(empty_output()),
+            listing: Ok(listing),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -72,6 +84,10 @@ impl ReadOnlyDatabase for FakeDatabase {
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
         self.answer(catalog_sql)
+    }
+
+    async fn list_databases(&self, _connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
+        self.listing.clone()
     }
 }
 
