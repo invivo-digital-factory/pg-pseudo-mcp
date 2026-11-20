@@ -48,6 +48,16 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 | `explain` | The plan of one statement, without executing it; literals in the plan are pseudonymized. |
 | `server_info` | Live limits, reversible and non-reversible kinds, known limitations. |
 
+## Azure Database for PostgreSQL
+
+For a connection that uses DBeaver's pgpass authentication model and whose host ends with `.postgres.database.azure.com` (private link hosts included), the server gets the password itself from the Azure CLI instead of `~/.pgpass`: it runs `az account get-access-token --resource-type oss-rdbms --output json` (no shell, `az` found on `PATH`) and uses the Entra ID access token as the password.
+
+- The token is kept in memory only, reused until about five minutes before it expires, then fetched again. A connection refused for authentication (SQLSTATE `28P01` or `28000`) is retried once with a freshly fetched token, and reconnections of an idle session pick up the current token.
+- If `az` is missing, not signed in or fails, the matching `~/.pgpass` entry is used when there is one, as before. Otherwise `list_connections` shows the connection as unavailable with a reason that tells you to run `az login`. The reason carries at most the first error line of the CLI, never a token.
+- Other hosts and other authentication models are unchanged.
+
+The script that wrote an access token into `~/.pgpass` before each session is no longer needed for the MCP server; DBeaver itself still reads `~/.pgpass`.
+
 ## How values are pseudonymized
 
 - **Detection is automatic.** Column names are matched against the [PostgreSQL Anonymizer](https://gitlab.com/dalibo/postgresql_anonymizer) identifier dictionary; values are scanned for emails, French phone numbers, IBAN (mod 97), SIREN and SIRET (Luhn), NIR (key), card numbers, IP addresses, person names (French name lists and civility markers such as `M.` or `Mme`) and street addresses.

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,9 @@ use serde_json::Value;
 use super::credentials::CredentialStore;
 use super::pgpass;
 use super::variables::{process_env, resolve};
+use crate::contexts::connections::domain::errors::AccessTokenError;
+use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
+use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
     ConnectParams, ConnectionEntry, ConnectionStatus, Secret, SshAuth, SslMode, TunnelParams,
 };
@@ -23,11 +27,12 @@ const MASTER_PASSWORD_REASON: &str = "credentials protected by DBeaver master pa
 const NO_PASSWORD_REASON: &str = "no saved password for this connection in DBeaver";
 const UNREADABLE_REASON: &str = "data-sources file is not valid JSON (the DBeaver project may be encrypted); its connections cannot be listed";
 
-pub fn load(root: &Path) -> Vec<ConnectionEntry> {
+pub fn load(root: &Path, tokens: &dyn AzureSignInTokenProvider) -> Vec<ConnectionEntry> {
+    let sign_in = SignIn::new(tokens);
     let mut entries = Vec::new();
     for (project, dir) in project_dirs(root) {
         for (suffix, path) in data_source_files(&dir) {
-            entries.extend(load_file(&project, &dir, &suffix, &path));
+            entries.extend(load_file(&project, &dir, &suffix, &path, &sign_in));
         }
     }
     entries
@@ -69,7 +74,34 @@ fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
     files
 }
 
-fn load_file(project: &str, dir: &Path, suffix: &str, path: &Path) -> Vec<ConnectionEntry> {
+struct SignIn<'a> {
+    tokens: &'a dyn AzureSignInTokenProvider,
+    attempt: RefCell<Option<Result<Secret, AccessTokenError>>>,
+}
+
+impl<'a> SignIn<'a> {
+    fn new(tokens: &'a dyn AzureSignInTokenProvider) -> Self {
+        Self {
+            tokens,
+            attempt: RefCell::new(None),
+        }
+    }
+
+    fn token(&self) -> Result<Secret, AccessTokenError> {
+        self.attempt
+            .borrow_mut()
+            .get_or_insert_with(|| self.tokens.access_token())
+            .clone()
+    }
+}
+
+fn load_file(
+    project: &str,
+    dir: &Path,
+    suffix: &str,
+    path: &Path,
+    sign_in: &SignIn<'_>,
+) -> Vec<ConnectionEntry> {
     let file_label = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -94,6 +126,7 @@ fn load_file(project: &str, dir: &Path, suffix: &str, path: &Path) -> Vec<Connec
                 connection,
                 &store,
                 credentials_problem.as_deref(),
+                sign_in,
             )
         })
         .collect()
@@ -141,6 +174,7 @@ fn build_entry(
     connection: &Value,
     store: &CredentialStore,
     credentials_problem: Option<&str>,
+    sign_in: &SignIn<'_>,
 ) -> ConnectionEntry {
     let configuration = connection.get("configuration").unwrap_or(&NULL);
     let engine = text(connection, "provider").unwrap_or_else(|| "unknown".to_string());
@@ -153,6 +187,7 @@ fn build_entry(
         configuration,
         store,
         credentials_problem,
+        sign_in,
     ) {
         Ok(params) => (ConnectionStatus::Available, Some(params)),
         Err(status) => (status, None),
@@ -193,6 +228,7 @@ fn evaluate(
     configuration: &Value,
     store: &CredentialStore,
     credentials_problem: Option<&str>,
+    sign_in: &SignIn<'_>,
 ) -> Result<ConnectParams, ConnectionStatus> {
     if engine != "postgresql" {
         return Err(unsupported(format!(
@@ -265,6 +301,7 @@ fn evaluate(
         .or_else(|| saved.and_then(|saved| saved.user.clone()))
         .filter(|user| !user.is_empty());
 
+    let mut password_is_azure_token = false;
     let (user, password) = if pgpass_auth {
         let user = user.ok_or_else(|| unavailable(NO_USER_REASON))?;
         let target = pgpass::Target {
@@ -273,11 +310,29 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let password = match pgpass::default_path() {
-            Some(path) => pgpass::lookup(&path, &target).map_err(unavailable)?,
-            None => None,
-        }
-        .ok_or_else(|| unavailable(PGPASS_REASON))?;
+        let from_pgpass = || {
+            match pgpass::default_path() {
+                Some(path) => pgpass::lookup(&path, &target).map_err(unavailable)?,
+                None => None,
+            }
+            .ok_or_else(|| unavailable(PGPASS_REASON))
+        };
+        let password = if is_azure_postgres_host(&host) {
+            match sign_in.token() {
+                Ok(token) => {
+                    password_is_azure_token = true;
+                    token
+                }
+                Err(sign_in_error) => from_pgpass().map_err(|status| match status {
+                    ConnectionStatus::Unavailable { reason } if reason == PGPASS_REASON => {
+                        unavailable(sign_in_error.to_string())
+                    }
+                    other => other,
+                })?,
+            }
+        } else {
+            from_pgpass()?
+        };
         (user, password)
     } else {
         let password = text(configuration, "password")
@@ -303,6 +358,7 @@ fn evaluate(
         database,
         user,
         password,
+        password_is_azure_token,
         sslmode,
         tunnel,
     })

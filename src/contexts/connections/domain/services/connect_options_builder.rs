@@ -51,6 +51,7 @@ mod unit {
             database: "app".into(),
             user: "reader".into(),
             password: Secret::new("db-pass"),
+            password_is_azure_token: false,
             sslmode: SslMode::Require,
             tunnel: Some(TunnelParams {
                 host: "bastion.example".into(),

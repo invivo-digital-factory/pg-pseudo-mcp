@@ -20,7 +20,7 @@ use crate::contexts::connections::domain::types::{
     ColumnMeta, ConnectOptions, DbMessage, QueryOutput, SslMode,
 };
 use crate::contexts::connections::infrastructure::mappers::{
-    db_message_from_db_error, session_error_from_postgres,
+    db_message_from_db_error, session_error_from_handshake, session_error_from_postgres,
 };
 
 const APPLICATION_NAME: &str = "pg-pseudo-mcp";
@@ -251,7 +251,7 @@ async fn handshake(options: &ConnectOptions, link: Option<SshLink>) -> Result<Li
             SslMode::Allow | SslMode::Prefer => WireSslMode::Prefer,
             _ => WireSslMode::Require,
         });
-    let refused = |error: tokio_postgres::Error| SessionError::Connect(error.to_string());
+    let refused = |error: tokio_postgres::Error| session_error_from_handshake(&error);
     let tls = match options.sslmode {
         SslMode::Disable => None,
         _ => Some(

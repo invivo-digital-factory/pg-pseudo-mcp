@@ -41,6 +41,7 @@ pub struct ConnectParams {
     pub database: String,
     pub user: String,
     pub password: Secret,
+    pub password_is_azure_token: bool,
     pub sslmode: SslMode,
     pub tunnel: Option<TunnelParams>,
 }
@@ -53,6 +54,7 @@ impl fmt::Debug for ConnectParams {
             .field("database", &self.database)
             .field("user", &self.user)
             .field("password", &self.password)
+            .field("password_is_azure_token", &self.password_is_azure_token)
             .field("sslmode", &self.sslmode)
             .field("tunnel", &self.tunnel)
             .finish()

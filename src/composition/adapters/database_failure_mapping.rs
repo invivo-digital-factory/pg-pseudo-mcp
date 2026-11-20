@@ -22,7 +22,9 @@ fn session_failure(error: SessionError) -> DatabaseFailure {
     match error {
         SessionError::Timeout => DatabaseFailure::Timeout,
         SessionError::Db(message) => DatabaseFailure::Db(Box::new(db_message(*message))),
-        SessionError::Connect(message) => DatabaseFailure::Connect(message),
+        SessionError::Connect(message) | SessionError::Authentication(message) => {
+            DatabaseFailure::Connect(message)
+        }
         SessionError::Decode(message) => DatabaseFailure::Decode(message),
     }
 }

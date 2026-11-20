@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::workspace;
+use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::disambiguate;
 use crate::contexts::connections::domain::types::Discovery;
 
@@ -13,7 +14,7 @@ pub fn default_dbeaver_home() -> Option<PathBuf> {
     }
 }
 
-pub fn discover(dbeaver_home: Option<&Path>) -> Discovery {
+pub fn discover(dbeaver_home: Option<&Path>, tokens: &dyn AzureSignInTokenProvider) -> Discovery {
     let Some(root) = dbeaver_home
         .map(Path::to_path_buf)
         .or_else(default_dbeaver_home)
@@ -35,7 +36,7 @@ pub fn discover(dbeaver_home: Option<&Path>) -> Discovery {
             )),
         };
     }
-    let mut connections = workspace::load(&root);
+    let mut connections = workspace::load(&root, tokens);
     disambiguate(&mut connections);
     connections.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     let hint = connections
