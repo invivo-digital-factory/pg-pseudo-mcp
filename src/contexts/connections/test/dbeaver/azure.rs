@@ -215,3 +215,48 @@ fn un_seul_appel_a_az_sert_toutes_les_connexions_azure_d_une_decouverte() {
     let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
     assert_eq!(count.lines().count(), 1);
 }
+
+fn azure_pgpass_sslmode(extra: Value) -> SslMode {
+    let mut model = pgpass_model();
+    merge(&mut model, extra);
+    let setup = setup(AZURE_HOST, model, None, WORKING_AZ);
+    use_pgpass(&setup);
+    let params = shop(&setup).params.expect("available");
+    assert!(params.password_is_azure_token);
+    params.sslmode
+}
+
+#[test]
+fn un_jeton_azure_sans_sslmode_impose_tls() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(azure_pgpass_sslmode(json!({})), SslMode::Require);
+}
+
+#[test]
+fn un_jeton_azure_avec_sslmode_disable_allow_ou_prefer_impose_tls() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    for mode in ["disable", "allow", "prefer"] {
+        let extra = json!({ "configuration": { "provider-properties": { "sslmode": mode } } });
+        assert_eq!(azure_pgpass_sslmode(extra), SslMode::Require, "{mode}");
+    }
+}
+
+#[test]
+fn un_jeton_azure_garde_une_verification_plus_stricte_que_require() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let extra = json!({ "configuration": { "provider-properties": { "sslmode": "verify-full" } } });
+    assert_eq!(azure_pgpass_sslmode(extra), SslMode::VerifyFull);
+}
+
+#[test]
+fn un_mot_de_passe_pgpass_hors_azure_garde_prefer() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(
+        "db.internal.example",
+        pgpass_model(),
+        Some("db.internal.example:5433:shop:dev@corp.example:plain-secret\n"),
+        WORKING_AZ,
+    );
+    use_pgpass(&setup);
+    assert_eq!(shop(&setup).params.unwrap().sslmode, SslMode::Prefer);
+}

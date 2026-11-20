@@ -359,7 +359,11 @@ fn evaluate(
         user,
         password,
         password_is_azure_token,
-        sslmode,
+        sslmode: if password_is_azure_token {
+            sslmode.at_least_require()
+        } else {
+            sslmode
+        },
         tunnel,
     })
 }

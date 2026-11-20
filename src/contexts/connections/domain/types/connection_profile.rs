@@ -13,6 +13,15 @@ pub enum SslMode {
     VerifyFull,
 }
 
+impl SslMode {
+    pub fn at_least_require(self) -> Self {
+        match self {
+            Self::Disable | Self::Allow | Self::Prefer => Self::Require,
+            strict => strict,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SshAuth {
     PublicKey {
