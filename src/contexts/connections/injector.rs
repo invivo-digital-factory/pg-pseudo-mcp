@@ -1,8 +1,11 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::common::AppConfig;
+use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
+use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::repositories::{
-    DbeaverConnectionCatalog, PostgresSessionPool,
+    CachedAzureSignInTokens, DbeaverConnectionCatalog, PostgresSessionPool,
 };
 use crate::contexts::connections::use_cases::{
     ExplainStatement, ListConnections, ReadCatalog, RunReadOnlyStatement,
@@ -17,10 +20,26 @@ pub struct ConnectionsContext {
 
 impl ConnectionsContext {
     pub fn new(config: &AppConfig) -> Self {
-        let catalog = Arc::new(DbeaverConnectionCatalog::new(config.dbeaver_home.clone()));
+        Self::with_azure_cli(config, AzureCli::from_path())
+    }
+
+    pub fn with_azure_command(config: &AppConfig, command: Option<PathBuf>) -> Self {
+        Self::with_azure_cli(config, AzureCli::new(command))
+    }
+
+    fn with_azure_cli(config: &AppConfig, cli: AzureCli) -> Self {
+        let tokens: Arc<dyn AzureSignInTokenProvider> = Arc::new(CachedAzureSignInTokens::new(
+            Arc::new(cli),
+            Arc::new(SystemClock),
+        ));
+        let catalog = Arc::new(DbeaverConnectionCatalog::new(
+            config.dbeaver_home.clone(),
+            tokens.clone(),
+        ));
         let pool = Arc::new(PostgresSessionPool::new(
             catalog.clone(),
             config.ssh_known_hosts.clone(),
+            tokens,
         ));
         Self {
             list_connections: ListConnections::new(catalog),

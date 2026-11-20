@@ -422,7 +422,7 @@ mod integration {
             Ok(_) => panic!("connection must be refused"),
             Err(error) => error,
         };
-        assert!(matches!(error, SessionError::Connect(_)), "{error:?}");
+        assert!(error.is_authentication_failure(), "{error:?}");
         assert!(!error.to_string().contains("definitely-not-the-password"));
     }
 

@@ -14,6 +14,18 @@ pub fn db_message_from_db_error(error: &DbError) -> DbMessage {
     }
 }
 
+pub fn session_error_from_handshake(error: &tokio_postgres::Error) -> SessionError {
+    match error.as_db_error().map(DbError::code) {
+        Some(code)
+            if code == &SqlState::INVALID_PASSWORD
+                || code == &SqlState::INVALID_AUTHORIZATION_SPECIFICATION =>
+        {
+            SessionError::Authentication(error.to_string())
+        }
+        _ => SessionError::Connect(error.to_string()),
+    }
+}
+
 pub fn session_error_from_postgres(error: &tokio_postgres::Error) -> SessionError {
     match error.as_db_error() {
         Some(db) if db.code() == &SqlState::QUERY_CANCELED => SessionError::Timeout,

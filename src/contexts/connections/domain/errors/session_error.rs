@@ -4,6 +4,8 @@ use crate::contexts::connections::domain::types::DbMessage;
 pub enum SessionError {
     #[error("connection failed: {0}")]
     Connect(String),
+    #[error("connection failed: {0}")]
+    Authentication(String),
     #[error("statement timed out")]
     Timeout,
     #[error("{}", describe(.0))]
@@ -13,8 +15,12 @@ pub enum SessionError {
 }
 
 impl SessionError {
+    pub fn is_authentication_failure(&self) -> bool {
+        matches!(self, Self::Authentication(_))
+    }
+
     pub fn breaks_connection(&self) -> bool {
-        matches!(self, Self::Connect(_))
+        matches!(self, Self::Connect(_) | Self::Authentication(_))
     }
 }
 

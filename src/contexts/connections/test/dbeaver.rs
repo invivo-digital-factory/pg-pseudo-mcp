@@ -5,18 +5,40 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use crate::contexts::connections::domain::errors::ConnectionError;
+use crate::contexts::connections::domain::errors::{AccessTokenError, ConnectionError};
+use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::resolve_connection;
 use crate::contexts::connections::domain::types::{
     ConnectParams, ConnectionEntry, ConnectionStatus, Discovery, Secret, SshAuth, SslMode,
     TunnelParams,
 };
 use crate::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
-use crate::contexts::connections::infrastructure::data_sources::dbeaver::discover;
+use crate::contexts::connections::infrastructure::data_sources::dbeaver::discover as discover_with;
 use crate::contexts::connections::infrastructure::repositories::DbeaverConnectionCatalog;
 use crate::contexts::connections::presentation;
 use crate::contexts::connections::use_cases::ListConnections;
 use rmcp::model::CallToolResult;
+
+#[cfg(unix)]
+mod azure;
+
+struct NoTokens;
+
+impl AzureSignInTokenProvider for NoTokens {
+    fn access_token(&self) -> Result<Secret, AccessTokenError> {
+        Err(AccessTokenError::CliNotInstalled)
+    }
+
+    fn renewed_access_token(&self) -> Result<Secret, AccessTokenError> {
+        Err(AccessTokenError::CliNotInstalled)
+    }
+}
+
+static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn discover(home: Option<&Path>) -> Discovery {
+    discover_with(home, &NoTokens)
+}
 
 fn write_project(root: &Path, project: &str, suffix: &str, sources: &Value, creds: Option<&Value>) {
     let dir = root.join("workspace6").join(project).join(".dbeaver");
@@ -82,7 +104,7 @@ fn find_connection(home: &Path, name: &str) -> Result<ConnectParams, ConnectionE
 }
 
 async fn list_connections(home: &Path) -> CallToolResult {
-    let catalog = DbeaverConnectionCatalog::new(Some(home.to_path_buf()));
+    let catalog = DbeaverConnectionCatalog::new(Some(home.to_path_buf()), Arc::new(NoTokens));
     presentation::list_connections(&ListConnections::new(Arc::new(catalog))).await
 }
 
@@ -841,6 +863,7 @@ mod integration {
 
     #[test]
     fn pgpass_fournit_le_mot_de_passe_de_la_base() {
+        let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let home = TempDir::new().unwrap();
         let key = key_file(&home);
         let pgpass = home.path().join("pgpass-dbeaver-test");
