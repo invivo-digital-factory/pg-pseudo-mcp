@@ -20,7 +20,7 @@ use crate::contexts::querying::presentation::{
 };
 
 pub const INSTRUCTIONS: &str = "\
-pg-pseudo-mcp gives read-only access to the PostgreSQL databases configured in the developer's DBeaver.
+pg-pseudo-mcp gives read-only access to the PostgreSQL databases of the developer's own connection file, and of DBeaver as a fallback.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query.
 A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
@@ -54,7 +54,7 @@ impl PgPseudoServer {
     }
 
     #[tool(
-        description = "List the PostgreSQL connections found in the developer's DBeaver workspace, with status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
+        description = "List the PostgreSQL connections of the developer's connection file and, as a fallback, of the DBeaver workspace, with source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_connections(&self) -> CallToolResult {
@@ -62,7 +62,7 @@ impl PgPseudoServer {
     }
 
     #[tool(
-        description = "List the databases of the server behind one connection, with the connection's default database (the one DBeaver points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+        description = "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_databases(

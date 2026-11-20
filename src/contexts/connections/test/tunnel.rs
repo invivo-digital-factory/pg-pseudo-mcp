@@ -14,7 +14,7 @@ use tokio_postgres::Config;
 use super::database::database_url;
 use crate::contexts::connections::domain::errors::SessionError;
 use crate::contexts::connections::domain::types::{
-    Cell, ConnectOptions, SslMode, Tunnel, TunnelAuth,
+    Cell, ConnectOptions, Hop, SslMode, Tunnel, TunnelAuth,
 };
 use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect, connect_within,
@@ -108,14 +108,18 @@ fn options(auth: TunnelAuth, verify_host_key: bool, known_hosts: Option<&Path>) 
             .unwrap_or_default(),
         sslmode: SslMode::Disable,
         tunnel: Some(Tunnel {
-            host: SSH_HOST.to_string(),
-            port: ssh_port(),
-            user: SSH_USER.to_string(),
-            auth,
+            hops: vec![Hop {
+                label: SSH_HOST.to_string(),
+                host: SSH_HOST.to_string(),
+                port: ssh_port(),
+                user: SSH_USER.to_string(),
+                auth,
+                verify_host_key,
+                known_hosts: known_hosts.map(Path::to_path_buf).into_iter().collect(),
+                host_key_alias: None,
+            }],
             remote_host: REMOTE_HOST.to_string(),
             remote_port: REMOTE_PORT,
-            verify_host_key,
-            known_hosts: known_hosts.map(Path::to_path_buf),
         }),
     }
 }
@@ -336,7 +340,7 @@ mod integration {
     async fn une_session_ssh_coupee_est_retablie_a_la_requete_suivante() {
         let mut options = unverified(key_auth());
         if let Some(tunnel) = options.tunnel.as_mut() {
-            tunnel.user = DROPPED_USER.to_string();
+            tunnel.hops[0].user = DROPPED_USER.to_string();
         }
         let mut session = connect(&options).await.expect("connect through the tunnel");
         let before = backend_pid(&mut session).await;
@@ -367,14 +371,18 @@ mod integration {
             password: "p".to_string(),
             sslmode: SslMode::Disable,
             tunnel: Some(Tunnel {
-                host: "127.0.0.1".to_string(),
-                port,
-                user: SSH_USER.to_string(),
-                auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
+                hops: vec![Hop {
+                    label: "127.0.0.1".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    user: SSH_USER.to_string(),
+                    auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
+                    verify_host_key: false,
+                    known_hosts: Vec::new(),
+                    host_key_alias: None,
+                }],
                 remote_host: REMOTE_HOST.to_string(),
                 remote_port: REMOTE_PORT,
-                verify_host_key: false,
-                known_hosts: None,
             }),
         };
         let started = Instant::now();
@@ -423,5 +431,165 @@ mod integration {
             while channel.wait().await.is_some() {}
         })
         .await;
+    }
+}
+
+mod chaine_de_sauts {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::contexts::connections::domain::services::connect_options;
+    use crate::contexts::connections::domain::types::{
+        ConnectParams, PasswordSource, Secret, TunnelParams,
+    };
+    use crate::contexts::connections::infrastructure::data_sources::openssh::{
+        LocalEnvironment, OpenSshResolver, SshCommand,
+    };
+
+    struct Fixture {
+        dir: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn config_path(&self) -> PathBuf {
+            self.dir.path().join("ssh_config")
+        }
+
+        fn resolver(&self) -> OpenSshResolver {
+            OpenSshResolver::new(
+                Arc::new(SshCommand::from_path(Some(self.config_path()))),
+                LocalEnvironment::from_process(),
+            )
+        }
+    }
+
+    fn fixture(
+        known_hosts: &str,
+        key: &str,
+        hop_two_strict: &str,
+        hop_one_strict: &str,
+    ) -> Fixture {
+        let dir = tempfile::tempdir().expect("config dir");
+        let known = dir.path().join("known_hosts");
+        std::fs::write(&known, known_hosts).expect("known_hosts");
+        let common = format!(
+            "  User {SSH_USER}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile {}\n  GlobalKnownHostsFile /dev/null\n",
+            asset(key).display(),
+            known.display()
+        );
+        let config = format!(
+            "Host jump-a\n  HostName {SSH_HOST}\n  Port {}\n{common}{hop_one_strict}\nHost app-via-jump\n  HostName {SSH_HOST}\n  Port 22\n  ProxyJump jump-a\n{common}{hop_two_strict}\n",
+            ssh_port()
+        );
+        std::fs::write(dir.path().join("ssh_config"), config).expect("ssh config");
+        Fixture { dir }
+    }
+
+    fn known(first: bool, second: bool) -> String {
+        let key = public_key_fields("ssh_host_ed25519_test.pub");
+        let mut contents = String::new();
+        if first {
+            contents.push_str(&format!("{} {key}\n", host_pattern()));
+        }
+        if second {
+            contents.push_str(&format!("{SSH_HOST} {key}\n"));
+        }
+        contents
+    }
+
+    fn options_for(fixture: &Fixture, alias: &str) -> ConnectOptions {
+        let hops = fixture.resolver().resolve(alias).expect("alias resolves");
+        let config = Config::from_str(&database_url()).expect("valid database url");
+        let params = ConnectParams {
+            host: REMOTE_HOST.to_string(),
+            port: REMOTE_PORT,
+            database: config.get_dbname().unwrap_or("pgpseudo").to_string(),
+            user: config.get_user().unwrap_or("pgpseudo").to_string(),
+            password: PasswordSource::Resolved(Secret::new(
+                config
+                    .get_password()
+                    .map(|p| String::from_utf8_lossy(p).into_owned())
+                    .unwrap_or_default(),
+            )),
+            sslmode: SslMode::Disable,
+            tunnel: Some(TunnelParams {
+                hops,
+                remote_host: REMOTE_HOST.to_string(),
+                remote_port: REMOTE_PORT,
+            }),
+        };
+        connect_options(&params, None)
+    }
+
+    const STRICT_NO: &str = "  StrictHostKeyChecking no\n";
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_chaine_a_deux_sauts_dont_les_cles_sont_connues_execute_une_requete() {
+        let fixture = fixture(&known(true, true), "tunnel_test_ed25519", "", "");
+        let mut session = connect(&options_for(&fixture, "app-via-jump"))
+            .await
+            .expect("two-hop chain connects");
+        select_one(&mut session).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_inconnue_au_premier_saut_est_refusee_avec_l_alias_et_l_empreinte() {
+        let fixture = fixture(&known(false, true), "tunnel_test_ed25519", "", "");
+        let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
+        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(message.contains("SHA256:"), "{message}");
+        assert!(message.contains("not in known_hosts"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn stricthostkeychecking_no_ne_desactive_pas_la_verification_du_premier_saut() {
+        let fixture = fixture(
+            &known(false, true),
+            "tunnel_test_ed25519",
+            STRICT_NO,
+            STRICT_NO,
+        );
+        let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
+        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(message.contains("SHA256:"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_inconnue_au_second_saut_atteint_par_canal_est_refusee_meme_avec_strict_no() {
+        let fixture = fixture(&known(true, false), "tunnel_test_ed25519", "", "");
+        let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
+        assert!(message.contains("SSH hop 2 of 2"), "{message}");
+        assert!(message.contains("SHA256:"), "{message}");
+        let relaxed = fixture_with_strict(&known(true, false));
+        let message = connect_error(&options_for(&relaxed, "app-via-jump")).await;
+        assert!(message.contains("SSH hop 2 of 2"), "{message}");
+        assert!(message.contains("SHA256:"), "{message}");
+    }
+
+    fn fixture_with_strict(known_hosts: &str) -> Fixture {
+        fixture(known_hosts, "tunnel_test_ed25519", STRICT_NO, STRICT_NO)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn une_cle_chiffree_sans_agent_est_refusee_avec_la_consigne_ssh_add() {
+        let fixture = fixture(&known(true, true), "tunnel_test_ed25519_encrypted", "", "");
+        let message = connect_error(&options_for(&fixture, "jump-a")).await;
+        assert!(message.contains("ssh-add"), "{message}");
+        assert!(message.contains("encrypted"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and postgres services"]
+    async fn un_alias_a_un_saut_dont_la_cle_est_connue_execute_une_requete() {
+        let fixture = fixture(&known(true, true), "tunnel_test_ed25519", "", "");
+        let mut session = connect(&options_for(&fixture, "jump-a"))
+            .await
+            .expect("single hop alias connects");
+        select_one(&mut session).await;
     }
 }

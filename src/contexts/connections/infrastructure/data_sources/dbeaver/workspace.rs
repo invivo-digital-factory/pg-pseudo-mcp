@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -6,26 +5,28 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::credentials::CredentialStore;
-use super::pgpass;
 use super::variables::{process_env, resolve};
-use crate::contexts::connections::domain::errors::AccessTokenError;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
-    ConnectParams, ConnectionEntry, ConnectionStatus, Secret, SshAuth, SslMode, TunnelParams,
+    ConnectParams, ConnectionEntry, ConnectionSource, ConnectionStatus, HostKeyPolicy,
+    PasswordSource, Secret, SshAuth, SshHop, SslMode, TunnelParams,
 };
+use crate::contexts::connections::infrastructure::data_sources::password_resolution::{
+    SignIn, pgpass_or_azure_token,
+};
+use crate::contexts::connections::infrastructure::data_sources::pgpass;
 
-static NULL: Value = Value::Null;
+pub(super) static NULL: Value = Value::Null;
 
 const JUMP_SERVER_REASON: &str = "SSH jump servers are not supported yet";
-const SSH_USER_REASON: &str = "SSH user not saved in DBeaver";
+pub(super) const SSH_USER_REASON: &str = "SSH user not saved in DBeaver";
 const SSH_PASSWORD_REASON: &str = "no saved SSH password for this connection in DBeaver";
-const PGPASS_REASON: &str = "no matching entry in the pgpass file";
 const NO_USER_REASON: &str = "no saved user name for this connection in DBeaver";
 const PROXY_REASON: &str = "proxy not supported in this version";
 const MASTER_PASSWORD_REASON: &str = "credentials protected by DBeaver master password or secure storage; unlock or re-save them in DBeaver";
 const NO_PASSWORD_REASON: &str = "no saved password for this connection in DBeaver";
-const UNREADABLE_REASON: &str = "data-sources file is not valid JSON (the DBeaver project may be encrypted); its connections cannot be listed";
+pub(super) const UNREADABLE_REASON: &str = "data-sources file is not valid JSON (the DBeaver project may be encrypted); its connections cannot be listed";
 
 pub fn load(
     root: &Path,
@@ -45,7 +46,7 @@ pub fn load(
     entries
 }
 
-fn project_dirs(root: &Path) -> Vec<(String, PathBuf)> {
+pub(super) fn project_dirs(root: &Path) -> Vec<(String, PathBuf)> {
     let mut projects: Vec<(String, PathBuf)> = fs::read_dir(root.join("workspace6"))
         .into_iter()
         .flatten()
@@ -63,7 +64,7 @@ fn project_dirs(root: &Path) -> Vec<(String, PathBuf)> {
     projects
 }
 
-fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
+pub(super) fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
     let mut files: Vec<(String, PathBuf)> = fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -84,27 +85,6 @@ fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
 struct Lookup<'a> {
     sign_in: SignIn<'a>,
     database: Option<&'a str>,
-}
-
-struct SignIn<'a> {
-    tokens: &'a dyn AzureSignInTokenProvider,
-    attempt: RefCell<Option<Result<Secret, AccessTokenError>>>,
-}
-
-impl<'a> SignIn<'a> {
-    fn new(tokens: &'a dyn AzureSignInTokenProvider) -> Self {
-        Self {
-            tokens,
-            attempt: RefCell::new(None),
-        }
-    }
-
-    fn token(&self) -> Result<Secret, AccessTokenError> {
-        self.attempt
-            .borrow_mut()
-            .get_or_insert_with(|| self.tokens.access_token())
-            .clone()
-    }
 }
 
 fn load_file(
@@ -148,6 +128,8 @@ fn unreadable_entry(project: &str, file_label: &str) -> ConnectionEntry {
     let label = format!("{project}/{file_label}");
     ConnectionEntry {
         id: label.clone(),
+        declared_name: label.clone(),
+        source: ConnectionSource::Dbeaver,
         name: label,
         folder: None,
         project: project.to_string(),
@@ -161,7 +143,7 @@ fn unreadable_entry(project: &str, file_label: &str) -> ConnectionEntry {
     }
 }
 
-fn load_credentials(dir: &Path, suffix: &str) -> (CredentialStore, Option<String>) {
+pub(super) fn load_credentials(dir: &Path, suffix: &str) -> (CredentialStore, Option<String>) {
     let path = dir.join(format!("credentials-config{suffix}.json"));
     let Ok(bytes) = fs::read(&path) else {
         return (CredentialStore::default(), None);
@@ -172,7 +154,7 @@ fn load_credentials(dir: &Path, suffix: &str) -> (CredentialStore, Option<String
     }
 }
 
-fn text(value: &Value, key: &str) -> Option<String> {
+pub(super) fn text(value: &Value, key: &str) -> Option<String> {
     match value.get(key)? {
         Value::String(text) if !text.is_empty() => Some(text.clone()),
         Value::Number(number) => Some(number.to_string()),
@@ -208,9 +190,12 @@ fn build_entry(
         .as_ref()
         .map(|params| params.database.clone())
         .or(database);
+    let name = text(connection, "name").unwrap_or_else(|| id.to_string());
     ConnectionEntry {
         id: id.to_string(),
-        name: text(connection, "name").unwrap_or_else(|| id.to_string()),
+        declared_name: name.clone(),
+        source: ConnectionSource::Dbeaver,
+        name,
         folder: text(connection, "folder"),
         project: project.to_string(),
         engine,
@@ -233,37 +218,39 @@ fn unsupported(reason: impl Into<String>) -> ConnectionStatus {
     }
 }
 
-fn evaluate(
-    id: &str,
-    engine: &str,
-    connection: &Value,
-    configuration: &Value,
-    store: &CredentialStore,
-    credentials_problem: Option<&str>,
-    lookup: &Lookup<'_>,
-) -> Result<ConnectParams, ConnectionStatus> {
-    if engine != "postgresql" {
-        return Err(unsupported(format!(
-            "engine {engine} is not supported, only PostgreSQL"
-        )));
+pub(super) struct Endpoint {
+    pub host: String,
+    pub port: u16,
+    pub database: Option<String>,
+    pub sslmode: SslMode,
+}
+
+pub(super) fn pgpass_auth_model(configuration: &Value) -> Result<bool, ConnectionStatus> {
+    match text(configuration, "auth-model").as_deref() {
+        None | Some("native") => Ok(false),
+        Some("postgres_pgpass") => Ok(true),
+        Some(model) => Err(unsupported(format!(
+            "authentication model {model} is not supported in this version"
+        ))),
     }
-    let tunnel_handler = find_tunnel_handler(configuration)?;
-    let pgpass_auth = match text(configuration, "auth-model").as_deref() {
-        None | Some("native") => false,
-        Some("postgres_pgpass") => true,
-        Some(model) => {
-            return Err(unsupported(format!(
-                "authentication model {model} is not supported in this version"
-            )));
-        }
-    };
+}
 
-    let own_field = |name: &str| match name {
-        "host" | "port" | "database" | "user" => text(configuration, name),
-        _ => None,
-    };
-    let expand = |input: &str| resolve(input, own_field, process_env).map_err(unavailable);
+pub(super) fn expander(
+    configuration: &Value,
+) -> impl Fn(&str) -> Result<String, ConnectionStatus> + '_ {
+    move |input: &str| {
+        let own_field = |name: &str| match name {
+            "host" | "port" | "database" | "user" => text(configuration, name),
+            _ => None,
+        };
+        resolve(input, own_field, process_env).map_err(unavailable)
+    }
+}
 
+pub(super) fn endpoint<E>(configuration: &Value, expand: &E) -> Result<Endpoint, ConnectionStatus>
+where
+    E: Fn(&str) -> Result<String, ConnectionStatus>,
+{
     let mut sslmode_raw: Option<String> = None;
     let (host, port, database) =
         if text(configuration, "configurationType").as_deref() == Some("URL") {
@@ -295,19 +282,43 @@ fn evaluate(
                 .transpose()?;
             (host, port, database)
         };
-
     let sslmode = parse_sslmode(
         sslmode_raw
             .or_else(|| property_sslmode(configuration.get("provider-properties")))
             .or_else(|| property_sslmode(configuration.get("properties")))
             .as_deref(),
     )?;
+    Ok(Endpoint {
+        host,
+        port: port.unwrap_or(5432),
+        database,
+        sslmode,
+    })
+}
 
-    let port = port.unwrap_or(5432);
+fn evaluate(
+    id: &str,
+    engine: &str,
+    connection: &Value,
+    configuration: &Value,
+    store: &CredentialStore,
+    credentials_problem: Option<&str>,
+    lookup: &Lookup<'_>,
+) -> Result<ConnectParams, ConnectionStatus> {
+    if engine != "postgresql" {
+        return Err(unsupported(format!(
+            "engine {engine} is not supported, only PostgreSQL"
+        )));
+    }
+    let tunnel_handler = find_tunnel_handler(configuration)?;
+    let pgpass_auth = pgpass_auth_model(configuration)?;
+    let expand = expander(configuration);
+    let endpoint = endpoint(configuration, &expand)?;
+    let (host, port, sslmode) = (endpoint.host, endpoint.port, endpoint.sslmode);
     let database = lookup
         .database
         .map(str::to_string)
-        .or(database)
+        .or(endpoint.database)
         .unwrap_or_else(|| "postgres".to_string());
     let saved = store.get(id);
     let plain_user = text(configuration, "user")
@@ -317,7 +328,6 @@ fn evaluate(
         .or_else(|| saved.and_then(|saved| saved.user.clone()))
         .filter(|user| !user.is_empty());
 
-    let mut password_is_azure_token = false;
     let (user, password) = if pgpass_auth {
         let user = user.ok_or_else(|| unavailable(NO_USER_REASON))?;
         let target = pgpass::Target {
@@ -326,25 +336,8 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let from_pgpass = || -> Result<Option<Secret>, ConnectionStatus> {
-            match pgpass::default_path() {
-                Some(path) => pgpass::lookup(&path, &target).map_err(unavailable),
-                None => Ok(None),
-            }
-        };
-        let password = if is_azure_postgres_host(&host) {
-            match lookup.sign_in.token() {
-                Ok(token) => {
-                    password_is_azure_token = true;
-                    token
-                }
-                Err(sign_in_error) => {
-                    from_pgpass()?.ok_or_else(|| unavailable(sign_in_error.to_string()))?
-                }
-            }
-        } else {
-            from_pgpass()?.ok_or_else(|| unavailable(PGPASS_REASON))?
-        };
+        let password =
+            pgpass_or_azure_token(&target, is_azure_postgres_host(&host), &lookup.sign_in)?;
         (user, password)
     } else {
         let password = text(configuration, "password")
@@ -357,7 +350,10 @@ fn evaluate(
                 credentials_problem,
             )));
         };
-        (user.ok_or_else(|| unavailable(NO_USER_REASON))?, password)
+        (
+            user.ok_or_else(|| unavailable(NO_USER_REASON))?,
+            PasswordSource::Resolved(password),
+        )
     };
 
     let tunnel = tunnel_handler
@@ -369,13 +365,12 @@ fn evaluate(
         port,
         database,
         user,
-        password,
-        password_is_azure_token,
-        sslmode: if password_is_azure_token {
+        sslmode: if password.is_azure_token() {
             sslmode.at_least_require()
         } else {
             sslmode
         },
+        password,
         tunnel,
     })
 }
@@ -448,14 +443,25 @@ where
         }
         None => (database_host.to_string(), database_port),
     };
+    let host_key = if is_true(properties.get("bypassHostVerification")) {
+        HostKeyPolicy::Bypass
+    } else {
+        HostKeyPolicy::Verify {
+            known_hosts: Vec::new(),
+            alias: None,
+        }
+    };
     Ok(TunnelParams {
-        host,
-        port,
-        user,
-        auth,
+        hops: vec![SshHop {
+            label: host.clone(),
+            host,
+            port,
+            user,
+            auth,
+            host_key,
+        }],
         remote_host,
         remote_port,
-        verify_host_key: !is_true(properties.get("bypassHostVerification")),
     })
 }
 
@@ -477,7 +483,7 @@ fn check_key_file(path: &Path) -> Result<(), ConnectionStatus> {
     }
 }
 
-fn parse_port(raw: &str) -> Option<u16> {
+pub(super) fn parse_port(raw: &str) -> Option<u16> {
     let raw = raw.trim();
     let port = raw.parse::<u16>().ok().or_else(|| {
         let number = raw.parse::<f64>().ok()?;
@@ -487,7 +493,7 @@ fn parse_port(raw: &str) -> Option<u16> {
     (port != 0).then_some(port)
 }
 
-fn is_true(value: Option<&Value>) -> bool {
+pub(super) fn is_true(value: Option<&Value>) -> bool {
     match value {
         Some(Value::Bool(flag)) => *flag,
         Some(Value::String(text)) => text.trim().eq_ignore_ascii_case("true"),
@@ -524,7 +530,9 @@ fn missing_password_reason(
     }
 }
 
-fn find_tunnel_handler(configuration: &Value) -> Result<Option<&Value>, ConnectionStatus> {
+pub(super) fn find_tunnel_handler(
+    configuration: &Value,
+) -> Result<Option<&Value>, ConnectionStatus> {
     let Some(handlers) = configuration.get("handlers").and_then(Value::as_object) else {
         return Ok(None);
     };

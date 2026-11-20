@@ -5,6 +5,7 @@
       "Read(~/.local/share/pg-pseudo-mcp/**)",
       "Read(~/Library/DBeaverData/**)",
       "Read(~/.local/share/DBeaverData/**)",
+      "Edit(~/.config/pg-pseudo/**)",
       "Bash(psql:*)",
       "Bash(pg_dump:*)",
       "Bash(sqlite3:*)"

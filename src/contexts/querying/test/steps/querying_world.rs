@@ -67,6 +67,8 @@ impl QueryingWorld {
             dbeaver_home: Some(self._dbeaver.path().to_path_buf()),
             data_dir: Some(self._data.path().to_path_buf()),
             ssh_known_hosts: None,
+            ssh_config: None,
+            connections_file: None,
         };
         let anonymization = AnonymizationInjector::new(self._data.path()).use_cases();
         self.contexts = Some(Arc::new(Contexts::with_anonymization(

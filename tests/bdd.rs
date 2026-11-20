@@ -13,10 +13,16 @@ mod choix_de_la_base;
 mod colonnes_derivees;
 #[path = "../src/contexts/connections/test/steps/decouverte_des_connexions.rs"]
 mod decouverte_des_connexions;
+#[path = "../src/contexts/connections/test/steps/fichier_de_connexions.rs"]
+mod fichier_de_connexions;
+#[path = "../src/contexts/connections/test/steps/import_dbeaver.rs"]
+mod import_dbeaver;
 #[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
 mod lecture_seule;
 #[path = "../src/contexts/anonymization/test/steps/pseudonymisation.rs"]
 mod pseudonymisation;
+#[path = "../src/contexts/connections/test/steps/rebond_ssh.rs"]
+mod rebond_ssh;
 #[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme.rs"]
 mod suivi_par_pseudonyme;
 #[path = "../src/contexts/connections/test/steps/tunnel_ssh.rs"]
