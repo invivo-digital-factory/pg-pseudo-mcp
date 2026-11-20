@@ -272,10 +272,22 @@ fn allowed(path: &[String], context: &str, layer: Layer, module: &[String]) -> b
                     .get(..4)
                     .is_some_and(|own| path.len() >= 4 && path[..4] == *own)
         }
-        Layer::Injector | Layer::Infrastructure | Layer::Presentation => {
+        Layer::Infrastructure => {
+            starts_with(path, &["contexts", context, "domain"])
+                || starts_with(path, &["contexts", context, "infrastructure"])
+                || starts_with(path, &["common"])
+        }
+        Layer::Presentation => {
+            starts_with(path, &["contexts", context, "domain"])
+                || starts_with(path, &["contexts", context, "use_cases"])
+                || starts_with(path, &["contexts", context, "presentation"])
+                || starts_with(path, &["common"])
+        }
+        Layer::Injector => {
             starts_with(path, &["contexts", context]) || starts_with(path, &["common"])
         }
-        Layer::Domain | Layer::Root => starts_with(path, &["contexts", context]),
+        Layer::Domain => starts_with(path, &["contexts", context, "domain"]),
+        Layer::Root => starts_with(path, &["contexts", context]),
     }
 }
 
@@ -461,6 +473,17 @@ mod integration {
             "use_case_reaches_infrastructure",
             &[
                 "contexts/connections/use_cases/open_session/use_case.rs: crate::contexts::connections::infrastructure::Client resolves to crate::contexts::connections::infrastructure::Client",
+            ],
+        );
+    }
+
+    #[test]
+    fn un_domaine_ou_une_infrastructure_qui_atteint_une_couche_exterieure_est_signale() {
+        assert_reported(
+            "domain_reaches_outer_layers",
+            &[
+                "contexts/connections/domain/types/session.rs: crate::contexts::connections::infrastructure::Client resolves to crate::contexts::connections::infrastructure::Client",
+                "contexts/connections/infrastructure/repositories/catalog.rs: crate::contexts::connections::presentation::Reply resolves to crate::contexts::connections::presentation::Reply",
             ],
         );
     }
