@@ -135,4 +135,42 @@ mod e2e {
         assert_eq!(info["maxima"]["max_rows"], json!(500));
         assert_eq!(info["maxima"]["max_bytes"], json!(65536));
     }
+
+    fn tools_by_name(result: &Value) -> std::collections::BTreeMap<String, Value> {
+        result["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|tool| {
+                (
+                    tool["name"].as_str().expect("tool name").to_owned(),
+                    tool.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn la_liste_des_outils_correspond_au_contrat_de_reference() {
+        let expected: Value =
+            serde_json::from_str(include_str!("fixtures/tools_list.json")).expect("fixture json");
+        let mut server = McpProcess::start();
+        server.initialize();
+        server.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+        let live = server.receive(2)["result"].clone();
+        let expected_tools = tools_by_name(&expected);
+        let live_tools = tools_by_name(&live);
+        let differing: std::collections::BTreeSet<&String> = expected_tools
+            .keys()
+            .chain(live_tools.keys())
+            .filter(|name| expected_tools.get(*name) != live_tools.get(*name))
+            .collect();
+        assert!(
+            differing.is_empty(),
+            "tools differing from the reference: {differing:?}\nexpected: {}\nlive: {}",
+            serde_json::to_string_pretty(&expected).unwrap(),
+            serde_json::to_string_pretty(&live).unwrap()
+        );
+        assert_eq!(live, expected);
+    }
 }
