@@ -22,6 +22,7 @@ use crate::contexts::querying::presentation::{
 pub const INSTRUCTIONS: &str = "\
 pg-pseudo-mcp gives read-only access to the PostgreSQL databases configured in the developer's DBeaver.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query.
+A connection points at one database; pass database to query, explain, search_schema, list_tables or describe_table to use another database of the same server.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
 A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived).
 You may reuse a pseudonym verbatim in a later query: emails, phones, IBAN, SIREN, SIRET, NIR, card numbers, IP addresses, full person names and last names are translated back to the real value before execution. Check translated_literals and warnings to confirm.

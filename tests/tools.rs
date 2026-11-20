@@ -235,6 +235,7 @@ mod e2e {
             &harness.state,
             ExplainArgs {
                 connection: CONNECTION.to_string(),
+                database: None,
                 sql: format!("SELECT * FROM customers WHERE email = '{pseudonym}'"),
             },
         )
@@ -388,6 +389,7 @@ mod e2e {
                 &harness.state,
                 ExplainArgs {
                     connection: CONNECTION.to_string(),
+                    database: None,
                     sql: format!(
                         "EXPLAIN (FORMAT {format}) SELECT * FROM customers WHERE email = '{pseudonym}'"
                     ),

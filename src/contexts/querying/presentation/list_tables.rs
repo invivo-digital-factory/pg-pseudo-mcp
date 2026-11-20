@@ -8,7 +8,7 @@ use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
 use crate::contexts::querying::domain::types::ListTablesRequest;
 use crate::contexts::querying::use_cases::ListTables;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct ListTablesArgs {
     #[schemars(description = "Connection name as returned by list_connections")]
     pub connection: String,
@@ -20,6 +20,10 @@ pub struct ListTablesArgs {
     pub limit: Option<u32>,
     #[schemars(description = "Number of tables to skip, for pagination")]
     pub offset: Option<u32>,
+    #[schemars(
+        description = "Database on the same server to use instead of the connection's default database"
+    )]
+    pub database: Option<String>,
 }
 
 pub async fn list_tables<D: ReadOnlyDatabase>(
@@ -28,6 +32,7 @@ pub async fn list_tables<D: ReadOnlyDatabase>(
 ) -> CallToolResult {
     let request = ListTablesRequest {
         connection: args.connection,
+        database: args.database,
         schema: args.schema,
         name_like: args.name_like,
         limit: args.limit,

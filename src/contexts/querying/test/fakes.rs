@@ -47,6 +47,7 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn run(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
@@ -56,6 +57,7 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn explain(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         explain_sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
@@ -65,6 +67,7 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn read_catalog(
         &self,
         _connection: &str,
+        _database: Option<&str>,
         catalog_sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {

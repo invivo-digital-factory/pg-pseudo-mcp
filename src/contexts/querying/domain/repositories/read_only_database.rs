@@ -7,6 +7,7 @@ pub trait ReadOnlyDatabase: Send + Sync {
     fn run(
         &self,
         connection: &str,
+        database: Option<&str>,
         sql: &str,
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<QueryOutput, DatabaseFailure>> + Send;
@@ -14,6 +15,7 @@ pub trait ReadOnlyDatabase: Send + Sync {
     fn explain(
         &self,
         connection: &str,
+        database: Option<&str>,
         explain_sql: &str,
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<QueryOutput, DatabaseFailure>> + Send;
@@ -21,6 +23,7 @@ pub trait ReadOnlyDatabase: Send + Sync {
     fn read_catalog(
         &self,
         connection: &str,
+        database: Option<&str>,
         catalog_sql: &str,
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<QueryOutput, DatabaseFailure>> + Send;

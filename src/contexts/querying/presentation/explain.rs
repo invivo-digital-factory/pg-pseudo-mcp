@@ -8,12 +8,16 @@ use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
 use crate::contexts::querying::domain::types::ExplainRequest;
 use crate::contexts::querying::use_cases::ExplainQuery;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct ExplainArgs {
     #[schemars(description = "Connection name as returned by list_connections")]
     pub connection: String,
     #[schemars(description = "One read-only SQL statement to explain")]
     pub sql: String,
+    #[schemars(
+        description = "Database on the same server to use instead of the connection's default database"
+    )]
+    pub database: Option<String>,
 }
 
 pub async fn explain<D: ReadOnlyDatabase>(
@@ -22,6 +26,7 @@ pub async fn explain<D: ReadOnlyDatabase>(
 ) -> CallToolResult {
     let request = ExplainRequest {
         connection: args.connection,
+        database: args.database,
         sql: args.sql,
     };
     match use_case.execute(request).await {

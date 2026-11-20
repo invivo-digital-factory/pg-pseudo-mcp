@@ -27,12 +27,19 @@ const MASTER_PASSWORD_REASON: &str = "credentials protected by DBeaver master pa
 const NO_PASSWORD_REASON: &str = "no saved password for this connection in DBeaver";
 const UNREADABLE_REASON: &str = "data-sources file is not valid JSON (the DBeaver project may be encrypted); its connections cannot be listed";
 
-pub fn load(root: &Path, tokens: &dyn AzureSignInTokenProvider) -> Vec<ConnectionEntry> {
-    let sign_in = SignIn::new(tokens);
+pub fn load(
+    root: &Path,
+    tokens: &dyn AzureSignInTokenProvider,
+    database: Option<&str>,
+) -> Vec<ConnectionEntry> {
+    let lookup = Lookup {
+        sign_in: SignIn::new(tokens),
+        database,
+    };
     let mut entries = Vec::new();
     for (project, dir) in project_dirs(root) {
         for (suffix, path) in data_source_files(&dir) {
-            entries.extend(load_file(&project, &dir, &suffix, &path, &sign_in));
+            entries.extend(load_file(&project, &dir, &suffix, &path, &lookup));
         }
     }
     entries
@@ -74,6 +81,11 @@ fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
     files
 }
 
+struct Lookup<'a> {
+    sign_in: SignIn<'a>,
+    database: Option<&'a str>,
+}
+
 struct SignIn<'a> {
     tokens: &'a dyn AzureSignInTokenProvider,
     attempt: RefCell<Option<Result<Secret, AccessTokenError>>>,
@@ -100,7 +112,7 @@ fn load_file(
     dir: &Path,
     suffix: &str,
     path: &Path,
-    sign_in: &SignIn<'_>,
+    lookup: &Lookup<'_>,
 ) -> Vec<ConnectionEntry> {
     let file_label = path
         .file_name()
@@ -126,7 +138,7 @@ fn load_file(
                 connection,
                 &store,
                 credentials_problem.as_deref(),
-                sign_in,
+                lookup,
             )
         })
         .collect()
@@ -174,7 +186,7 @@ fn build_entry(
     connection: &Value,
     store: &CredentialStore,
     credentials_problem: Option<&str>,
-    sign_in: &SignIn<'_>,
+    lookup: &Lookup<'_>,
 ) -> ConnectionEntry {
     let configuration = connection.get("configuration").unwrap_or(&NULL);
     let engine = text(connection, "provider").unwrap_or_else(|| "unknown".to_string());
@@ -187,7 +199,7 @@ fn build_entry(
         configuration,
         store,
         credentials_problem,
-        sign_in,
+        lookup,
     ) {
         Ok(params) => (ConnectionStatus::Available, Some(params)),
         Err(status) => (status, None),
@@ -228,7 +240,7 @@ fn evaluate(
     configuration: &Value,
     store: &CredentialStore,
     credentials_problem: Option<&str>,
-    sign_in: &SignIn<'_>,
+    lookup: &Lookup<'_>,
 ) -> Result<ConnectParams, ConnectionStatus> {
     if engine != "postgresql" {
         return Err(unsupported(format!(
@@ -292,7 +304,11 @@ fn evaluate(
     )?;
 
     let port = port.unwrap_or(5432);
-    let database = database.unwrap_or_else(|| "postgres".to_string());
+    let database = lookup
+        .database
+        .map(str::to_string)
+        .or(database)
+        .unwrap_or_else(|| "postgres".to_string());
     let saved = store.get(id);
     let plain_user = text(configuration, "user")
         .map(|value| expand(&value))
@@ -317,7 +333,7 @@ fn evaluate(
             }
         };
         let password = if is_azure_postgres_host(&host) {
-            match sign_in.token() {
+            match lookup.sign_in.token() {
                 Ok(token) => {
                     password_is_azure_token = true;
                     token

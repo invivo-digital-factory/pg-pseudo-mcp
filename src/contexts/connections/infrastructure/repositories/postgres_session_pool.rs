@@ -22,7 +22,7 @@ pub struct PostgresSessionPool {
     catalog: Arc<dyn ConnectionCatalog>,
     known_hosts: Option<PathBuf>,
     tokens: Arc<dyn AzureSignInTokenProvider>,
-    sessions: Mutex<HashMap<String, SessionSlot>>,
+    sessions: Mutex<HashMap<(String, String), SessionSlot>>,
     connect_deadline: Duration,
 }
 
@@ -46,11 +46,11 @@ impl PostgresSessionPool {
         self
     }
 
-    async fn slot(&self, connection: &str) -> SessionSlot {
+    async fn slot(&self, connection: &str, database: &str) -> SessionSlot {
         self.sessions
             .lock()
             .await
-            .entry(connection.to_string())
+            .entry((connection.to_string(), database.to_string()))
             .or_default()
             .clone()
     }
@@ -93,12 +93,12 @@ impl PostgresSessionPool {
     }
 
     #[cfg(test)]
-    fn cache_for_tests(&self, connection: &str, session: Session) {
+    fn cache_for_tests(&self, connection: &str, database: &str, session: Session) {
         let slot = self
             .sessions
             .try_lock()
             .expect("idle pool")
-            .entry(connection.to_string())
+            .entry((connection.to_string(), database.to_string()))
             .or_default()
             .clone();
         *slot.try_lock().expect("idle slot") = Some(session);
@@ -109,16 +109,21 @@ impl SessionPool for PostgresSessionPool {
     async fn run_read_only(
         &self,
         connection: &str,
+        database: Option<&str>,
         sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
         let catalog = self.catalog.clone();
-        let discovery = tokio::task::spawn_blocking(move || catalog.discover())
-            .await
-            .map_err(|_| ConnectionError::discovery_interrupted())?;
+        let requested = database
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_string);
+        let discovery =
+            tokio::task::spawn_blocking(move || catalog.discover_in(requested.as_deref()))
+                .await
+                .map_err(|_| ConnectionError::discovery_interrupted())?;
         let params = resolve_connection(&discovery, connection)?;
         let options = connect_options(&params, self.known_hosts.as_deref());
-        let slot = self.slot(connection).await;
+        let slot = self.slot(connection, &params.database).await;
         let mut cached = slot.lock_owned().await;
         let session = match cached.take() {
             Some(session) if session.options() == &options => session,
@@ -148,7 +153,7 @@ mod integration {
     use super::*;
     use crate::contexts::connections::domain::errors::AccessTokenError;
     use crate::contexts::connections::domain::types::{
-        ConnectParams, ConnectionEntry, ConnectionStatus, Discovery, Secret, SslMode,
+        Cell, ConnectParams, ConnectionEntry, ConnectionStatus, Discovery, Secret, SslMode,
     };
     use crate::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
     use crate::contexts::connections::infrastructure::repositories::DbeaverConnectionCatalog;
@@ -224,7 +229,11 @@ mod integration {
     struct FixedCatalog(ConnectParams);
 
     impl ConnectionCatalog for FixedCatalog {
-        fn discover(&self) -> Discovery {
+        fn discover_in(&self, database: Option<&str>) -> Discovery {
+            let mut params = self.0.clone();
+            if let Some(database) = database {
+                params.database = database.to_string();
+            }
             Discovery {
                 connections: vec![ConnectionEntry {
                     id: "azure".into(),
@@ -233,9 +242,9 @@ mod integration {
                     project: "General".into(),
                     engine: "postgresql".into(),
                     connection_type: "dev".into(),
-                    database: Some(self.0.database.clone()),
+                    database: Some(params.database.clone()),
                     status: ConnectionStatus::Available,
-                    params: Some(self.0.clone()),
+                    params: Some(params),
                 }],
                 hint: None,
             }
@@ -304,7 +313,7 @@ mod integration {
         let tokens = ScriptedTokens::new(Ok(real_password()));
         let pool = azure_pool(local_params("expired-token", true), tokens.clone());
         let output = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect("the retry with a fresh token connects");
         assert_eq!(output.rows.len(), 1);
@@ -317,7 +326,7 @@ mod integration {
         let tokens = ScriptedTokens::new(Ok(Secret::new("still-wrong")));
         let pool = azure_pool(local_params("expired-token", true), tokens.clone());
         let error = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect_err("both tokens are refused");
         assert!(
@@ -337,7 +346,7 @@ mod integration {
         let tokens = ScriptedTokens::new(Err(AccessTokenError::SignInRequired));
         let pool = azure_pool(local_params("expired-token", true), tokens.clone());
         let error = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect_err("no fresh token");
         assert!(
@@ -356,7 +365,7 @@ mod integration {
         let tokens = ScriptedTokens::new(Ok(real_password()));
         let pool = azure_pool(local_params("wrong", false), tokens.clone());
         let error = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect_err("a stored password is not renewed");
         assert!(matches!(error, ConnectionError::ConnectFailed { .. }));
@@ -369,7 +378,7 @@ mod integration {
         let tokens = ScriptedTokens::new(Ok(real_password()));
         let pool = azure_pool(local_params("hunter2-wrong", false), tokens);
         let error = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect_err("the password is refused");
         let text = error.to_string();
@@ -387,7 +396,7 @@ mod integration {
         params.database = "absent_database_for_test".to_string();
         let pool = azure_pool(params, tokens);
         let error = pool
-            .run_read_only("azure", "SELECT 1", limits())
+            .run_read_only("azure", None, "SELECT 1", limits())
             .await
             .expect_err("the database does not exist");
         let text = error.to_string();
@@ -409,11 +418,75 @@ mod integration {
         );
         let pool = pool_for(root.path());
         let error = pool
-            .run_read_only("closed", "SELECT 1", limits())
+            .run_read_only("closed", None, "SELECT 1", limits())
             .await
             .expect_err("nothing listens");
         let text = error.to_string().to_lowercase();
         assert!(text.contains("refused"), "{text}");
+    }
+
+    async fn backend_and_database(
+        pool: &PostgresSessionPool,
+        database: Option<&str>,
+    ) -> (Cell, Cell) {
+        let output = pool
+            .run_read_only(
+                "azure",
+                database,
+                "SELECT pg_backend_pid(), current_database()::text",
+                limits(),
+            )
+            .await
+            .expect("the database is reachable");
+        let row = &output.rows[0];
+        (row[0].clone(), row[1].clone())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn deux_bases_d_une_meme_connexion_ont_chacune_leur_session_reutilisee() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let pool = azure_pool(local_params(real_password().expose(), false), tokens);
+        let (default_pid, default_name) = backend_and_database(&pool, None).await;
+        let (other_pid, other_name) = backend_and_database(&pool, Some("postgres")).await;
+        assert_eq!(other_name, Cell::Text("postgres".into()));
+        assert_ne!(default_name, other_name);
+        assert_ne!(default_pid, other_pid);
+        assert_eq!(backend_and_database(&pool, None).await.0, default_pid);
+        assert_eq!(
+            backend_and_database(&pool, Some("postgres")).await.0,
+            other_pid
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn la_base_par_defaut_demandee_explicitement_reutilise_la_session_existante() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let params = local_params(real_password().expose(), false);
+        let default = params.database.clone();
+        let pool = azure_pool(params, tokens);
+        let (pid, _) = backend_and_database(&pool, None).await;
+        assert_eq!(backend_and_database(&pool, Some(&default)).await.0, pid);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn une_base_inconnue_rend_l_erreur_lisible_du_serveur() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let pool = azure_pool(local_params(real_password().expose(), false), tokens);
+        let error = pool
+            .run_read_only(
+                "azure",
+                Some("absent_database_for_test"),
+                "SELECT 1",
+                limits(),
+            )
+            .await
+            .expect_err("the database does not exist");
+        let text = error.to_string();
+        assert!(text.contains("3D000"), "{text}");
+        assert!(text.contains("absent_database_for_test"), "{text}");
     }
 
     fn limits() -> ExecutionLimits {
@@ -463,12 +536,15 @@ mod integration {
         let started = Instant::now();
         let stalled = tokio::spawn({
             let pool = pool.clone();
-            async move { pool.run_read_only("stalled", "SELECT 1", limits()).await }
+            async move {
+                pool.run_read_only("stalled", None, "SELECT 1", limits())
+                    .await
+            }
         });
         tokio::time::sleep(Duration::from_millis(100)).await;
         let other = tokio::time::timeout(
             Duration::from_secs(1),
-            pool.run_read_only("refused", "SELECT 1", limits()),
+            pool.run_read_only("refused", None, "SELECT 1", limits()),
         )
         .await
         .expect("another connection is not blocked by the stalled one");
@@ -496,9 +572,13 @@ mod integration {
         );
         let pool = pool_for(root.path());
         let params = resolve_connection(&pool.catalog.discover(), "app").expect("params");
-        pool.cache_for_tests("app", Session::idle(connect_options(&params, None)));
+        pool.cache_for_tests(
+            "app",
+            &params.database,
+            Session::idle(connect_options(&params, None)),
+        );
         let reused = pool
-            .run_read_only("app", "SELECT 1", limits())
+            .run_read_only("app", None, "SELECT 1", limits())
             .await
             .expect_err("the idle cached session reconnects to the closed port");
         assert!(matches!(reused, ConnectionError::Session(_)), "{reused:?}");
@@ -511,7 +591,7 @@ mod integration {
             }],
         );
         let error = pool
-            .run_read_only("app", "SELECT 1", limits())
+            .run_read_only("app", None, "SELECT 1", limits())
             .await
             .expect_err("the stale session is not reused");
         assert!(

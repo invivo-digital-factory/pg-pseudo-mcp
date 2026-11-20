@@ -48,6 +48,10 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 | `explain` | The plan of one statement, without executing it; literals in the plan are pseudonymized. |
 | `server_info` | Live limits, reversible and non-reversible kinds, known limitations. |
 
+### Choosing the database
+
+A DBeaver connection points at one database, often `postgres`, while the application databases live on the same server. `query`, `explain`, `search_schema`, `list_tables` and `describe_table` accept an optional `database` argument. It keeps the host, port, SSH tunnel, credentials, Azure token handling and `sslmode` of the connection and only changes the database name, including the one matched in `~/.pgpass`. Sessions are kept per connection and database. Without the argument the connection's own database is used. The read-only guard and the pseudonymization are the same for every database. A database that does not exist is reported with the server message and SQLSTATE `3D000`.
+
 ## Azure Database for PostgreSQL
 
 For a connection that uses DBeaver's pgpass authentication model and whose host ends with `.postgres.database.azure.com` (private link hosts included), the server gets the password itself from the Azure CLI instead of `~/.pgpass`: it runs `az account get-access-token --resource-type oss-rdbms --output json` (no shell, `az` found on `PATH`) and uses the Entra ID access token as the password.

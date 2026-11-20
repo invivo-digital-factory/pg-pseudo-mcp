@@ -8,6 +8,7 @@ use super::{ColumnFlag, Truncation, Warning};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QueryRequest {
     pub connection: String,
+    pub database: Option<String>,
     pub sql: String,
     pub max_rows: Option<u64>,
     pub max_bytes: Option<u64>,

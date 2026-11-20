@@ -21,12 +21,13 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
     async fn run(
         &self,
         connection: &str,
+        database: Option<&str>,
         sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
         self.connections
             .run_read_only_statement
-            .execute(connection, sql, execution_limits(limits))
+            .execute(connection, database, sql, execution_limits(limits))
             .await
             .map(query_output)
             .map_err(database_failure)
@@ -35,12 +36,13 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
     async fn explain(
         &self,
         connection: &str,
+        database: Option<&str>,
         explain_sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
         self.connections
             .explain_statement
-            .execute(connection, explain_sql, execution_limits(limits))
+            .execute(connection, database, explain_sql, execution_limits(limits))
             .await
             .map(query_output)
             .map_err(database_failure)
@@ -49,12 +51,13 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
     async fn read_catalog(
         &self,
         connection: &str,
+        database: Option<&str>,
         catalog_sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
         self.connections
             .read_catalog
-            .execute(connection, catalog_sql, execution_limits(limits))
+            .execute(connection, database, catalog_sql, execution_limits(limits))
             .await
             .map(query_output)
             .map_err(database_failure)

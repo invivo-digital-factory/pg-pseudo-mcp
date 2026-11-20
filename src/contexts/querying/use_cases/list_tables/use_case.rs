@@ -39,6 +39,7 @@ impl<D: ReadOnlyDatabase> ListTables<D> {
             .database
             .read_catalog(
                 &request.connection,
+                request.database.as_deref(),
                 &list_sql(
                     request.schema.as_deref(),
                     request.name_like.as_deref(),

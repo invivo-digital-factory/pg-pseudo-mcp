@@ -39,6 +39,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             .database
             .run(
                 &request.connection,
+                request.database.as_deref(),
                 &guarded.sql,
                 ExecutionLimits {
                     max_rows: limits.max_rows,

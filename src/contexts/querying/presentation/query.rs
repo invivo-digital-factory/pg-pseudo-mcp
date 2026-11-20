@@ -26,11 +26,16 @@ pub struct QueryArgs {
         description = "Characters to skip at the start of every text cell before the 500-character cap; repeat a query with the offset given in a cell truncation to read the rest of a long value"
     )]
     pub cell_offset: Option<u64>,
+    #[schemars(
+        description = "Database on the same server to use instead of the connection's default database"
+    )]
+    pub database: Option<String>,
 }
 
 pub async fn query<D: ReadOnlyDatabase>(use_case: &RunQuery<D>, args: QueryArgs) -> CallToolResult {
     let request = QueryRequest {
         connection: args.connection,
+        database: args.database,
         sql: args.sql,
         max_rows: args.max_rows,
         max_bytes: args.max_bytes,

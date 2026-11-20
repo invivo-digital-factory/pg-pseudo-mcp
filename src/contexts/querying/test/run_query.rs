@@ -63,6 +63,7 @@ mod unit {
         let error = use_case
             .execute(ExplainRequest {
                 connection: "Shop".into(),
+                database: None,
                 sql: "SELECT 1".into(),
             })
             .await

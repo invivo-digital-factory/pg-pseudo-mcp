@@ -15,6 +15,14 @@ pub fn default_dbeaver_home() -> Option<PathBuf> {
 }
 
 pub fn discover(dbeaver_home: Option<&Path>, tokens: &dyn AzureSignInTokenProvider) -> Discovery {
+    discover_in(dbeaver_home, tokens, None)
+}
+
+pub fn discover_in(
+    dbeaver_home: Option<&Path>,
+    tokens: &dyn AzureSignInTokenProvider,
+    database: Option<&str>,
+) -> Discovery {
     let Some(root) = dbeaver_home
         .map(Path::to_path_buf)
         .or_else(default_dbeaver_home)
@@ -36,7 +44,7 @@ pub fn discover(dbeaver_home: Option<&Path>, tokens: &dyn AzureSignInTokenProvid
             )),
         };
     }
-    let mut connections = workspace::load(&root, tokens);
+    let mut connections = workspace::load(&root, tokens, database);
     disambiguate(&mut connections);
     connections.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     let hint = connections

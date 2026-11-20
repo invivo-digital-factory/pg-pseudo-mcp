@@ -16,6 +16,12 @@ use crate::contexts::querying::domain::types::{
     DescribeResponse, DescribeTableRequest, ExecutionLimits, QueryLimits, QueryOutput,
 };
 
+#[derive(Clone, Copy)]
+struct Source<'a> {
+    connection: &'a str,
+    database: Option<&'a str>,
+}
+
 pub struct DescribeTable<D: ReadOnlyDatabase> {
     database: Arc<D>,
     anonymization: Result<AnonymizationPorts, String>,
@@ -39,13 +45,16 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
                 .map_err(|reason| QueryingError::StoreUnavailable {
                     reason: reason.clone(),
                 })?;
-        let connection = request.connection.as_str();
+        let source = Source {
+            connection: request.connection.as_str(),
+            database: request.database.as_deref(),
+        };
         let (schema, name) = split_qualified(&request.table);
         let target = self
-            .resolve(ports, connection, &request.table, schema.as_deref(), &name)
+            .resolve(ports, source, &request.table, schema.as_deref(), &name)
             .await?;
         let output = self
-            .fetch(ports, connection, &describe_sql(target.oid), 1)
+            .fetch(ports, source, &describe_sql(target.oid), 1)
             .await?;
         let row = output
             .rows
@@ -77,14 +86,15 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
     async fn fetch(
         &self,
         ports: &AnonymizationPorts,
-        connection: &str,
+        source: Source<'_>,
         sql: &str,
         max_rows: usize,
     ) -> Result<QueryOutput, QueryingError> {
         let limits = QueryLimits::default();
         self.database
             .read_catalog(
-                connection,
+                source.connection,
+                source.database,
                 sql,
                 ExecutionLimits {
                     max_rows,
@@ -98,18 +108,13 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
     async fn resolve(
         &self,
         ports: &AnonymizationPorts,
-        connection: &str,
+        source: Source<'_>,
         requested: &str,
         schema: Option<&str>,
         name: &str,
     ) -> Result<Candidate, QueryingError> {
         let output = self
-            .fetch(
-                ports,
-                connection,
-                &resolve_sql(schema, name),
-                SUGGESTION_POOL,
-            )
+            .fetch(ports, source, &resolve_sql(schema, name), SUGGESTION_POOL)
             .await?;
         match pick(candidates(&output), schema, name) {
             Pick::One(candidate) => Ok(candidate),
@@ -117,19 +122,19 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
                 requested: requested.to_string(),
                 candidates: names,
             }),
-            Pick::None => Err(self.unknown_table(ports, connection, requested, name).await),
+            Pick::None => Err(self.unknown_table(ports, source, requested, name).await),
         }
     }
 
     async fn unknown_table(
         &self,
         ports: &AnonymizationPorts,
-        connection: &str,
+        source: Source<'_>,
         requested: &str,
         name: &str,
     ) -> QueryingError {
         let known = match self
-            .fetch(ports, connection, &known_tables_sql(), SUGGESTION_POOL)
+            .fetch(ports, source, &known_tables_sql(), SUGGESTION_POOL)
             .await
         {
             Ok(output) => known_tables(&output),

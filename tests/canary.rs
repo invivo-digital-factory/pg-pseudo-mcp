@@ -49,6 +49,7 @@ mod e2e {
                 state,
                 SearchSchemaArgs {
                     connection: CONNECTION.into(),
+                    database: None,
                     pattern: "mail".into(),
                 },
             )
@@ -59,6 +60,7 @@ mod e2e {
                 state,
                 ListTablesArgs {
                     connection: CONNECTION.into(),
+                    database: None,
                     schema: None,
                     name_like: None,
                     limit: None,
@@ -73,6 +75,7 @@ mod e2e {
                     state,
                     DescribeTableArgs {
                         connection: CONNECTION.into(),
+                        database: None,
                         table: table.into(),
                     },
                 )
@@ -137,6 +140,7 @@ mod e2e {
             state,
             ExplainArgs {
                 connection: CONNECTION.into(),
+                database: None,
                 sql: format!("SELECT * FROM customers WHERE email = '{email}'"),
             },
         )

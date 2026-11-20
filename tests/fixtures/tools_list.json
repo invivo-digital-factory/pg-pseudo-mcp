@@ -13,6 +13,13 @@
             "description": "Connection name as returned by list_connections",
             "type": "string"
           },
+          "database": {
+            "description": "Database on the same server to use instead of the connection's default database",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "table": {
             "description": "Table name, optionally schema-qualified (schema.table)",
             "type": "string"
@@ -38,6 +45,13 @@
           "connection": {
             "description": "Connection name as returned by list_connections",
             "type": "string"
+          },
+          "database": {
+            "description": "Database on the same server to use instead of the connection's default database",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sql": {
             "description": "One read-only SQL statement to explain",
@@ -76,6 +90,13 @@
           "connection": {
             "description": "Connection name as returned by list_connections",
             "type": "string"
+          },
+          "database": {
+            "description": "Database on the same server to use instead of the connection's default database",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "limit": {
             "description": "Maximum number of tables returned (default 100, maximum 500)",
@@ -139,6 +160,13 @@
             "description": "Connection name as returned by list_connections",
             "type": "string"
           },
+          "database": {
+            "description": "Database on the same server to use instead of the connection's default database",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "max_bytes": {
             "description": "Maximum size of the returned rows in bytes (default 16384, maximum 65536)",
             "format": "uint64",
@@ -191,6 +219,13 @@
           "connection": {
             "description": "Connection name as returned by list_connections",
             "type": "string"
+          },
+          "database": {
+            "description": "Database on the same server to use instead of the connection's default database",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "pattern": {
             "description": "Case-insensitive substring matched against table and column names",

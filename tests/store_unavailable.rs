@@ -55,6 +55,7 @@ mod e2e {
                 &contexts,
                 ExplainArgs {
                     connection: "any".into(),
+                    database: None,
                     sql: "SELECT 1".into(),
                 },
             )
@@ -65,6 +66,7 @@ mod e2e {
                 &contexts,
                 SearchSchemaArgs {
                     connection: "any".into(),
+                    database: None,
                     pattern: "user".into(),
                 },
             )
@@ -75,6 +77,7 @@ mod e2e {
                 &contexts,
                 ListTablesArgs {
                     connection: "any".into(),
+                    database: None,
                     schema: None,
                     name_like: None,
                     limit: None,
@@ -88,6 +91,7 @@ mod e2e {
                 &contexts,
                 DescribeTableArgs {
                     connection: "any".into(),
+                    database: None,
                     table: "users".into(),
                 },
             )

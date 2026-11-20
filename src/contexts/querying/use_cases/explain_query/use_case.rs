@@ -35,6 +35,7 @@ impl<D: ReadOnlyDatabase> ExplainQuery<D> {
             .database
             .explain(
                 &request.connection,
+                request.database.as_deref(),
                 &guarded.explain_sql(),
                 ExecutionLimits {
                     max_rows: MAX_PLAN_LINES,
