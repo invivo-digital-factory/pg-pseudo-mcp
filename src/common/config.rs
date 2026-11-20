@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub data_dir: Option<PathBuf>,
     pub ssh_known_hosts: Option<PathBuf>,
     pub ssh_config: Option<PathBuf>,
+    pub connections_file: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -16,6 +17,7 @@ impl AppConfig {
             std::env::var_os("PG_PSEUDO_DATA_DIR"),
             std::env::var_os("PG_PSEUDO_SSH_KNOWN_HOSTS"),
             std::env::var_os("PG_PSEUDO_SSH_CONFIG"),
+            std::env::var_os("PG_PSEUDO_CONNECTIONS_FILE"),
         )
     }
 
@@ -24,6 +26,7 @@ impl AppConfig {
         data_dir: Option<OsString>,
         ssh_known_hosts: Option<OsString>,
         ssh_config: Option<OsString>,
+        connections_file: Option<OsString>,
     ) -> Self {
         let absolute =
             |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
@@ -32,6 +35,7 @@ impl AppConfig {
             data_dir: absolute(data_dir),
             ssh_known_hosts: absolute(ssh_known_hosts),
             ssh_config: absolute(ssh_config),
+            connections_file: absolute(connections_file),
         }
     }
 }
@@ -50,16 +54,19 @@ mod unit {
             Some(OsString::from("relative")),
             Some(OsString::from("known_hosts")),
             Some(OsString::from("ssh_config")),
+            Some(OsString::from("connections.toml")),
         );
         assert_eq!(config.dbeaver_home, None);
         assert_eq!(config.data_dir, None);
         assert_eq!(config.ssh_known_hosts, None);
         assert_eq!(config.ssh_config, None);
+        assert_eq!(config.connections_file, None);
         let config = AppConfig::from_vars(
             None,
             Some(OsString::from("/tmp/pg-pseudo")),
             Some(OsString::from("/tmp/known_hosts")),
             Some(OsString::from("/tmp/ssh_config")),
+            Some(OsString::from("/tmp/connections.toml")),
         );
         assert_eq!(config.data_dir, Some(PathBuf::from("/tmp/pg-pseudo")));
         assert_eq!(
@@ -67,5 +74,9 @@ mod unit {
             Some(PathBuf::from("/tmp/known_hosts"))
         );
         assert_eq!(config.ssh_config, Some(PathBuf::from("/tmp/ssh_config")));
+        assert_eq!(
+            config.connections_file,
+            Some(PathBuf::from("/tmp/connections.toml"))
+        );
     }
 }

@@ -9,8 +9,10 @@ use serde_json::Value;
 #[world(init = Self::new)]
 pub struct ConnectionsWorld {
     pub workspace: tempfile::TempDir,
+    pub config_dir: tempfile::TempDir,
     pub known_hosts_dir: tempfile::TempDir,
     pub known_hosts: Option<PathBuf>,
+    pub ssh_config: Option<PathBuf>,
     pub listing: Option<Value>,
     pub outcome: Option<Result<(), String>>,
 }
@@ -27,13 +29,21 @@ impl std::fmt::Debug for ConnectionsWorld {
 
 impl ConnectionsWorld {
     fn new() -> Self {
-        Self {
+        let world = Self {
             workspace: tempfile::tempdir().expect("workspace dir"),
+            config_dir: tempfile::tempdir().expect("config dir"),
             known_hosts_dir: tempfile::tempdir().expect("known_hosts dir"),
             known_hosts: None,
+            ssh_config: None,
             listing: None,
             outcome: None,
-        }
+        };
+        std::fs::write(world.connections_file(), "").expect("empty connection file");
+        world
+    }
+
+    pub fn connections_file(&self) -> PathBuf {
+        self.config_dir.path().join("connections.toml")
     }
 
     pub fn context(&self) -> ConnectionsContext {
@@ -41,7 +51,8 @@ impl ConnectionsWorld {
             dbeaver_home: Some(self.workspace.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: self.known_hosts.clone(),
-            ssh_config: None,
+            ssh_config: self.ssh_config.clone(),
+            connections_file: Some(self.connections_file()),
         })
     }
 

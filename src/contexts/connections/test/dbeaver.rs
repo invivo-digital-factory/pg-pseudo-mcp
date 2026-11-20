@@ -36,7 +36,7 @@ impl AzureSignInTokenProvider for NoTokens {
     }
 }
 
-static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn discover(home: Option<&Path>) -> Discovery {
     discover_in(home, None)

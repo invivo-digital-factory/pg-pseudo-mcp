@@ -18,7 +18,7 @@ pub async fn list_connections(use_case: &ListConnections) -> CallToolResult {
     let mut body = Map::new();
     body.insert("connections".to_string(), Value::Array(connections));
     if let Some(hint) = discovery.hint {
-        body.insert("hint".to_string(), Value::String(hint));
+        body.insert("hint".to_string(), Value::String(redact_home(&hint)));
     }
     CallToolResult::success(vec![ContentBlock::text(Value::Object(body).to_string())])
 }
@@ -27,6 +27,7 @@ fn describe(entry: &ConnectionEntry) -> Value {
     let mut item = Map::new();
     item.insert("name".to_string(), json!(entry.name));
     item.insert("engine".to_string(), json!(entry.engine));
+    item.insert("source".to_string(), json!(entry.source.as_str()));
     match &entry.status {
         ConnectionStatus::Available => {
             item.insert("status".to_string(), json!("available"));

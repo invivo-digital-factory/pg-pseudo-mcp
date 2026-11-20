@@ -5,9 +5,13 @@ use crate::contexts::connections::domain::repositories::{
     AzureSignInTokenProvider, CommandPasswordProvider,
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
+use crate::contexts::connections::infrastructure::data_sources::openssh::{
+    LocalEnvironment, OpenSshResolver, SshCommand,
+};
 use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
 use crate::contexts::connections::infrastructure::repositories::{
-    CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog, PostgresSessionPool,
+    CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog,
+    FileConnectionCatalog, LayeredConnectionCatalog, PostgresSessionPool,
 };
 use crate::contexts::connections::use_cases::{
     ExplainStatement, ListConnections, ListDatabases, ReadCatalog, RunReadOnlyStatement,
@@ -39,9 +43,13 @@ impl ConnectionsContext {
             Arc::new(cli),
             Arc::new(SystemClock),
         ));
-        let catalog = Arc::new(DbeaverConnectionCatalog::new(
-            config.dbeaver_home.clone(),
-            tokens.clone(),
+        let resolver = Arc::new(OpenSshResolver::new(
+            Arc::new(SshCommand::from_path(config.ssh_config.clone())),
+            LocalEnvironment::from_process(),
+        ));
+        let catalog = Arc::new(LayeredConnectionCatalog::new(
+            FileConnectionCatalog::new(config.connections_file.clone(), tokens.clone(), resolver),
+            DbeaverConnectionCatalog::new(config.dbeaver_home.clone(), tokens.clone()),
         ));
         let commands: Arc<dyn CommandPasswordProvider> = Arc::new(CachedCommandPasswords::new(
             Arc::new(ProcessPasswordCommand::new()),

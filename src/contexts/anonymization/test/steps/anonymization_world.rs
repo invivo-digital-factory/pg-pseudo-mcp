@@ -43,6 +43,7 @@ impl AnonymizationWorld {
             data_dir: Some(self.data_dir.path().to_path_buf()),
             ssh_known_hosts: None,
             ssh_config: None,
+            connections_file: None,
         };
         let handler = mapping_purge_handler(&config).expect("purge handler");
         let status = handler.run(true);

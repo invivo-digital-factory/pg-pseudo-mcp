@@ -9,8 +9,8 @@ use super::variables::{process_env, resolve};
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
-    ConnectParams, ConnectionEntry, ConnectionStatus, HostKeyPolicy, PasswordSource, Secret,
-    SshAuth, SshHop, SslMode, TunnelParams,
+    ConnectParams, ConnectionEntry, ConnectionSource, ConnectionStatus, HostKeyPolicy,
+    PasswordSource, Secret, SshAuth, SshHop, SslMode, TunnelParams,
 };
 use crate::contexts::connections::infrastructure::data_sources::password_resolution::{
     SignIn, pgpass_or_azure_token,
@@ -128,6 +128,8 @@ fn unreadable_entry(project: &str, file_label: &str) -> ConnectionEntry {
     let label = format!("{project}/{file_label}");
     ConnectionEntry {
         id: label.clone(),
+        declared_name: label.clone(),
+        source: ConnectionSource::Dbeaver,
         name: label,
         folder: None,
         project: project.to_string(),
@@ -188,9 +190,12 @@ fn build_entry(
         .as_ref()
         .map(|params| params.database.clone())
         .or(database);
+    let name = text(connection, "name").unwrap_or_else(|| id.to_string());
     ConnectionEntry {
         id: id.to_string(),
-        name: text(connection, "name").unwrap_or_else(|| id.to_string()),
+        declared_name: name.clone(),
+        source: ConnectionSource::Dbeaver,
+        name,
         folder: text(connection, "folder"),
         project: project.to_string(),
         engine,

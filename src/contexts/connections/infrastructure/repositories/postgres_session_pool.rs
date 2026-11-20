@@ -225,7 +225,8 @@ mod integration {
     use super::*;
     use crate::contexts::connections::domain::errors::{AccessTokenError, PasswordCommandError};
     use crate::contexts::connections::domain::types::{
-        Cell, ConnectParams, ConnectionEntry, ConnectionStatus, Discovery, SslMode,
+        Cell, ConnectParams, ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery,
+        SslMode,
     };
     use crate::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
     use crate::contexts::connections::infrastructure::repositories::DbeaverConnectionCatalog;
@@ -323,6 +324,8 @@ mod integration {
                 connections: vec![ConnectionEntry {
                     id: "azure".into(),
                     name: "azure".into(),
+                    declared_name: "azure".into(),
+                    source: ConnectionSource::File,
                     folder: None,
                     project: "General".into(),
                     engine: "postgresql".into(),

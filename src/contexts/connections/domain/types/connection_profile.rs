@@ -15,6 +15,29 @@ pub enum SslMode {
 }
 
 impl SslMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disable => "disable",
+            Self::Allow => "allow",
+            Self::Prefer => "prefer",
+            Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
+            Self::VerifyFull => "verify-full",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "disable" => Some(Self::Disable),
+            "allow" => Some(Self::Allow),
+            "prefer" => Some(Self::Prefer),
+            "require" => Some(Self::Require),
+            "verify-ca" => Some(Self::VerifyCa),
+            "verify-full" => Some(Self::VerifyFull),
+            _ => None,
+        }
+    }
+
     pub fn at_least_require(self) -> Self {
         match self {
             Self::Disable | Self::Allow | Self::Prefer => Self::Require,
