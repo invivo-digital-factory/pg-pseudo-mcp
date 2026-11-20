@@ -24,8 +24,8 @@ pub(super) fn home_dir() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
 }
 
-pub(super) fn recorded_algorithms(host: &str, port: u16, known_hosts: &Path) -> Vec<Algorithm> {
-    known_keys(host, port, known_hosts)
+pub(super) fn recorded_algorithms(name: &str, known_hosts: &[PathBuf]) -> Vec<Algorithm> {
+    known_keys(name, known_hosts)
         .map(|keys| {
             keys.into_iter()
                 .filter(|known| !known.revoked)
@@ -35,34 +35,39 @@ pub(super) fn recorded_algorithms(host: &str, port: u16, known_hosts: &Path) -> 
         .unwrap_or_default()
 }
 
-struct KnownKey {
+pub(super) fn lookup_name(host: &str, port: u16, alias: Option<&str>) -> String {
+    match (alias, port) {
+        (Some(alias), _) => alias.to_string(),
+        (None, 22) => host.to_string(),
+        (None, port) => format!("[{host}]:{port}"),
+    }
+}
+
+struct KnownKey<'a> {
+    file: &'a Path,
     line: usize,
     revoked: bool,
     key: PublicKey,
 }
 
-fn known_keys(host: &str, port: u16, known_hosts: &Path) -> Result<Vec<KnownKey>, String> {
-    let contents = match std::fs::read(known_hosts) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.to_string()),
-    };
-    let name = if port == 22 {
-        host.to_string()
-    } else {
-        format!("[{host}]:{port}")
-    };
-    Ok(contents
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            parse_entry(line, &name).map(|(revoked, key)| KnownKey {
+fn known_keys<'a>(name: &str, files: &'a [PathBuf]) -> Result<Vec<KnownKey<'a>>, String> {
+    let mut found = Vec::new();
+    for file in files {
+        let contents = match std::fs::read(file) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("{}: {error}", file.display())),
+        };
+        found.extend(contents.lines().enumerate().filter_map(|(index, line)| {
+            parse_entry(line, name).map(|(revoked, key)| KnownKey {
+                file,
                 line: index + 1,
                 revoked,
                 key,
             })
-        })
-        .collect())
+        }));
+    }
+    Ok(found)
 }
 
 fn parse_entry(line: &str, name: &str) -> Option<(bool, PublicKey)> {
@@ -124,19 +129,21 @@ pub(super) fn known_algorithms_first(
 pub(super) fn verify_host_key(
     host: &str,
     port: u16,
+    alias: Option<&str>,
     key: &PublicKey,
-    known_hosts: &Path,
+    known_hosts: &[PathBuf],
 ) -> Result<(), String> {
     let fingerprint = Fingerprint(key);
-    let file = known_hosts.display();
-    let recorded = known_keys(host, port, known_hosts).map_err(|error| {
-        format!("cannot check the SSH host key of {host}:{port} against {file}: {error}")
+    let name = lookup_name(host, port, alias);
+    let recorded = known_keys(&name, known_hosts).map_err(|error| {
+        format!("cannot check the SSH host key of {host}:{port} against known_hosts: {error}")
     })?;
     let same_key = |known: &&KnownKey| known.key.key_data() == key.key_data();
     if let Some(known) = recorded.iter().filter(|known| known.revoked).find(same_key) {
         return Err(format!(
-            "SSH host key of {host}:{port} ({fingerprint}) is revoked by line {} of {file}; refusing to connect",
-            known.line
+            "SSH host key of {host}:{port} ({fingerprint}) is revoked by line {} of {}; refusing to connect",
+            known.line,
+            known.file.display()
         ));
     }
     let trusted: Vec<&KnownKey> = recorded.iter().filter(|known| !known.revoked).collect();
@@ -148,17 +155,23 @@ pub(super) fn verify_host_key(
         .find(|known| known.key.algorithm() == key.algorithm())
     {
         return Err(format!(
-            "SSH host key of {host}:{port} changed: the server now presents {fingerprint}, which differs from line {} of {file}; refusing to connect until the new key is confirmed with the server administrator and the old entry is replaced",
-            known.line
+            "SSH host key of {host}:{port} changed: the server now presents {fingerprint}, which differs from line {} of {}; refusing to connect until the new key is confirmed with the server administrator and the old entry is replaced",
+            known.line,
+            known.file.display()
         ));
     }
     if let Some(known) = trusted.first() {
         return Err(format!(
-            "SSH server {host}:{port} presented a host key ({fingerprint}) whose type is not recorded in {file}, but a key of another type ({}) is already known for this host on line {}; the connection is refused because this may be an interception; confirm the server keys with the server administrator",
+            "SSH server {host}:{port} presented a host key ({fingerprint}) whose type is not recorded in {}, but a key of another type ({}) is already known for this host on line {}; the connection is refused because this may be an interception; confirm the server keys with the server administrator",
+            known.file.display(),
             known.key.algorithm(),
             known.line
         ));
     }
+    let file = known_hosts
+        .first()
+        .map(|file| file.display().to_string())
+        .unwrap_or_default();
     Err(format!(
         "SSH host key of {host}:{port} ({fingerprint}) is not in known_hosts file {file}; check this fingerprint with the server administrator, then add it with `ssh-keyscan -p {port} {host} >> {file}`"
     ))
@@ -212,7 +225,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("known_hosts");
         std::fs::write(&path, contents).unwrap();
-        verify_host_key(HOST, PORT, &server(), &path)
+        verify_host_key(HOST, PORT, None, &server(), &[path])
     }
 
     fn pattern() -> String {
@@ -320,7 +333,8 @@ mod tests {
         fn un_fichier_known_hosts_absent_signale_un_hote_inconnu() {
             let dir = tempfile::tempdir().unwrap();
             let message =
-                verify_host_key(HOST, PORT, &server(), &dir.path().join("absent")).unwrap_err();
+                verify_host_key(HOST, PORT, None, &server(), &[dir.path().join("absent")])
+                    .unwrap_err();
             assert!(message.contains("not in known_hosts"), "{message}");
         }
 
@@ -339,7 +353,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                recorded_algorithms(HOST, PORT, &path),
+                recorded_algorithms(&pattern(), &[path]),
                 vec![Algorithm::Ed25519]
             );
         }

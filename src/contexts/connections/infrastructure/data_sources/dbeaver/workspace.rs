@@ -12,7 +12,8 @@ use crate::contexts::connections::domain::errors::AccessTokenError;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
-    ConnectParams, ConnectionEntry, ConnectionStatus, Secret, SshAuth, SslMode, TunnelParams,
+    ConnectParams, ConnectionEntry, ConnectionStatus, HostKeyPolicy, Secret, SshAuth, SshHop,
+    SslMode, TunnelParams,
 };
 
 static NULL: Value = Value::Null;
@@ -448,14 +449,25 @@ where
         }
         None => (database_host.to_string(), database_port),
     };
+    let host_key = if is_true(properties.get("bypassHostVerification")) {
+        HostKeyPolicy::Bypass
+    } else {
+        HostKeyPolicy::Verify {
+            known_hosts: Vec::new(),
+            alias: None,
+        }
+    };
     Ok(TunnelParams {
-        host,
-        port,
-        user,
-        auth,
+        hops: vec![SshHop {
+            label: host.clone(),
+            host,
+            port,
+            user,
+            auth,
+            host_key,
+        }],
         remote_host,
         remote_port,
-        verify_host_key: !is_true(properties.get("bypassHostVerification")),
     })
 }
 

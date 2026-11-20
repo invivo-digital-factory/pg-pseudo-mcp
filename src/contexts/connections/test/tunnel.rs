@@ -14,7 +14,7 @@ use tokio_postgres::Config;
 use super::database::database_url;
 use crate::contexts::connections::domain::errors::SessionError;
 use crate::contexts::connections::domain::types::{
-    Cell, ConnectOptions, SslMode, Tunnel, TunnelAuth,
+    Cell, ConnectOptions, Hop, SslMode, Tunnel, TunnelAuth,
 };
 use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect, connect_within,
@@ -108,14 +108,18 @@ fn options(auth: TunnelAuth, verify_host_key: bool, known_hosts: Option<&Path>) 
             .unwrap_or_default(),
         sslmode: SslMode::Disable,
         tunnel: Some(Tunnel {
-            host: SSH_HOST.to_string(),
-            port: ssh_port(),
-            user: SSH_USER.to_string(),
-            auth,
+            hops: vec![Hop {
+                label: SSH_HOST.to_string(),
+                host: SSH_HOST.to_string(),
+                port: ssh_port(),
+                user: SSH_USER.to_string(),
+                auth,
+                verify_host_key,
+                known_hosts: known_hosts.map(Path::to_path_buf).into_iter().collect(),
+                host_key_alias: None,
+            }],
             remote_host: REMOTE_HOST.to_string(),
             remote_port: REMOTE_PORT,
-            verify_host_key,
-            known_hosts: known_hosts.map(Path::to_path_buf),
         }),
     }
 }
@@ -336,7 +340,7 @@ mod integration {
     async fn une_session_ssh_coupee_est_retablie_a_la_requete_suivante() {
         let mut options = unverified(key_auth());
         if let Some(tunnel) = options.tunnel.as_mut() {
-            tunnel.user = DROPPED_USER.to_string();
+            tunnel.hops[0].user = DROPPED_USER.to_string();
         }
         let mut session = connect(&options).await.expect("connect through the tunnel");
         let before = backend_pid(&mut session).await;
@@ -367,14 +371,18 @@ mod integration {
             password: "p".to_string(),
             sslmode: SslMode::Disable,
             tunnel: Some(Tunnel {
-                host: "127.0.0.1".to_string(),
-                port,
-                user: SSH_USER.to_string(),
-                auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
+                hops: vec![Hop {
+                    label: "127.0.0.1".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port,
+                    user: SSH_USER.to_string(),
+                    auth: TunnelAuth::Password("ssh-secret-0042".to_string()),
+                    verify_host_key: false,
+                    known_hosts: Vec::new(),
+                    host_key_alias: None,
+                }],
                 remote_host: REMOTE_HOST.to_string(),
                 remote_port: REMOTE_PORT,
-                verify_host_key: false,
-                known_hosts: None,
             }),
         };
         let started = Instant::now();

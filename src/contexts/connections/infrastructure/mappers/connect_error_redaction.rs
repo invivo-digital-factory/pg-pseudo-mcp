@@ -15,11 +15,10 @@ pub fn redact_connection_identity(error: SessionError, options: &ConnectOptions)
 fn identifying_values(options: &ConnectOptions) -> Vec<&str> {
     let mut values = vec![options.user.as_str(), options.host.as_str()];
     if let Some(tunnel) = &options.tunnel {
-        values.extend([
-            tunnel.host.as_str(),
-            tunnel.user.as_str(),
-            tunnel.remote_host.as_str(),
-        ]);
+        values.push(tunnel.remote_host.as_str());
+        for hop in &tunnel.hops {
+            values.extend([hop.host.as_str(), hop.user.as_str()]);
+        }
     }
     values.retain(|value| !value.is_empty());
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
@@ -35,7 +34,20 @@ fn redact(text: &str, secrets: &[&str]) -> String {
 #[cfg(test)]
 mod unit {
     use super::*;
-    use crate::contexts::connections::domain::types::{SslMode, Tunnel, TunnelAuth};
+    use crate::contexts::connections::domain::types::{Hop, SslMode, Tunnel, TunnelAuth};
+
+    fn hop(host: &str, user: &str) -> Hop {
+        Hop {
+            label: host.into(),
+            host: host.into(),
+            port: 22,
+            user: user.into(),
+            auth: TunnelAuth::Agent,
+            verify_host_key: false,
+            known_hosts: Vec::new(),
+            host_key_alias: None,
+        }
+    }
 
     fn options(user: &str, host: &str, tunnel_host: Option<&str>) -> ConnectOptions {
         ConnectOptions {
@@ -46,14 +58,9 @@ mod unit {
             password: "pw".into(),
             sslmode: SslMode::Disable,
             tunnel: tunnel_host.map(|host| Tunnel {
-                host: host.into(),
-                port: 22,
-                user: "jump".into(),
-                auth: TunnelAuth::Agent,
+                hops: vec![hop(host, "jump")],
                 remote_host: host.into(),
                 remote_port: 5432,
-                verify_host_key: false,
-                known_hosts: None,
             }),
         }
     }
@@ -79,7 +86,7 @@ mod unit {
     fn tunnel_options() -> ConnectOptions {
         let mut options = options("pgpseudo", "db.internal.example", Some("bastion.corp"));
         if let Some(tunnel) = options.tunnel.as_mut() {
-            tunnel.user = "etienne.bernoux".into();
+            tunnel.hops[0].user = "etienne.bernoux".into();
             tunnel.remote_host = "pg-prod.private.example".into();
         }
         options
@@ -103,6 +110,23 @@ mod unit {
         let text = redact_connection_identity(error, &tunnel_options()).to_string();
         assert!(text.contains("refused forward"), "{text}");
         assert!(!text.contains("pg-prod.private.example"), "{text}");
+    }
+
+    #[test]
+    fn l_hote_et_l_utilisateur_de_chaque_saut_sont_remplaces_dans_le_message() {
+        let mut options = tunnel_options();
+        if let Some(tunnel) = options.tunnel.as_mut() {
+            tunnel.hops.insert(0, hop("jump.corp", "first.user"));
+        }
+        let error = SessionError::Connect(
+            "SSH hop 1 of 2 (jump-a): first.user rejected at jump.corp, then bastion.corp refused"
+                .into(),
+        );
+        let text = redact_connection_identity(error, &options).to_string();
+        assert!(text.contains("SSH hop 1 of 2 (jump-a)"), "{text}");
+        assert!(!text.contains("first.user"), "{text}");
+        assert!(!text.contains("jump.corp"), "{text}");
+        assert!(!text.contains("bastion.corp"), "{text}");
     }
 
     #[test]

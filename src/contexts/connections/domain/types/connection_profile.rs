@@ -33,14 +33,35 @@ pub enum SshAuth {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TunnelParams {
+pub enum HostKeyPolicy {
+    Bypass,
+    Verify {
+        known_hosts: Vec<PathBuf>,
+        alias: Option<String>,
+    },
+}
+
+impl HostKeyPolicy {
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verify { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshHop {
+    pub label: String,
     pub host: String,
     pub port: u16,
     pub user: String,
     pub auth: SshAuth,
+    pub host_key: HostKeyPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelParams {
+    pub hops: Vec<SshHop>,
     pub remote_host: String,
     pub remote_port: u16,
-    pub verify_host_key: bool,
 }
 
 #[derive(Clone)]

@@ -47,7 +47,7 @@ fn describe(entry: &ConnectionEntry) -> Value {
         .params
         .as_ref()
         .and_then(|params| params.tunnel.as_ref())
-        .is_some_and(|tunnel| !tunnel.verify_host_key);
+        .is_some_and(|tunnel| tunnel.hops.iter().any(|hop| !hop.host_key.is_verified()));
     if bypassed {
         item.insert("ssh_host_key_check".to_string(), json!("bypassed"));
     }
