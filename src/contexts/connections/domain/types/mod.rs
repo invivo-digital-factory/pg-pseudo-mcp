@@ -13,7 +13,7 @@ pub use cell::Cell;
 pub use connect_options::{ConnectOptions, Hop, Tunnel, TunnelAuth};
 pub use connection_entry::{ConnectionEntry, ConnectionStatus, Discovery};
 pub use connection_profile::{
-    ConnectParams, HostKeyPolicy, SshAuth, SshHop, SslMode, TunnelParams,
+    ConnectParams, HostKeyPolicy, OpenSshKeys, SshAgent, SshAuth, SshHop, SslMode, TunnelParams,
 };
 pub use database_listing::DatabaseListing;
 pub use db_message::DbMessage;

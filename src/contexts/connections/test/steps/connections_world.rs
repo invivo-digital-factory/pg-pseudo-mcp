@@ -41,6 +41,7 @@ impl ConnectionsWorld {
             dbeaver_home: Some(self.workspace.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: self.known_hosts.clone(),
+            ssh_config: None,
         })
     }
 

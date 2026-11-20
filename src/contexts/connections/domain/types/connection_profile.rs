@@ -24,6 +24,20 @@ impl SslMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshAgent {
+    Environment,
+    Socket(PathBuf),
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSshKeys {
+    pub identity_files: Vec<PathBuf>,
+    pub agent: SshAgent,
+    pub identities_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SshAuth {
     PublicKey {
         key_path: PathBuf,
@@ -31,6 +45,7 @@ pub enum SshAuth {
     },
     Password(Secret),
     Agent,
+    OpenSsh(OpenSshKeys),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

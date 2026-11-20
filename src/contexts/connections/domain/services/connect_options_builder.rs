@@ -52,6 +52,7 @@ fn hop_options(hop: &SshHop, configured_known_hosts: Option<&Path>) -> Hop {
             },
             SshAuth::Password(password) => TunnelAuth::Password(password.expose().to_string()),
             SshAuth::Agent => TunnelAuth::Agent,
+            SshAuth::OpenSsh(keys) => TunnelAuth::OpenSsh(keys.clone()),
         },
         verify_host_key,
         known_hosts,

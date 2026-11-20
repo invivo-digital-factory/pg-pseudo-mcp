@@ -326,6 +326,7 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
             dbeaver_home: Some(setup.home.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: None,
+            ssh_config: None,
         },
         Some(setup.bin.path().join("az")),
     );

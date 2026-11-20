@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::connection_profile::SslMode;
+use super::connection_profile::{OpenSshKeys, SslMode};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectOptions {
@@ -41,6 +41,7 @@ pub enum TunnelAuth {
     },
     Password(String),
     Agent,
+    OpenSsh(OpenSshKeys),
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -70,6 +71,7 @@ impl fmt::Debug for TunnelAuth {
                 .finish(),
             Self::Password(_) => f.debug_tuple("Password").field(&"<redacted>").finish(),
             Self::Agent => f.write_str("Agent"),
+            Self::OpenSsh(keys) => f.debug_tuple("OpenSsh").field(keys).finish(),
         }
     }
 }

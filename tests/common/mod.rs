@@ -87,6 +87,7 @@ impl Harness {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
+            ssh_config: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {

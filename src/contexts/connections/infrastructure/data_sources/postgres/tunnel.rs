@@ -13,7 +13,7 @@ use super::known_hosts::{
     verify_host_key,
 };
 use crate::contexts::connections::domain::errors::SessionError;
-use crate::contexts::connections::domain::types::{Hop, Tunnel, TunnelAuth};
+use crate::contexts::connections::domain::types::{Hop, OpenSshKeys, SshAgent, Tunnel, TunnelAuth};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const ORIGINATOR_ADDRESS: &str = "127.0.0.1";
@@ -281,6 +281,7 @@ async fn authenticate(handle: &mut Handle<HostKeyCheck>, hop: &Hop) -> Result<()
             "SSH agent".to_string(),
             authenticate_with_agent(handle, hop).await?,
         ),
+        TunnelAuth::OpenSsh(keys) => return authenticate_with_keys(handle, hop, keys).await,
     };
     if accepted {
         Ok(())
@@ -351,4 +352,97 @@ async fn authenticate_with_agent(
         }
     }
     Ok(false)
+}
+
+async fn authenticate_with_keys(
+    handle: &mut Handle<HostKeyCheck>,
+    hop: &Hop,
+    keys: &OpenSshKeys,
+) -> Result<(), SessionError> {
+    let location = format!("{}:{}", hop.host, hop.port);
+    let failed = |error: russh::Error| {
+        SessionError::Connect(format!(
+            "SSH authentication with {location} failed: {error}"
+        ))
+    };
+    let allowed = keys
+        .identities_only
+        .then(|| public_keys_of(&keys.identity_files));
+    if let Some(mut agent) = connect_agent(&keys.agent).await {
+        if let Some(binding) = handle.agent_session_binding() {
+            let _ = agent.bind_session(binding, false).await;
+        }
+        for identity in agent.request_identities().await.unwrap_or_default() {
+            let key = identity.public_key().into_owned();
+            let offered = allowed.as_ref().is_none_or(|allowed| {
+                allowed
+                    .iter()
+                    .any(|wanted| wanted.key_data() == key.key_data())
+            });
+            if !offered {
+                continue;
+            }
+            let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
+            let result = handle
+                .authenticate_publickey_with(hop.user.as_str(), key, hash, &mut agent)
+                .await
+                .map_err(|error| {
+                    SessionError::Connect(format!("SSH agent signing failed: {error}"))
+                })?;
+            if result.success() {
+                return Ok(());
+            }
+        }
+    }
+    let mut encrypted: Option<&Path> = None;
+    for path in &keys.identity_files {
+        match keys::load_secret_key(path, None) {
+            Ok(key) => {
+                let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
+                let key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
+                let result = handle
+                    .authenticate_publickey(hop.user.as_str(), key)
+                    .await
+                    .map_err(failed)?;
+                if result.success() {
+                    return Ok(());
+                }
+            }
+            Err(keys::Error::KeyIsEncrypted) => encrypted = encrypted.or(Some(path)),
+            Err(_) => {}
+        }
+    }
+    Err(SessionError::Connect(match encrypted {
+        Some(path) => format!(
+            "SSH private key {} is encrypted and no agent offers it; load it into the SSH agent with ssh-add",
+            path.display()
+        ),
+        None => format!(
+            "SSH server {location} accepted none of the available keys for user {}; load a key into the SSH agent or name an unencrypted IdentityFile",
+            hop.user
+        ),
+    }))
+}
+
+async fn connect_agent(agent: &SshAgent) -> Option<AgentClient<tokio::net::UnixStream>> {
+    match agent {
+        SshAgent::Disabled => None,
+        SshAgent::Environment => AgentClient::connect_env().await.ok(),
+        SshAgent::Socket(path) => AgentClient::connect_uds(path).await.ok(),
+    }
+}
+
+fn public_keys_of(identity_files: &[PathBuf]) -> Vec<keys::PublicKey> {
+    identity_files
+        .iter()
+        .filter_map(|path| {
+            let mut companion = path.clone().into_os_string();
+            companion.push(".pub");
+            keys::load_public_key(&companion).ok().or_else(|| {
+                keys::load_secret_key(path, None)
+                    .ok()
+                    .map(|key| key.public_key().clone())
+            })
+        })
+        .collect()
 }
