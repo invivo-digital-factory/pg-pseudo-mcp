@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,14 +14,17 @@ use crate::contexts::connections::domain::types::{ConnectOptions, ExecutionLimit
 use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect_within,
 };
+use crate::contexts::connections::infrastructure::repositories::session_cache::{
+    SessionCache, Slot,
+};
 
-type SessionSlot = Arc<Mutex<Option<Session>>>;
+const MAX_OTHER_DATABASE_SESSIONS: usize = 4;
 
 pub struct PostgresSessionPool {
     catalog: Arc<dyn ConnectionCatalog>,
     known_hosts: Option<PathBuf>,
     tokens: Arc<dyn AzureSignInTokenProvider>,
-    sessions: Mutex<HashMap<(String, String), SessionSlot>>,
+    sessions: Mutex<SessionCache<Session>>,
     connect_deadline: Duration,
 }
 
@@ -36,7 +38,7 @@ impl PostgresSessionPool {
             catalog,
             known_hosts,
             tokens,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(SessionCache::new(MAX_OTHER_DATABASE_SESSIONS)),
             connect_deadline: CONNECT_DEADLINE,
         }
     }
@@ -46,13 +48,23 @@ impl PostgresSessionPool {
         self
     }
 
-    async fn slot(&self, connection: &str, database: &str) -> SessionSlot {
+    async fn slot(
+        &self,
+        connection: &str,
+        database: &str,
+        default_database: bool,
+    ) -> Slot<Session> {
         self.sessions
             .lock()
             .await
-            .entry((connection.to_string(), database.to_string()))
-            .or_default()
-            .clone()
+            .slot(connection, database, default_database)
+    }
+
+    async fn forget(&self, connection: &str, database: &str, slot: &Slot<Session>) {
+        self.sessions
+            .lock()
+            .await
+            .forget(connection, database, slot);
     }
 
     async fn connect(
@@ -93,14 +105,17 @@ impl PostgresSessionPool {
     }
 
     #[cfg(test)]
+    fn cached_sessions_for_tests(&self) -> usize {
+        self.sessions.try_lock().expect("idle pool").len()
+    }
+
+    #[cfg(test)]
     fn cache_for_tests(&self, connection: &str, database: &str, session: Session) {
         let slot = self
             .sessions
             .try_lock()
             .expect("idle pool")
-            .entry((connection.to_string(), database.to_string()))
-            .or_default()
-            .clone();
+            .slot(connection, database, true);
         *slot.try_lock().expect("idle slot") = Some(session);
     }
 }
@@ -114,6 +129,7 @@ impl SessionPool for PostgresSessionPool {
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
         let catalog = self.catalog.clone();
+        let database_unrequested = database.is_none_or(|name| name.trim().is_empty());
         let requested = database
             .filter(|name| !name.trim().is_empty())
             .map(str::to_string);
@@ -123,13 +139,24 @@ impl SessionPool for PostgresSessionPool {
                 .map_err(|_| ConnectionError::discovery_interrupted())?;
         let params = resolve_connection(&discovery, connection)?;
         let options = connect_options(&params, self.known_hosts.as_deref());
-        let slot = self.slot(connection, &params.database).await;
-        let mut cached = slot.lock_owned().await;
+        let slot = self
+            .slot(connection, &params.database, database_unrequested)
+            .await;
+        let mut cached = slot.clone().lock_owned().await;
         let session = match cached.take() {
             Some(session) if session.options() == &options => session,
             _ => {
-                self.connect(connection, options, params.password_is_azure_token)
-                    .await?
+                match self
+                    .connect(connection, options, params.password_is_azure_token)
+                    .await
+                {
+                    Ok(session) => session,
+                    Err(error) => {
+                        drop(cached);
+                        self.forget(connection, &params.database, &slot).await;
+                        return Err(error);
+                    }
+                }
             }
         };
         let session = cached.insert(session);
@@ -423,6 +450,26 @@ mod integration {
             .expect_err("nothing listens");
         let text = error.to_string().to_lowercase();
         assert!(text.contains("refused"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn un_premier_echec_de_connexion_ne_garde_aucune_place_en_cache() {
+        let root = tempfile::tempdir().expect("dbeaver dir");
+        write_workspace(
+            root.path(),
+            &[Endpoint {
+                name: "closed",
+                port: refused_port().await,
+                password: "p",
+            }],
+        );
+        let pool = pool_for(root.path());
+        for database in [None, Some("other"), Some("another")] {
+            pool.run_read_only("closed", database, "SELECT 1", limits())
+                .await
+                .expect_err("nothing listens");
+        }
+        assert_eq!(pool.cached_sessions_for_tests(), 0);
     }
 
     async fn backend_and_database(
