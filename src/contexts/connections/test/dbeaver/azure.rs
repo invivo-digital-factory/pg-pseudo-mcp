@@ -260,3 +260,37 @@ fn un_mot_de_passe_pgpass_hors_azure_garde_prefer() {
     use_pgpass(&setup);
     assert_eq!(shop(&setup).params.unwrap().sslmode, SslMode::Prefer);
 }
+
+#[test]
+fn deux_decouvertes_rapprochees_apres_un_echec_de_az_n_appellent_az_qu_une_fois() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = setup(
+        AZURE_HOST,
+        pgpass_model(),
+        None,
+        "echo x >> \"$0.count\"\nexit 1",
+    );
+    use_pgpass(&setup);
+    write_project(
+        setup.home.path(),
+        "General",
+        "",
+        &sources(json!({
+            "pg-1": connection_json(AZURE_HOST, "Shop", pgpass_model()),
+            "pg-2": connection_json("db.internal.example", "Plain", json!({
+                "configuration": { "password": "native-secret" }
+            }))
+        })),
+        None,
+    );
+    let tokens = tokens(&setup);
+    let first = discover_with(Some(setup.home.path()), tokens.as_ref());
+    let second = discover_with(Some(setup.home.path()), tokens.as_ref());
+    assert_eq!(by_name(&first, "Plain").status, ConnectionStatus::Available);
+    assert_eq!(
+        by_name(&second, "Plain").status,
+        ConnectionStatus::Available
+    );
+    let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
+    assert_eq!(count.lines().count(), 1);
+}
