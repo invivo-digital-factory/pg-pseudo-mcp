@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use super::location::locate_from_environment;
@@ -37,19 +38,20 @@ impl ConnectionFileWriter for TomlConnectionFileWriter {
         }
         let directory = path.parent().ok_or(ConnectionFileWriteError::NoLocation)?;
         std::fs::create_dir_all(directory).map_err(io_error)?;
-        let temporary = directory.join(format!(".connections.toml.{}.tmp", std::process::id()));
-        std::fs::write(&temporary, render(definitions)).map_err(io_error)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(io_error)?;
+        temporary
+            .write_all(render(definitions).as_bytes())
+            .map_err(io_error)?;
         let placed = if overwrite {
-            std::fs::rename(&temporary, &path)
+            temporary.persist(&path)
         } else {
-            std::fs::hard_link(&temporary, &path).and_then(|()| std::fs::remove_file(&temporary))
+            temporary.persist_noclobber(&path)
         };
         if let Err(error) = placed {
-            let _ = std::fs::remove_file(&temporary);
-            return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
+            return Err(if error.error.kind() == std::io::ErrorKind::AlreadyExists {
                 ConnectionFileWriteError::AlreadyExists(path.clone())
             } else {
-                io_error(error)
+                io_error(error.error)
             });
         }
         Ok(path)
@@ -175,5 +177,32 @@ mod integration {
             .flatten()
             .collect();
         assert_eq!(leftovers.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_lien_symbolique_au_nom_temporaire_predictible_n_est_pas_suivi_et_le_fichier_est_en_0600()
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let writer = writer_in(dir.path());
+        let nested = dir.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        let predictable = nested.join(format!(".connections.toml.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &predictable).unwrap();
+        let path = writer
+            .write(&[definition("a", AuthMode::Pgpass, None)], false)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("name = \"a\"")
+        );
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }
