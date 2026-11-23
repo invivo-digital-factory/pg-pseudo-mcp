@@ -58,6 +58,16 @@ Fonctionnalité: Fichier de connexions
     Et la connexion "dbeaver-b" est listée comme indisponible
     Et la raison de la connexion "dbeaver-a" contient "connection file"
 
+  Scénario: Un fichier qui porte déjà son indice n'y ajoute pas la proposition de le créer
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "a" "b"
+      """
+    Quand l'agent liste les connexions
+    Alors l'indice cite la ligne 2
+    Et l'indice ne contient pas "run `pg-pseudo-mcp connections import-dbeaver`"
+
   Scénario: Une valeur invalide de read_dbeaver rend les connexions DBeaver indisponibles
     Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
     Et le fichier de connexions suivant :

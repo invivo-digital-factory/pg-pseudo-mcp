@@ -63,7 +63,7 @@ impl FileConnectionCatalog {
                 };
                 load.discovery.hint = Some(if error.kind() == ErrorKind::NotFound {
                     format!(
-                        "PG_PSEUDO_CONNECTIONS_FILE points at {}, which does not exist",
+                        "PG_PSEUDO_CONNECTIONS_FILE points at {}, which does not exist; create it or run `pg-pseudo-mcp connections import-dbeaver` to write it from DBeaver",
                         location.path.display()
                     )
                 } else {

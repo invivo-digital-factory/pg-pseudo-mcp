@@ -20,7 +20,9 @@ pub fn layer_sources(file: Discovery, dbeaver: Option<Discovery>, empty_hint: &s
     let mut hints: Vec<&str> = file.hint.as_deref().into_iter().collect();
     if connections.is_empty() {
         hints.extend(dbeaver_hint.as_deref());
-        hints.push(empty_hint);
+        if file.hint.is_none() {
+            hints.push(empty_hint);
+        }
     }
     Discovery {
         connections,
@@ -217,7 +219,7 @@ mod unit {
         );
         assert_eq!(
             without.hint.as_deref(),
-            Some("file hint no DBeaver workspace create the file")
+            Some("file hint no DBeaver workspace")
         );
     }
 
@@ -231,5 +233,16 @@ mod unit {
         assert_eq!(empty.hint.as_deref(), Some("create the file"));
         let dbeaver_off = layer_sources(discovery(Vec::new(), None), None, "create the file");
         assert_eq!(dbeaver_off.hint.as_deref(), Some("create the file"));
+    }
+    #[test]
+    fn un_fichier_vide_qui_porte_deja_son_indice_n_y_ajoute_pas_l_indice_de_creation() {
+        let own = layer_sources(
+            discovery(Vec::new(), Some("the file has problems")),
+            Some(discovery(Vec::new(), None)),
+            "create the file",
+        );
+        assert_eq!(own.hint.as_deref(), Some("the file has problems"));
+        let none = layer_sources(discovery(Vec::new(), None), None, "create the file");
+        assert_eq!(none.hint.as_deref(), Some("create the file"));
     }
 }
