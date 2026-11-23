@@ -9,10 +9,11 @@ use russh::keys::{self, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelOpenFailure, ChannelStream};
 
 use super::known_hosts::{
-    home_dir, known_algorithms_first, known_hosts_path, recorded_algorithms, verify_host_key,
+    home_dir, known_algorithms_first, known_hosts_path, lookup_name, recorded_algorithms,
+    verify_host_key,
 };
 use crate::contexts::connections::domain::errors::SessionError;
-use crate::contexts::connections::domain::types::{Tunnel, TunnelAuth};
+use crate::contexts::connections::domain::types::{Hop, OpenSshKeys, SshAgent, Tunnel, TunnelAuth};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const ORIGINATOR_ADDRESS: &str = "127.0.0.1";
@@ -20,55 +21,66 @@ const ORIGINATOR_ADDRESS: &str = "127.0.0.1";
 pub(crate) type TunnelStream = ChannelStream<Msg>;
 
 pub(crate) struct SshLink {
-    handle: Handle<HostKeyCheck>,
+    handles: Vec<Handle<HostKeyCheck>>,
     host: String,
     port: u16,
     remote_host: String,
     remote_port: u16,
 }
 
+struct Position<'a> {
+    index: usize,
+    total: usize,
+    hop: &'a Hop,
+}
+
+impl Position<'_> {
+    fn tag(&self, error: SessionError) -> SessionError {
+        if self.total == 1 {
+            return error;
+        }
+        let prefix = format!(
+            "SSH hop {} of {} ({})",
+            self.index + 1,
+            self.total,
+            self.hop.label
+        );
+        match error {
+            SessionError::Connect(text) => SessionError::Connect(format!("{prefix}: {text}")),
+            other => other,
+        }
+    }
+}
+
 impl SshLink {
     pub(crate) async fn open(tunnel: &Tunnel) -> Result<Self, SessionError> {
-        let known_hosts = tunnel
-            .verify_host_key
-            .then(|| known_hosts_path(tunnel.known_hosts.as_deref(), home_dir()))
-            .transpose()
-            .map_err(SessionError::Connect)?;
-        let mut config = client::Config {
-            keepalive_interval: Some(KEEPALIVE_INTERVAL),
-            nodelay: true,
-            ..client::Config::default()
-        };
-        if let Some(path) = &known_hosts {
-            let recorded = recorded_algorithms(&tunnel.host, tunnel.port, path);
-            config.preferred.key =
-                Cow::Owned(known_algorithms_first(&config.preferred.key, &recorded));
+        let total = tunnel.hops.len();
+        let mut handles: Vec<Handle<HostKeyCheck>> = Vec::with_capacity(total);
+        for (index, hop) in tunnel.hops.iter().enumerate() {
+            let position = Position { index, total, hop };
+            let mut handle = connect_hop(handles.last(), &position).await?;
+            authenticate(&mut handle, hop)
+                .await
+                .map_err(|error| position.tag(error))?;
+            handles.push(handle);
         }
-        let checker = HostKeyCheck {
-            host: tunnel.host.clone(),
-            port: tunnel.port,
-            known_hosts,
-        };
-        let mut handle = client::connect(
-            Arc::new(config),
-            (tunnel.host.as_str(), tunnel.port),
-            checker,
-        )
-        .await
-        .map_err(|failure| failure.describe(&tunnel.host, tunnel.port))?;
-        authenticate(&mut handle, tunnel).await?;
+        let last = tunnel.hops.last().ok_or_else(|| {
+            SessionError::Connect("the SSH tunnel has no hop to connect through".to_string())
+        })?;
         Ok(Self {
-            handle,
-            host: tunnel.host.clone(),
-            port: tunnel.port,
+            handles,
+            host: last.host.clone(),
+            port: last.port,
             remote_host: tunnel.remote_host.clone(),
             remote_port: tunnel.remote_port,
         })
     }
 
     pub(crate) async fn forward(&self) -> Result<TunnelStream, SessionError> {
-        let channel = self
-            .handle
+        let last = self.handles.last().ok_or_else(|| {
+            SessionError::Connect("the SSH tunnel has no hop to forward through".to_string())
+        })?;
+        let channel = last
             .channel_open_direct_tcpip(
                 self.remote_host.as_str(),
                 u32::from(self.remote_port),
@@ -77,20 +89,13 @@ impl SshLink {
             )
             .await
             .map_err(|error| {
-                let reason = match error {
-                    russh::Error::ChannelOpenFailure(
-                        ChannelOpenFailure::AdministrativelyProhibited,
-                    ) => "forwarding is prohibited; enable AllowTcpForwarding on the SSH server"
-                        .to_string(),
-                    russh::Error::ChannelOpenFailure(ChannelOpenFailure::ConnectFailed) => {
-                        "the SSH server could not reach the database address".to_string()
-                    }
-                    other => other.to_string(),
-                };
-                SessionError::Connect(format!(
-                    "SSH server {}:{} refused to forward to {}:{}: {reason}",
-                    self.host, self.port, self.remote_host, self.remote_port
-                ))
+                forward_refusal(
+                    error,
+                    &self.host,
+                    self.port,
+                    &self.remote_host,
+                    self.remote_port,
+                )
             })?;
         Ok(channel.into_stream())
     }
@@ -100,14 +105,90 @@ impl SshLink {
     }
 
     pub(crate) fn is_closed(&self) -> bool {
-        self.handle.is_closed()
+        self.handles.iter().any(Handle::is_closed)
     }
+}
+
+fn forward_refusal(
+    error: russh::Error,
+    host: &str,
+    port: u16,
+    remote_host: &str,
+    remote_port: u16,
+) -> SessionError {
+    let reason = match error {
+        russh::Error::ChannelOpenFailure(ChannelOpenFailure::AdministrativelyProhibited) => {
+            "forwarding is prohibited; enable AllowTcpForwarding on the SSH server".to_string()
+        }
+        russh::Error::ChannelOpenFailure(ChannelOpenFailure::ConnectFailed) => {
+            "the SSH server could not reach the database address".to_string()
+        }
+        other => other.to_string(),
+    };
+    SessionError::Connect(format!(
+        "SSH server {host}:{port} refused to forward to {remote_host}:{remote_port}: {reason}"
+    ))
+}
+
+async fn connect_hop(
+    previous: Option<&Handle<HostKeyCheck>>,
+    position: &Position<'_>,
+) -> Result<Handle<HostKeyCheck>, SessionError> {
+    let hop = position.hop;
+    let known_hosts = if hop.verify_host_key {
+        let files = if hop.known_hosts.is_empty() {
+            vec![known_hosts_path(None, home_dir()).map_err(SessionError::Connect)?]
+        } else {
+            hop.known_hosts.clone()
+        };
+        Some(files)
+    } else {
+        None
+    };
+    let mut config = client::Config {
+        keepalive_interval: Some(KEEPALIVE_INTERVAL),
+        nodelay: true,
+        ..client::Config::default()
+    };
+    if let Some(files) = &known_hosts {
+        let name = lookup_name(&hop.host, hop.port, hop.host_key_alias.as_deref());
+        let recorded = recorded_algorithms(&name, files);
+        config.preferred.key = Cow::Owned(known_algorithms_first(&config.preferred.key, &recorded));
+    }
+    let checker = HostKeyCheck {
+        host: hop.host.clone(),
+        port: hop.port,
+        alias: hop.host_key_alias.clone(),
+        known_hosts,
+    };
+    let config = Arc::new(config);
+    let connected = match previous {
+        None => client::connect(config, (hop.host.as_str(), hop.port), checker).await,
+        Some(previous) => {
+            let channel = previous
+                .channel_open_direct_tcpip(
+                    hop.host.as_str(),
+                    u32::from(hop.port),
+                    ORIGINATOR_ADDRESS,
+                    0,
+                )
+                .await
+                .map_err(|error| {
+                    position.tag(forward_refusal(
+                        error, &hop.host, hop.port, &hop.host, hop.port,
+                    ))
+                })?;
+            client::connect_stream(config, channel.into_stream(), checker).await
+        }
+    };
+    connected.map_err(|failure| position.tag(failure.describe(&hop.host, hop.port)))
 }
 
 struct HostKeyCheck {
     host: String,
     port: u16,
-    known_hosts: Option<PathBuf>,
+    alias: Option<String>,
+    known_hosts: Option<Vec<PathBuf>>,
 }
 
 #[derive(Debug)]
@@ -153,23 +234,26 @@ impl client::Handler for HostKeyCheck {
                 self.host, self.port
             )));
         };
-        verify_host_key(&self.host, self.port, key, known_hosts)
-            .map(|()| true)
-            .map_err(SshFailure::HostKey)
+        verify_host_key(
+            &self.host,
+            self.port,
+            self.alias.as_deref(),
+            key,
+            known_hosts,
+        )
+        .map(|()| true)
+        .map_err(SshFailure::HostKey)
     }
 }
 
-async fn authenticate(
-    handle: &mut Handle<HostKeyCheck>,
-    tunnel: &Tunnel,
-) -> Result<(), SessionError> {
-    let location = format!("{}:{}", tunnel.host, tunnel.port);
+async fn authenticate(handle: &mut Handle<HostKeyCheck>, hop: &Hop) -> Result<(), SessionError> {
+    let location = format!("{}:{}", hop.host, hop.port);
     let protocol = |error: russh::Error| {
         SessionError::Connect(format!(
             "SSH authentication with {location} failed: {error}"
         ))
     };
-    let (method, accepted) = match &tunnel.auth {
+    let (method, accepted) = match &hop.auth {
         TunnelAuth::PublicKey {
             key_path,
             passphrase,
@@ -178,7 +262,7 @@ async fn authenticate(
             let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
             let key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
             let result = handle
-                .authenticate_publickey(tunnel.user.as_str(), key)
+                .authenticate_publickey(hop.user.as_str(), key)
                 .await
                 .map_err(protocol)?;
             (
@@ -188,22 +272,23 @@ async fn authenticate(
         }
         TunnelAuth::Password(password) => {
             let result = handle
-                .authenticate_password(tunnel.user.as_str(), password.as_str())
+                .authenticate_password(hop.user.as_str(), password.as_str())
                 .await
                 .map_err(protocol)?;
             ("password".to_string(), result.success())
         }
         TunnelAuth::Agent => (
             "SSH agent".to_string(),
-            authenticate_with_agent(handle, tunnel).await?,
+            authenticate_with_agent(handle, hop).await?,
         ),
+        TunnelAuth::OpenSsh(keys) => return authenticate_with_keys(handle, hop, keys).await,
     };
     if accepted {
         Ok(())
     } else {
         Err(SessionError::Connect(format!(
             "SSH server {location} rejected {method} authentication for user {}",
-            tunnel.user
+            hop.user
         )))
     }
 }
@@ -238,7 +323,7 @@ fn load_key(path: &Path, passphrase: Option<&str>) -> Result<keys::PrivateKey, S
 
 async fn authenticate_with_agent(
     handle: &mut Handle<HostKeyCheck>,
-    tunnel: &Tunnel,
+    hop: &Hop,
 ) -> Result<bool, SessionError> {
     let unavailable = |error: keys::Error| {
         SessionError::Connect(format!(
@@ -259,7 +344,7 @@ async fn authenticate_with_agent(
         let key = identity.public_key().into_owned();
         let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
         let result = handle
-            .authenticate_publickey_with(tunnel.user.as_str(), key, hash, &mut agent)
+            .authenticate_publickey_with(hop.user.as_str(), key, hash, &mut agent)
             .await
             .map_err(|error| SessionError::Connect(format!("SSH agent signing failed: {error}")))?;
         if result.success() {
@@ -267,4 +352,97 @@ async fn authenticate_with_agent(
         }
     }
     Ok(false)
+}
+
+async fn authenticate_with_keys(
+    handle: &mut Handle<HostKeyCheck>,
+    hop: &Hop,
+    keys: &OpenSshKeys,
+) -> Result<(), SessionError> {
+    let location = format!("{}:{}", hop.host, hop.port);
+    let failed = |error: russh::Error| {
+        SessionError::Connect(format!(
+            "SSH authentication with {location} failed: {error}"
+        ))
+    };
+    let allowed = keys
+        .identities_only
+        .then(|| public_keys_of(&keys.identity_files));
+    if let Some(mut agent) = connect_agent(&keys.agent).await {
+        if let Some(binding) = handle.agent_session_binding() {
+            let _ = agent.bind_session(binding, false).await;
+        }
+        for identity in agent.request_identities().await.unwrap_or_default() {
+            let key = identity.public_key().into_owned();
+            let offered = allowed.as_ref().is_none_or(|allowed| {
+                allowed
+                    .iter()
+                    .any(|wanted| wanted.key_data() == key.key_data())
+            });
+            if !offered {
+                continue;
+            }
+            let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
+            let result = handle
+                .authenticate_publickey_with(hop.user.as_str(), key, hash, &mut agent)
+                .await
+                .map_err(|error| {
+                    SessionError::Connect(format!("SSH agent signing failed: {error}"))
+                })?;
+            if result.success() {
+                return Ok(());
+            }
+        }
+    }
+    let mut encrypted: Option<&Path> = None;
+    for path in &keys.identity_files {
+        match keys::load_secret_key(path, None) {
+            Ok(key) => {
+                let hash = rsa_hash(handle, key.algorithm().is_rsa()).await;
+                let key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
+                let result = handle
+                    .authenticate_publickey(hop.user.as_str(), key)
+                    .await
+                    .map_err(failed)?;
+                if result.success() {
+                    return Ok(());
+                }
+            }
+            Err(keys::Error::KeyIsEncrypted) => encrypted = encrypted.or(Some(path)),
+            Err(_) => {}
+        }
+    }
+    Err(SessionError::Connect(match encrypted {
+        Some(path) => format!(
+            "SSH private key {} is encrypted and no agent offers it; load it into the SSH agent with ssh-add",
+            path.display()
+        ),
+        None => format!(
+            "SSH server {location} accepted none of the available keys for user {}; load a key into the SSH agent or name an unencrypted IdentityFile",
+            hop.user
+        ),
+    }))
+}
+
+async fn connect_agent(agent: &SshAgent) -> Option<AgentClient<tokio::net::UnixStream>> {
+    match agent {
+        SshAgent::Disabled => None,
+        SshAgent::Environment => AgentClient::connect_env().await.ok(),
+        SshAgent::Socket(path) => AgentClient::connect_uds(path).await.ok(),
+    }
+}
+
+fn public_keys_of(identity_files: &[PathBuf]) -> Vec<keys::PublicKey> {
+    identity_files
+        .iter()
+        .filter_map(|path| {
+            let mut companion = path.clone().into_os_string();
+            companion.push(".pub");
+            keys::load_public_key(&companion).ok().or_else(|| {
+                keys::load_secret_key(path, None)
+                    .ok()
+                    .map(|key| key.public_key().clone())
+            })
+        })
+        .collect()
 }

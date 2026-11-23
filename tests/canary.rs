@@ -34,6 +34,28 @@ mod e2e {
 
     #[tokio::test]
     #[ignore]
+    async fn la_sortie_d_une_commande_de_mot_de_passe_n_apparait_jamais_dans_une_reponse_reussie() {
+        let url = common::database_url();
+        let password = url
+            .strip_prefix("postgres://")
+            .and_then(|rest| rest.split_once('@'))
+            .and_then(|(credentials, _)| credentials.split_once(':'))
+            .map(|(_, password)| password.to_string())
+            .expect("user:password");
+        let harness = Harness::with_password_command("/bin/echo", &[&password]);
+        let state = &harness.state;
+
+        let connections = list_connections(state).await;
+        assert_eq!(body(&connections)["connections"][0]["status"], "available");
+
+        let answer = query(state, sql("SELECT 1 AS one")).await;
+        assert!(!is_error(&answer), "{}", text_of(&answer));
+        assert_eq!(body(&answer)["rows"][0][0], 1);
+        assert!(!text_of(&answer).contains(&password));
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn une_enquete_d_agent_ne_recoit_jamais_une_valeur_reelle_semee() {
         let harness = Harness::new();
         let state = &harness.state;

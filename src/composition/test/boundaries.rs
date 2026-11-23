@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-const FORBIDDEN_IN_DOMAIN: &str = r"\b(?:rmcp|tokio_postgres|postgres_types|rusqlite|russh)::";
+const FORBIDDEN_IN_DOMAIN: &str = r"\b(?:rmcp|tokio_postgres|postgres_types|rusqlite|russh|toml)::";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Layer {

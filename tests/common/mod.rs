@@ -79,6 +79,40 @@ impl Harness {
         })
     }
 
+    pub fn with_password_command(program: &str, arguments: &[&str]) -> Self {
+        let url = database_url();
+        let (credentials, location) = url
+            .strip_prefix("postgres://")
+            .and_then(|rest| rest.split_once('@'))
+            .expect("user:password@host");
+        let (user, _) = credentials.split_once(':').expect("user:password");
+        let (address, database) = location.split_once('/').expect("host:port/database");
+        let (host, port) = address.split_once(':').expect("host:port");
+        let mut command = vec![program.to_string()];
+        command.extend(arguments.iter().map(ToString::to_string));
+        let file = format!(
+            "[[connection]]\nname = \"{CONNECTION}\"\nhost = \"{host}\"\nport = {port}\ndatabase = \"{database}\"\nuser = \"{user}\"\nsslmode = \"disable\"\ntype = \"dev\"\nauth = \"command\"\npassword_command = {}\n",
+            serde_json::to_string(&command).expect("json array is a toml array")
+        );
+        let dbeaver = tempfile::tempdir().expect("dbeaver dir");
+        let data = tempfile::tempdir().expect("data dir");
+        let path = data.path().join("connections.toml");
+        std::fs::write(&path, file).expect("connection file");
+        let config = AppConfig {
+            dbeaver_home: Some(dbeaver.path().to_path_buf()),
+            data_dir: Some(data.path().to_path_buf()),
+            ssh_known_hosts: None,
+            ssh_config: None,
+            connections_file: Some(path),
+        };
+        let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
+        Self {
+            state: Arc::new(Contexts::with_anonymization(&config, pseudonymizer)),
+            _dbeaver: dbeaver,
+            _data: data,
+        }
+    }
+
     fn with_workspace(write: impl FnOnce(&Path)) -> Self {
         let dbeaver = tempfile::tempdir().expect("dbeaver dir");
         write(dbeaver.path());
@@ -87,6 +121,8 @@ impl Harness {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
+            ssh_config: None,
+            connections_file: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {

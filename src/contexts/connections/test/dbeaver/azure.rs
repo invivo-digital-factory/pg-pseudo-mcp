@@ -89,7 +89,7 @@ fn un_serveur_azure_en_pgpass_prend_le_jeton_du_cli_meme_si_pgpass_a_une_entree(
     assert_eq!(entry.status, ConnectionStatus::Available, "{entry:?}");
     let params = entry.params.unwrap();
     assert_eq!(params.password.expose(), "entra-token-1");
-    assert!(params.password_is_azure_token);
+    assert!(params.password.is_azure_token());
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn un_az_en_echec_retombe_sur_l_entree_pgpass_quand_elle_correspond() {
     assert_eq!(entry.status, ConnectionStatus::Available, "{entry:?}");
     let params = entry.params.unwrap();
     assert_eq!(params.password.expose(), "pgpass-secret");
-    assert!(!params.password_is_azure_token);
+    assert!(!params.password.is_azure_token());
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn un_hote_hors_azure_en_pgpass_n_appelle_jamais_az() {
     use_pgpass(&setup);
     let params = shop(&setup).params.expect("available");
     assert_eq!(params.password.expose(), "plain-secret");
-    assert!(!params.password_is_azure_token);
+    assert!(!params.password.is_azure_token());
     assert!(!setup.bin.path().join("az.called").exists());
 }
 
@@ -189,7 +189,7 @@ fn un_serveur_azure_en_authentification_native_n_appelle_jamais_az() {
     );
     let params = shop(&setup).params.expect("available");
     assert_eq!(params.password.expose(), "native-secret");
-    assert!(!params.password_is_azure_token);
+    assert!(!params.password.is_azure_token());
     assert!(!setup.bin.path().join("az.called").exists());
 }
 
@@ -225,7 +225,7 @@ fn azure_pgpass_sslmode(extra: Value) -> SslMode {
     let setup = setup(AZURE_HOST, model, None, WORKING_AZ);
     use_pgpass(&setup);
     let params = shop(&setup).params.expect("available");
-    assert!(params.password_is_azure_token);
+    assert!(params.password.is_azure_token());
     params.sslmode
 }
 
@@ -326,6 +326,8 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
             dbeaver_home: Some(setup.home.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: None,
+            ssh_config: None,
+            connections_file: None,
         },
         Some(setup.bin.path().join("az")),
     );
@@ -354,7 +356,10 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
 fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
     use crate::contexts::connections::domain::repositories::SessionPool;
     use crate::contexts::connections::domain::types::ExecutionLimits;
-    use crate::contexts::connections::infrastructure::repositories::PostgresSessionPool;
+    use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
+    use crate::contexts::connections::infrastructure::repositories::{
+        CachedCommandPasswords, PostgresSessionPool,
+    };
 
     let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
@@ -368,6 +373,9 @@ fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que
         )),
         None,
         tokens,
+        Arc::new(CachedCommandPasswords::new(Arc::new(
+            ProcessPasswordCommand::new(),
+        ))),
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

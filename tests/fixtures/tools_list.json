@@ -71,7 +71,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the PostgreSQL connections found in the developer's DBeaver workspace, with status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
+      "description": "List the PostgreSQL connections of the developer's connection file and, as a fallback, of the DBeaver workspace, with source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -83,7 +83,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the databases of the server behind one connection, with the connection's default database (the one DBeaver points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+      "description": "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {

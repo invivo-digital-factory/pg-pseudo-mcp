@@ -32,6 +32,7 @@ const UNDEFINED_PARAMETER: &str = "42P02";
 
 pub struct Session {
     options: ConnectOptions,
+    password_command: Option<Vec<String>>,
     connect_deadline: Duration,
     live: Option<Live>,
     sources: SourceCache,
@@ -56,6 +57,7 @@ pub async fn connect_within(
     let live = open(options, deadline).await?;
     Ok(Session {
         options: options.clone(),
+        password_command: None,
         connect_deadline: deadline,
         live: Some(live),
         sources: SourceCache::default(),
@@ -67,10 +69,20 @@ impl Session {
         &self.options
     }
 
+    pub fn password_command(&self) -> Option<&[String]> {
+        self.password_command.as_deref()
+    }
+
+    pub fn with_password_command(mut self, argv: Option<Vec<String>>) -> Self {
+        self.password_command = argv;
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn idle(options: ConnectOptions) -> Self {
         Self {
             options,
+            password_command: None,
             connect_deadline: CONNECT_DEADLINE,
             live: None,
             sources: SourceCache::default(),
@@ -211,18 +223,23 @@ async fn open(options: &ConnectOptions, deadline: Duration) -> Result<Live, Sess
     let link = match &options.tunnel {
         None => None,
         Some(tunnel) => {
-            if !tunnel.verify_host_key {
+            for hop in tunnel.hops.iter().filter(|hop| !hop.verify_host_key) {
                 tracing::warn!(
-                    ssh_host = %tunnel.host,
+                    ssh_host = %hop.host,
                     "SSH host key verification is bypassed for this connection; the server identity is not checked"
                 );
             }
             match tokio::time::timeout(deadline, SshLink::open(tunnel)).await {
                 Ok(link) => Some(link?),
                 Err(_) => {
+                    let target = tunnel
+                        .hops
+                        .iter()
+                        .map(|hop| format!("{}:{}", hop.host, hop.port))
+                        .collect::<Vec<_>>()
+                        .join(" via ");
                     return Err(SessionError::Connect(format!(
-                        "SSH tunnel to {}:{} timed out after {deadline:?} before the server answered and authentication completed",
-                        tunnel.host, tunnel.port
+                        "SSH tunnel to {target} timed out after {deadline:?} before the server answered and authentication completed"
                     )));
                 }
             }

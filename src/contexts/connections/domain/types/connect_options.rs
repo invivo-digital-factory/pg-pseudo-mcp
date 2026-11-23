@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::connection_profile::SslMode;
+use super::connection_profile::{OpenSshKeys, SslMode};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectOptions {
@@ -14,16 +14,23 @@ pub struct ConnectOptions {
     pub tunnel: Option<Tunnel>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tunnel {
+    pub hops: Vec<Hop>,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hop {
+    pub label: String,
     pub host: String,
     pub port: u16,
     pub user: String,
     pub auth: TunnelAuth,
-    pub remote_host: String,
-    pub remote_port: u16,
     pub verify_host_key: bool,
-    pub known_hosts: Option<PathBuf>,
+    pub known_hosts: Vec<PathBuf>,
+    pub host_key_alias: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -34,6 +41,7 @@ pub enum TunnelAuth {
     },
     Password(String),
     Agent,
+    OpenSsh(OpenSshKeys),
 }
 
 impl fmt::Debug for ConnectOptions {
@@ -46,21 +54,6 @@ impl fmt::Debug for ConnectOptions {
             .field("password", &"<redacted>")
             .field("sslmode", &self.sslmode)
             .field("tunnel", &self.tunnel)
-            .finish()
-    }
-}
-
-impl fmt::Debug for Tunnel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Tunnel")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("user", &self.user)
-            .field("auth", &self.auth)
-            .field("remote_host", &self.remote_host)
-            .field("remote_port", &self.remote_port)
-            .field("verify_host_key", &self.verify_host_key)
-            .field("known_hosts", &self.known_hosts)
             .finish()
     }
 }
@@ -78,6 +71,7 @@ impl fmt::Debug for TunnelAuth {
                 .finish(),
             Self::Password(_) => f.debug_tuple("Password").field(&"<redacted>").finish(),
             Self::Agent => f.write_str("Agent"),
+            Self::OpenSsh(keys) => f.debug_tuple("OpenSsh").field(keys).finish(),
         }
     }
 }
@@ -102,16 +96,24 @@ mod unit {
         assert!(printed.contains("reader"));
     }
 
+    fn hop(host: &str, user: &str, auth: TunnelAuth) -> Hop {
+        Hop {
+            label: host.into(),
+            host: host.into(),
+            port: 2222,
+            user: user.into(),
+            auth,
+            verify_host_key: true,
+            known_hosts: Vec::new(),
+            host_key_alias: None,
+        }
+    }
+
     fn tunnel(auth: TunnelAuth) -> Tunnel {
         Tunnel {
-            host: "bastion.example".into(),
-            port: 2222,
-            user: "jump".into(),
-            auth,
+            hops: vec![hop("bastion.example", "jump", auth)],
             remote_host: "db.internal".into(),
             remote_port: 5432,
-            verify_host_key: true,
-            known_hosts: None,
         }
     }
 
@@ -136,5 +138,33 @@ mod unit {
         let printed = format!("{:?}", tunnel(TunnelAuth::Password("ssh-pass-19".into())));
         assert!(!printed.contains("ssh-pass-19"), "{printed}");
         assert!(printed.contains("Password"), "{printed}");
+    }
+
+    #[test]
+    fn l_affichage_debug_d_un_tunnel_a_deux_sauts_ne_contient_aucun_secret() {
+        let two_hops = Tunnel {
+            hops: vec![
+                hop(
+                    "jump.example",
+                    "first",
+                    TunnelAuth::Password("first-pass-61".into()),
+                ),
+                hop(
+                    "bastion.example",
+                    "second",
+                    TunnelAuth::PublicKey {
+                        key_path: "/keys/id_ed25519".into(),
+                        passphrase: Some("second-phrase-77".into()),
+                    },
+                ),
+            ],
+            remote_host: "db.internal".into(),
+            remote_port: 5432,
+        };
+        let printed = format!("{two_hops:?}");
+        assert!(!printed.contains("first-pass-61"), "{printed}");
+        assert!(!printed.contains("second-phrase-77"), "{printed}");
+        assert!(printed.contains("jump.example"), "{printed}");
+        assert!(printed.contains("bastion.example"), "{printed}");
     }
 }

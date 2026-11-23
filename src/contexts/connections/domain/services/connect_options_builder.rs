@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::contexts::connections::domain::types::{
-    ConnectOptions, ConnectParams, SshAuth, Tunnel, TunnelAuth,
+    ConnectOptions, ConnectParams, Hop, HostKeyPolicy, SshAuth, SshHop, Tunnel, TunnelAuth,
 };
 
 pub fn connect_options(params: &ConnectParams, known_hosts: Option<&Path>) -> ConnectOptions {
@@ -13,27 +13,50 @@ pub fn connect_options(params: &ConnectParams, known_hosts: Option<&Path>) -> Co
         password: params.password.expose().to_string(),
         sslmode: params.sslmode,
         tunnel: params.tunnel.as_ref().map(|tunnel| Tunnel {
-            host: tunnel.host.clone(),
-            port: tunnel.port,
-            user: tunnel.user.clone(),
-            auth: match &tunnel.auth {
-                SshAuth::PublicKey {
-                    key_path,
-                    passphrase,
-                } => TunnelAuth::PublicKey {
-                    key_path: key_path.clone(),
-                    passphrase: passphrase
-                        .as_ref()
-                        .map(|passphrase| passphrase.expose().to_string()),
-                },
-                SshAuth::Password(password) => TunnelAuth::Password(password.expose().to_string()),
-                SshAuth::Agent => TunnelAuth::Agent,
-            },
+            hops: tunnel
+                .hops
+                .iter()
+                .map(|hop| hop_options(hop, known_hosts))
+                .collect(),
             remote_host: tunnel.remote_host.clone(),
             remote_port: tunnel.remote_port,
-            verify_host_key: tunnel.verify_host_key,
-            known_hosts: known_hosts.map(Path::to_path_buf),
         }),
+    }
+}
+
+fn hop_options(hop: &SshHop, configured_known_hosts: Option<&Path>) -> Hop {
+    let (verify_host_key, known_hosts, host_key_alias) = match &hop.host_key {
+        HostKeyPolicy::Bypass => (false, Vec::new(), None),
+        HostKeyPolicy::Verify { known_hosts, alias } => (
+            true,
+            configured_known_hosts
+                .map(|path| vec![path.to_path_buf()])
+                .unwrap_or_else(|| known_hosts.clone()),
+            alias.clone(),
+        ),
+    };
+    Hop {
+        label: hop.label.clone(),
+        host: hop.host.clone(),
+        port: hop.port,
+        user: hop.user.clone(),
+        auth: match &hop.auth {
+            SshAuth::PublicKey {
+                key_path,
+                passphrase,
+            } => TunnelAuth::PublicKey {
+                key_path: key_path.clone(),
+                passphrase: passphrase
+                    .as_ref()
+                    .map(|passphrase| passphrase.expose().to_string()),
+            },
+            SshAuth::Password(password) => TunnelAuth::Password(password.expose().to_string()),
+            SshAuth::Agent => TunnelAuth::Agent,
+            SshAuth::OpenSsh(keys) => TunnelAuth::OpenSsh(keys.clone()),
+        },
+        verify_host_key,
+        known_hosts,
+        host_key_alias,
     }
 }
 
@@ -42,60 +65,100 @@ mod unit {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::contexts::connections::domain::types::{Secret, SslMode, TunnelParams};
+    use crate::contexts::connections::domain::types::{
+        PasswordSource, Secret, SslMode, TunnelParams,
+    };
 
-    fn tunneled(auth: SshAuth) -> ConnectParams {
+    fn tunneled(auth: SshAuth, host_key: HostKeyPolicy) -> ConnectParams {
         ConnectParams {
             host: "db.internal".into(),
             port: 5432,
             database: "app".into(),
             user: "reader".into(),
-            password: Secret::new("db-pass"),
-            password_is_azure_token: false,
+            password: PasswordSource::Resolved(Secret::new("db-pass")),
             sslmode: SslMode::Require,
             tunnel: Some(TunnelParams {
-                host: "bastion.example".into(),
-                port: 2222,
-                user: "jump".into(),
-                auth,
+                hops: vec![SshHop {
+                    label: "bastion.example".into(),
+                    host: "bastion.example".into(),
+                    port: 2222,
+                    user: "jump".into(),
+                    auth,
+                    host_key,
+                }],
                 remote_host: "db.internal".into(),
                 remote_port: 6432,
-                verify_host_key: false,
             }),
+        }
+    }
+
+    fn verified(known_hosts: Vec<PathBuf>) -> HostKeyPolicy {
+        HostKeyPolicy::Verify {
+            known_hosts,
+            alias: Some("bastion-alias".into()),
         }
     }
 
     #[test]
     fn un_tunnel_ssh_dbeaver_devient_un_tunnel_pg_avec_le_known_hosts_configure() {
-        let known_hosts = PathBuf::from("/etc/pg-pseudo/known_hosts");
+        let configured = PathBuf::from("/etc/pg-pseudo/known_hosts");
         let options = connect_options(
-            &tunneled(SshAuth::PublicKey {
-                key_path: PathBuf::from("/keys/id_ed25519"),
-                passphrase: Some(Secret::new("phrase")),
-            }),
-            Some(&known_hosts),
+            &tunneled(
+                SshAuth::PublicKey {
+                    key_path: PathBuf::from("/keys/id_ed25519"),
+                    passphrase: Some(Secret::new("phrase")),
+                },
+                verified(vec![PathBuf::from("/home/me/.ssh/known_hosts")]),
+            ),
+            Some(&configured),
         );
         assert_eq!(
             options.tunnel,
             Some(Tunnel {
-                host: "bastion.example".into(),
-                port: 2222,
-                user: "jump".into(),
-                auth: TunnelAuth::PublicKey {
-                    key_path: PathBuf::from("/keys/id_ed25519"),
-                    passphrase: Some("phrase".into()),
-                },
+                hops: vec![Hop {
+                    label: "bastion.example".into(),
+                    host: "bastion.example".into(),
+                    port: 2222,
+                    user: "jump".into(),
+                    auth: TunnelAuth::PublicKey {
+                        key_path: PathBuf::from("/keys/id_ed25519"),
+                        passphrase: Some("phrase".into()),
+                    },
+                    verify_host_key: true,
+                    known_hosts: vec![configured],
+                    host_key_alias: Some("bastion-alias".into()),
+                }],
                 remote_host: "db.internal".into(),
                 remote_port: 6432,
-                verify_host_key: false,
-                known_hosts: Some(PathBuf::from("/etc/pg-pseudo/known_hosts")),
             })
         );
-        let password = connect_options(&tunneled(SshAuth::Password(Secret::new("ssh-pass"))), None);
-        let tunnel = password.tunnel.expect("tunnel");
-        assert_eq!(tunnel.auth, TunnelAuth::Password("ssh-pass".into()));
-        assert_eq!(tunnel.known_hosts, None);
-        let agent = connect_options(&tunneled(SshAuth::Agent), None);
-        assert_eq!(agent.tunnel.expect("tunnel").auth, TunnelAuth::Agent);
+    }
+
+    #[test]
+    fn sans_known_hosts_configure_les_fichiers_du_saut_sont_conserves() {
+        let files = vec![
+            PathBuf::from("/home/me/.ssh/known_hosts"),
+            PathBuf::from("/etc/ssh/ssh_known_hosts"),
+        ];
+        let options = connect_options(&tunneled(SshAuth::Agent, verified(files.clone())), None);
+        let hop = options.tunnel.expect("tunnel").hops.remove(0);
+        assert_eq!(hop.known_hosts, files);
+        assert_eq!(hop.auth, TunnelAuth::Agent);
+    }
+
+    #[test]
+    fn un_saut_sans_verification_ne_porte_aucun_fichier_known_hosts() {
+        let configured = PathBuf::from("/etc/pg-pseudo/known_hosts");
+        let options = connect_options(
+            &tunneled(
+                SshAuth::Password(Secret::new("ssh-pass")),
+                HostKeyPolicy::Bypass,
+            ),
+            Some(&configured),
+        );
+        let hop = options.tunnel.expect("tunnel").hops.remove(0);
+        assert!(!hop.verify_host_key);
+        assert!(hop.known_hosts.is_empty());
+        assert_eq!(hop.auth, TunnelAuth::Password("ssh-pass".into()));
     }
 }

@@ -1,21 +1,23 @@
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use serde::Deserialize;
 
 use super::{AccessTokenFetcher, FetchedToken};
 use crate::contexts::connections::domain::errors::AccessTokenError;
 use crate::contexts::connections::domain::types::Secret;
+use crate::contexts::connections::infrastructure::data_sources::bounded_process::{
+    BoundedFailure, run_bounded,
+};
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const MAX_OUTPUT: usize = 1024 * 1024;
 
 pub struct AzureCli {
     command: Option<PathBuf>,
+    deadline: Duration,
 }
 
 #[derive(Deserialize)]
@@ -29,11 +31,20 @@ struct CliAnswer {
 
 impl AzureCli {
     pub fn new(command: Option<PathBuf>) -> Self {
-        Self { command }
+        Self {
+            command,
+            deadline: COMMAND_DEADLINE,
+        }
     }
 
     pub fn from_path() -> Self {
         Self::new(find_on_path(std::env::var_os("PATH")))
+    }
+
+    #[cfg(test)]
+    fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
     }
 }
 
@@ -42,7 +53,7 @@ impl AccessTokenFetcher for AzureCli {
         let Some(command) = &self.command else {
             return Err(AccessTokenError::CliNotInstalled);
         };
-        let output = run(command)?;
+        let output = run(command, self.deadline)?;
         if !output.success {
             return Err(AccessTokenError::SignInRequired);
         }
@@ -67,50 +78,26 @@ struct CommandOutput {
     stdout: Vec<u8>,
 }
 
-fn run(command: &Path) -> Result<CommandOutput, AccessTokenError> {
-    let mut child = Command::new(command)
-        .args([
+fn run(command: &Path, deadline: Duration) -> Result<CommandOutput, AccessTokenError> {
+    let output = run_bounded(
+        Command::new(command).args([
             "account",
             "get-access-token",
             "--resource-type",
             "oss-rdbms",
             "--output",
             "json",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => AccessTokenError::CliNotInstalled,
-            _ => AccessTokenError::SignInRequired,
-        })?;
-    let stdout = drain(child.stdout.take());
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < COMMAND_DEADLINE => thread::sleep(POLL_INTERVAL),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(AccessTokenError::SignInRequired);
-            }
-        }
-    };
+        ]),
+        deadline,
+        MAX_OUTPUT,
+    )
+    .map_err(|failure| match failure {
+        BoundedFailure::NotFound => AccessTokenError::CliNotInstalled,
+        _ => AccessTokenError::SignInRequired,
+    })?;
     Ok(CommandOutput {
-        success: status.success(),
-        stdout: stdout.join().unwrap_or_default(),
-    })
-}
-
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut buffer);
-        }
-        buffer
+        success: output.status.success(),
+        stdout: output.stdout,
     })
 }
 
@@ -219,6 +206,20 @@ echo '{"accessToken":"tok-abc","expires_on":1900000000,"expiresOn":"2030-03-17 1
         let error = fetch_with("echo 'not json tok-leak'").err().unwrap();
         assert_eq!(error, AccessTokenError::Unreadable);
         assert!(!error.to_string().contains("tok-leak"));
+    }
+
+    #[test]
+    fn un_descendant_en_arriere_plan_qui_garde_la_sortie_ouverte_respecte_le_delai() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_az(dir.path(), "sleep 30 &\necho '{}'");
+        let started = std::time::Instant::now();
+        let error = AzureCli::new(Some(path))
+            .with_deadline(Duration::from_millis(300))
+            .fetch()
+            .err()
+            .unwrap();
+        assert_eq!(error, AccessTokenError::SignInRequired);
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

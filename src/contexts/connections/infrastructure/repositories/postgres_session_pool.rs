@@ -5,12 +5,14 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::contexts::connections::domain::constants::CONNECT_DEADLINE;
-use crate::contexts::connections::domain::errors::{ConnectionError, SessionError};
+use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::repositories::{
-    AzureSignInTokenProvider, ConnectionCatalog, SessionPool,
+    AzureSignInTokenProvider, CommandPasswordProvider, ConnectionCatalog, SessionPool,
 };
 use crate::contexts::connections::domain::services::{connect_options, resolve_connection};
-use crate::contexts::connections::domain::types::{ConnectOptions, ExecutionLimits, QueryOutput};
+use crate::contexts::connections::domain::types::{
+    ConnectOptions, ExecutionLimits, PasswordSource, QueryOutput, Secret,
+};
 use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect_within,
 };
@@ -25,6 +27,7 @@ pub struct PostgresSessionPool {
     catalog: Arc<dyn ConnectionCatalog>,
     known_hosts: Option<PathBuf>,
     tokens: Arc<dyn AzureSignInTokenProvider>,
+    commands: Arc<dyn CommandPasswordProvider>,
     sessions: Mutex<SessionCache<Session>>,
     connect_deadline: Duration,
 }
@@ -34,11 +37,13 @@ impl PostgresSessionPool {
         catalog: Arc<dyn ConnectionCatalog>,
         known_hosts: Option<PathBuf>,
         tokens: Arc<dyn AzureSignInTokenProvider>,
+        commands: Arc<dyn CommandPasswordProvider>,
     ) -> Self {
         Self {
             catalog,
             known_hosts,
             tokens,
+            commands,
             sessions: Mutex::new(SessionCache::new(MAX_OTHER_DATABASE_SESSIONS)),
             connect_deadline: CONNECT_DEADLINE,
         }
@@ -71,38 +76,75 @@ impl PostgresSessionPool {
     async fn connect(
         &self,
         connection: &str,
-        options: ConnectOptions,
-        renewable_password: bool,
+        mut options: ConnectOptions,
+        source: &PasswordSource,
     ) -> Result<Session, ConnectionError> {
+        if let Some(argv) = source.command() {
+            options.password = self
+                .command_password(connection, argv, false)
+                .await?
+                .expose()
+                .to_string();
+        }
         let connect_failed = |source| ConnectionError::ConnectFailed {
             connection: connection.to_string(),
             source: redact_connection_identity(source, &options),
         };
-        match connect_within(&options, self.connect_deadline).await {
-            Err(refused) if renewable_password && refused.is_authentication_failure() => self
-                .retry_with_renewed_token(&options)
-                .await?
-                .map_err(connect_failed),
-            other => other.map_err(connect_failed),
-        }
+        let command = source.command().map(<[String]>::to_vec);
+        let refused = match connect_within(&options, self.connect_deadline).await {
+            Err(refused) if refused.is_authentication_failure() => refused,
+            other => {
+                return other
+                    .map(|session| session.with_password_command(command))
+                    .map_err(connect_failed);
+            }
+        };
+        let renewed = match source {
+            PasswordSource::AzureToken(_) => self.renewed_token().await?,
+            PasswordSource::Command(argv) => self.command_password(connection, argv, true).await?,
+            PasswordSource::Resolved(_) => return Err(connect_failed(refused)),
+        };
+        let options = ConnectOptions {
+            password: renewed.expose().to_string(),
+            ..options.clone()
+        };
+        connect_within(&options, self.connect_deadline)
+            .await
+            .map(|session| session.with_password_command(command))
+            .map_err(connect_failed)
     }
 
-    async fn retry_with_renewed_token(
-        &self,
-        options: &ConnectOptions,
-    ) -> Result<Result<Session, SessionError>, ConnectionError> {
+    async fn renewed_token(&self) -> Result<Secret, ConnectionError> {
         let tokens = self.tokens.clone();
-        let token = tokio::task::spawn_blocking(move || tokens.renewed_access_token())
+        tokio::task::spawn_blocking(move || tokens.renewed_access_token())
             .await
             .map_err(|_| ConnectionError::discovery_interrupted())?
             .map_err(|error| ConnectionError::Unavailable {
                 reason: error.to_string(),
-            })?;
-        let options = ConnectOptions {
-            password: token.expose().to_string(),
-            ..options.clone()
-        };
-        Ok(connect_within(&options, self.connect_deadline).await)
+            })
+    }
+
+    async fn command_password(
+        &self,
+        connection: &str,
+        argv: &[String],
+        renew: bool,
+    ) -> Result<Secret, ConnectionError> {
+        let commands = self.commands.clone();
+        let connection = connection.to_string();
+        let argv = argv.to_vec();
+        tokio::task::spawn_blocking(move || {
+            if renew {
+                commands.renewed_password(&connection, &argv)
+            } else {
+                commands.password(&connection, &argv)
+            }
+        })
+        .await
+        .map_err(|_| ConnectionError::discovery_interrupted())?
+        .map_err(|error| ConnectionError::Unavailable {
+            reason: error.to_string(),
+        })
     }
 
     #[cfg(test)]
@@ -118,6 +160,19 @@ impl PostgresSessionPool {
             .expect("idle pool")
             .slot(connection, database, true);
         *slot.try_lock().expect("idle slot") = Some(session);
+    }
+}
+
+fn reusable(cached: &Session, wanted: &ConnectOptions, source: &PasswordSource) -> bool {
+    match source {
+        PasswordSource::Command(argv) => {
+            let wanted = ConnectOptions {
+                password: cached.options().password.clone(),
+                ..wanted.clone()
+            };
+            cached.password_command() == Some(argv.as_slice()) && cached.options() == &wanted
+        }
+        _ => cached.password_command().is_none() && cached.options() == wanted,
     }
 }
 
@@ -145,20 +200,15 @@ impl SessionPool for PostgresSessionPool {
             .await;
         let mut cached = slot.clone().lock_owned().await;
         let session = match cached.take() {
-            Some(session) if session.options() == &options => session,
-            _ => {
-                match self
-                    .connect(connection, options, params.password_is_azure_token)
-                    .await
-                {
-                    Ok(session) => session,
-                    Err(error) => {
-                        drop(cached);
-                        self.forget(connection, &params.database, &slot).await;
-                        return Err(error);
-                    }
+            Some(session) if reusable(&session, &options, &params.password) => session,
+            _ => match self.connect(connection, options, &params.password).await {
+                Ok(session) => session,
+                Err(error) => {
+                    drop(cached);
+                    self.forget(connection, &params.database, &slot).await;
+                    return Err(error);
                 }
-            }
+            },
         };
         let session = cached.insert(session);
         session
@@ -179,9 +229,10 @@ mod integration {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::contexts::connections::domain::errors::AccessTokenError;
+    use crate::contexts::connections::domain::errors::{AccessTokenError, PasswordCommandError};
     use crate::contexts::connections::domain::types::{
-        Cell, ConnectParams, ConnectionEntry, ConnectionStatus, Discovery, Secret, SslMode,
+        Cell, ConnectParams, ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery,
+        SslMode,
     };
     use crate::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
     use crate::contexts::connections::infrastructure::repositories::DbeaverConnectionCatalog;
@@ -243,6 +294,18 @@ mod integration {
         }
     }
 
+    struct NoCommands;
+
+    impl CommandPasswordProvider for NoCommands {
+        fn password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            Err(PasswordCommandError::NotFound)
+        }
+
+        fn renewed_password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            Err(PasswordCommandError::NotFound)
+        }
+    }
+
     fn pool_for(root: &Path) -> PostgresSessionPool {
         PostgresSessionPool::new(
             Arc::new(DbeaverConnectionCatalog::new(
@@ -251,6 +314,7 @@ mod integration {
             )),
             None,
             Arc::new(NoTokens),
+            Arc::new(NoCommands),
         )
     }
 
@@ -266,6 +330,8 @@ mod integration {
                 connections: vec![ConnectionEntry {
                     id: "azure".into(),
                     name: "azure".into(),
+                    declared_name: "azure".into(),
+                    source: ConnectionSource::File,
                     folder: None,
                     project: "General".into(),
                     engine: "postgresql".into(),
@@ -319,8 +385,11 @@ mod integration {
             port: config.get_ports().first().copied().unwrap_or(5432),
             database: config.get_dbname().unwrap_or("pgpseudo").to_string(),
             user: config.get_user().unwrap_or("pgpseudo").to_string(),
-            password: Secret::new(password),
-            password_is_azure_token: azure,
+            password: if azure {
+                PasswordSource::AzureToken(Secret::new(password))
+            } else {
+                PasswordSource::Resolved(Secret::new(password))
+            },
             sslmode: SslMode::Disable,
             tunnel: None,
         }
@@ -332,7 +401,245 @@ mod integration {
     }
 
     fn azure_pool(params: ConnectParams, tokens: Arc<ScriptedTokens>) -> PostgresSessionPool {
-        PostgresSessionPool::new(Arc::new(FixedCatalog(params)), None, tokens)
+        PostgresSessionPool::new(
+            Arc::new(FixedCatalog(params)),
+            None,
+            tokens,
+            Arc::new(NoCommands),
+        )
+    }
+
+    struct ScriptedCommand {
+        passwords: Vec<Result<Secret, PasswordCommandError>>,
+        runs: AtomicUsize,
+        renewals: AtomicUsize,
+    }
+
+    impl ScriptedCommand {
+        fn new(passwords: Vec<Result<Secret, PasswordCommandError>>) -> Arc<Self> {
+            Arc::new(Self {
+                passwords,
+                runs: AtomicUsize::new(0),
+                renewals: AtomicUsize::new(0),
+            })
+        }
+
+        fn next(&self) -> Result<Secret, PasswordCommandError> {
+            let run = self.runs.fetch_add(1, Ordering::SeqCst);
+            self.passwords[run.min(self.passwords.len() - 1)].clone()
+        }
+
+        fn runs(&self) -> usize {
+            self.runs.load(Ordering::SeqCst)
+        }
+    }
+
+    impl CommandPasswordProvider for ScriptedCommand {
+        fn password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            self.next()
+        }
+
+        fn renewed_password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            self.renewals.fetch_add(1, Ordering::SeqCst);
+            self.next()
+        }
+    }
+
+    fn command_params(argv: &[&str]) -> ConnectParams {
+        ConnectParams {
+            password: PasswordSource::Command(argv.iter().map(ToString::to_string).collect()),
+            ..local_params("unused", false)
+        }
+    }
+
+    fn command_pool(params: ConnectParams, commands: Arc<ScriptedCommand>) -> PostgresSessionPool {
+        PostgresSessionPool::new(
+            Arc::new(FixedCatalog(params)),
+            None,
+            Arc::new(NoTokens),
+            commands,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn une_connexion_en_mode_commande_ouvre_sa_session_avec_le_mot_de_passe_de_la_commande() {
+        let commands = ScriptedCommand::new(vec![Ok(real_password())]);
+        let pool = command_pool(command_params(&["pw"]), commands.clone());
+        let output = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect("the command password connects");
+        assert_eq!(output.rows.len(), 1);
+        assert_eq!(commands.runs(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn la_session_en_cache_est_reutilisee_sans_relancer_la_commande() {
+        let commands = ScriptedCommand::new(vec![Ok(real_password())]);
+        let pool = command_pool(command_params(&["pw"]), commands.clone());
+        let first = backend_and_database(&pool, None).await;
+        let second = backend_and_database(&pool, None).await;
+        assert_eq!(first.0, second.0);
+        assert_eq!(commands.runs(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn un_mot_de_passe_de_commande_refuse_relance_la_commande_exactement_une_fois() {
+        let commands = ScriptedCommand::new(vec![Ok(Secret::new("stale")), Ok(real_password())]);
+        let pool = command_pool(command_params(&["pw"]), commands.clone());
+        let output = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect("the renewed password connects");
+        assert_eq!(output.rows.len(), 1);
+        assert_eq!(commands.runs(), 2);
+        assert_eq!(commands.renewals.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn deux_mots_de_passe_de_commande_refuses_echouent_sans_troisieme_execution() {
+        let commands = ScriptedCommand::new(vec![
+            Ok(Secret::new("stale-one")),
+            Ok(Secret::new("stale-two")),
+        ]);
+        let pool = command_pool(command_params(&["pw"]), commands.clone());
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("both passwords are refused");
+        assert!(
+            matches!(
+                &error,
+                ConnectionError::ConnectFailed { source, .. } if source.is_authentication_failure()
+            ),
+            "{error:?}"
+        );
+        assert_eq!(commands.runs(), 2);
+        let text = error.to_string();
+        assert!(
+            !text.contains("stale-one") && !text.contains("stale-two"),
+            "{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn une_commande_en_echec_rend_un_motif_fixe_avec_le_statut_et_sans_sa_sortie() {
+        let commands = ScriptedCommand::new(vec![Err(PasswordCommandError::ExitStatus(44))]);
+        let offline = ConnectParams {
+            host: "localhost".to_string(),
+            port: 5432,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["pw".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let pool = command_pool(offline, commands);
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("the command fails");
+        assert_eq!(
+            error,
+            ConnectionError::Unavailable {
+                reason: "the password command exited with status 44".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn une_commande_de_mot_de_passe_modifiee_remplace_la_session_en_cache_au_prochain_appel()
+    {
+        let offline = ConnectParams {
+            host: "127.0.0.1".to_string(),
+            port: refused_port().await,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["new".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let commands = ScriptedCommand::new(vec![Ok(Secret::new("fresh"))]);
+        let pool = command_pool(offline.clone(), commands.clone());
+        let params = resolve_connection(&pool.catalog.discover(), "azure").expect("params");
+        let cached = Session::idle(ConnectOptions {
+            password: "from-old-command".to_string(),
+            ..connect_options(&params, None)
+        })
+        .with_password_command(Some(vec!["old".to_string()]));
+        pool.cache_for_tests("azure", &params.database, cached);
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("the closed port refuses the new connection");
+        assert!(
+            matches!(error, ConnectionError::ConnectFailed { .. }),
+            "{error:?}"
+        );
+        assert_eq!(commands.runs(), 1);
+    }
+
+    async fn refusing_server(sqlstate: &'static str) -> (u16, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut startup = [0u8; 1024];
+                let _ = socket.read(&mut startup).await;
+                let mut fields = Vec::new();
+                for (tag, text) in [(b'S', "FATAL"), (b'C', sqlstate), (b'M', "no access")] {
+                    fields.push(tag);
+                    fields.extend_from_slice(text.as_bytes());
+                    fields.push(0);
+                }
+                fields.push(0);
+                let mut message = vec![b'E'];
+                message.extend_from_slice(&((fields.len() as u32 + 4).to_be_bytes()));
+                message.extend_from_slice(&fields);
+                let _ = socket.write_all(&message).await;
+            }
+        });
+        (port, accepted)
+    }
+
+    #[tokio::test]
+    async fn un_refus_d_autorisation_28000_relance_la_commande_exactement_une_fois() {
+        let (port, accepted) = refusing_server("28000").await;
+        let offline = ConnectParams {
+            host: "127.0.0.1".to_string(),
+            port,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["pw".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let commands = ScriptedCommand::new(vec![Ok(Secret::new("one")), Ok(Secret::new("two"))]);
+        let pool = command_pool(offline, commands.clone());
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("both passwords are refused");
+        assert!(
+            matches!(
+                &error,
+                ConnectionError::ConnectFailed { source, .. } if source.is_authentication_failure()
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("28000"), "{error}");
+        assert_eq!(commands.runs(), 2);
+        assert_eq!(commands.renewals.load(Ordering::SeqCst), 1);
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -420,7 +727,7 @@ mod integration {
     async fn une_base_absente_rend_le_code_et_le_message_du_serveur() {
         let tokens = ScriptedTokens::new(Ok(real_password()));
         let mut params = local_params("unused", false);
-        params.password = real_password();
+        params.password = PasswordSource::Resolved(real_password());
         params.database = "absent_database_for_test".to_string();
         let pool = azure_pool(params, tokens);
         let error = pool

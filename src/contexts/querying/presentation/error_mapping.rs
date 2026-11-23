@@ -44,7 +44,7 @@ pub fn tool_error(error: QueryingError) -> ToolError {
             "connection_unavailable",
             reason,
         )
-        .with_hint("ask the developer to fix the connection in DBeaver"),
+        .with_hint("ask the developer to fix the connection definition (connection file or DBeaver)"),
         QueryingError::MissingConnectParams => ToolError::new(
             ErrorCategory::Internal,
             "missing_connect_params",
@@ -155,7 +155,7 @@ mod unit {
         assert!(error.message.contains("no saved password"));
         assert_eq!(
             error.hint.as_deref(),
-            Some("ask the developer to fix the connection in DBeaver")
+            Some("ask the developer to fix the connection definition (connection file or DBeaver)")
         );
     }
 }

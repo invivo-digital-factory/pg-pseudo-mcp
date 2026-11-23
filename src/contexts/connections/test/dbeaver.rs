@@ -36,7 +36,7 @@ impl AzureSignInTokenProvider for NoTokens {
     }
 }
 
-static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn discover(home: Option<&Path>) -> Discovery {
     discover_in(home, None)
@@ -628,11 +628,11 @@ mod integration {
         assert_eq!(params.port, 5433);
         assert_eq!(params.password.expose(), "db-pw");
         let tunnel = tunnel_of(entry);
-        assert_eq!(tunnel.host, "bastion.example");
-        assert_eq!(tunnel.port, 2228);
-        assert_eq!(tunnel.user, "ssh-user");
+        assert_eq!(tunnel.hops[0].host, "bastion.example");
+        assert_eq!(tunnel.hops[0].port, 2228);
+        assert_eq!(tunnel.hops[0].user, "ssh-user");
         assert_eq!(
-            tunnel.auth,
+            tunnel.hops[0].auth,
             SshAuth::PublicKey {
                 key_path: key,
                 passphrase: Some(Secret::new("key-passphrase")),
@@ -640,7 +640,7 @@ mod integration {
         );
         assert_eq!(tunnel.remote_host, "db.internal.example");
         assert_eq!(tunnel.remote_port, 5433);
-        assert!(tunnel.verify_host_key);
+        assert!(tunnel.hops[0].host_key.is_verified());
     }
 
     #[test]
@@ -653,7 +653,7 @@ mod integration {
             json!({ "user": "ssh-user" }),
         ));
         assert_eq!(
-            tunnel.auth,
+            tunnel.hops[0].auth,
             SshAuth::PublicKey {
                 key_path: key,
                 passphrase: None
@@ -702,8 +702,11 @@ mod integration {
             json!({ "authType": "PASSWORD", "port": "2222" }),
             json!({ "user": "ssh-user", "password": "ssh-pw" }),
         ));
-        assert_eq!(tunnel.port, 2222);
-        assert_eq!(tunnel.auth, SshAuth::Password(Secret::new("ssh-pw")));
+        assert_eq!(tunnel.hops[0].port, 2222);
+        assert_eq!(
+            tunnel.hops[0].auth,
+            SshAuth::Password(Secret::new("ssh-pw"))
+        );
     }
 
     #[test]
@@ -742,8 +745,8 @@ mod integration {
             json!({ "authType": "AGENT", "port": null }),
             json!({ "user": "ssh-user" }),
         ));
-        assert_eq!(tunnel.auth, SshAuth::Agent);
-        assert_eq!(tunnel.port, 22);
+        assert_eq!(tunnel.hops[0].auth, SshAuth::Agent);
+        assert_eq!(tunnel.hops[0].port, 22);
     }
 
     #[test]
@@ -755,7 +758,7 @@ mod integration {
                 json!({ "authType": "AGENT", "bypassHostVerification": bypass }),
                 json!({ "user": "ssh-user" }),
             ));
-            assert!(!tunnel.verify_host_key);
+            assert!(!tunnel.hops[0].host_key.is_verified());
         }
         let home = TempDir::new().unwrap();
         let tunnel = tunnel_of(tunneled(
@@ -763,7 +766,7 @@ mod integration {
             json!({ "authType": "AGENT", "bypassHostVerification": false }),
             json!({ "user": "ssh-user" }),
         ));
-        assert!(tunnel.verify_host_key);
+        assert!(tunnel.hops[0].host_key.is_verified());
     }
 
     #[test]
@@ -785,8 +788,11 @@ mod integration {
             )),
         );
         let tunnel = tunnel_of(only(home.path()));
-        assert_eq!(tunnel.user, "handler-user");
-        assert_eq!(tunnel.auth, SshAuth::Password(Secret::new("handler-pw")));
+        assert_eq!(tunnel.hops[0].user, "handler-user");
+        assert_eq!(
+            tunnel.hops[0].auth,
+            SshAuth::Password(Secret::new("handler-pw"))
+        );
         assert_eq!(tunnel.remote_host, "10.0.0.7");
         assert_eq!(tunnel.remote_port, 5433);
     }
@@ -810,11 +816,11 @@ mod integration {
             }),
             json!({ "user": "${PGMCP_TEST_SSH_USER_UNSET:ssh-default}" }),
         ));
-        assert_eq!(tunnel.host, "bastion.default");
-        assert_eq!(tunnel.port, 2200);
-        assert_eq!(tunnel.user, "ssh-default");
+        assert_eq!(tunnel.hops[0].host, "bastion.default");
+        assert_eq!(tunnel.hops[0].port, 2200);
+        assert_eq!(tunnel.hops[0].user, "ssh-default");
         assert_eq!(
-            tunnel.auth,
+            tunnel.hops[0].auth,
             SshAuth::PublicKey {
                 key_path: key,
                 passphrase: None
@@ -922,7 +928,7 @@ mod integration {
         let params = shop.params.unwrap();
         assert_eq!(params.user, "reader");
         assert_eq!(params.password.expose(), r"p:gp\ss");
-        assert_eq!(params.tunnel.unwrap().host, "bastion.example");
+        assert_eq!(params.tunnel.unwrap().hops[0].host, "bastion.example");
         assert_eq!(
             by_name("Billing").status,
             ConnectionStatus::Unavailable {

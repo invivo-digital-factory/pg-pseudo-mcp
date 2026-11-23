@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::password_source::PasswordSource;
 use super::secret::Secret;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,12 +15,49 @@ pub enum SslMode {
 }
 
 impl SslMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disable => "disable",
+            Self::Allow => "allow",
+            Self::Prefer => "prefer",
+            Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
+            Self::VerifyFull => "verify-full",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "disable" => Some(Self::Disable),
+            "allow" => Some(Self::Allow),
+            "prefer" => Some(Self::Prefer),
+            "require" => Some(Self::Require),
+            "verify-ca" => Some(Self::VerifyCa),
+            "verify-full" => Some(Self::VerifyFull),
+            _ => None,
+        }
+    }
+
     pub fn at_least_require(self) -> Self {
         match self {
             Self::Disable | Self::Allow | Self::Prefer => Self::Require,
             strict => strict,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshAgent {
+    Environment,
+    Socket(PathBuf),
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSshKeys {
+    pub identity_files: Vec<PathBuf>,
+    pub agent: SshAgent,
+    pub identities_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,17 +68,39 @@ pub enum SshAuth {
     },
     Password(Secret),
     Agent,
+    OpenSsh(OpenSshKeys),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TunnelParams {
+pub enum HostKeyPolicy {
+    Bypass,
+    Verify {
+        known_hosts: Vec<PathBuf>,
+        alias: Option<String>,
+    },
+}
+
+impl HostKeyPolicy {
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verify { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshHop {
+    pub label: String,
     pub host: String,
     pub port: u16,
     pub user: String,
     pub auth: SshAuth,
+    pub host_key: HostKeyPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelParams {
+    pub hops: Vec<SshHop>,
     pub remote_host: String,
     pub remote_port: u16,
-    pub verify_host_key: bool,
 }
 
 #[derive(Clone)]
@@ -49,8 +109,7 @@ pub struct ConnectParams {
     pub port: u16,
     pub database: String,
     pub user: String,
-    pub password: Secret,
-    pub password_is_azure_token: bool,
+    pub password: PasswordSource,
     pub sslmode: SslMode,
     pub tunnel: Option<TunnelParams>,
 }
@@ -63,7 +122,6 @@ impl fmt::Debug for ConnectParams {
             .field("database", &self.database)
             .field("user", &self.user)
             .field("password", &self.password)
-            .field("password_is_azure_token", &self.password_is_azure_token)
             .field("sslmode", &self.sslmode)
             .field("tunnel", &self.tunnel)
             .finish()
