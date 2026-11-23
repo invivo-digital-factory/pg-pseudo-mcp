@@ -237,7 +237,10 @@ fn un_fichier_illisible_comme_toml_est_signale_avec_sa_ligne_et_bloque_dbeaver()
 }
 
 fn context_for(path: &Path) -> ConnectionsContext {
+    let ssh_config = path.with_file_name("ssh_config");
+    fs::write(&ssh_config, "").unwrap();
     ConnectionsContext::new(&AppConfig {
+        ssh_config: Some(ssh_config),
         connections_file: Some(path.to_path_buf()),
         ..AppConfig::default()
     })

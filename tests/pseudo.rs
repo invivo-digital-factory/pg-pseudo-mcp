@@ -22,6 +22,10 @@ mod e2e {
         let mut refused = Command::new(binary)
             .args(["mapping", "purge"])
             .env("PG_PSEUDO_DATA_DIR", dir.path())
+            .env(
+                "PG_PSEUDO_CONNECTIONS_FILE",
+                dir.path().join("absent-connections.toml"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -35,6 +39,10 @@ mod e2e {
         let mut confirmed = Command::new(binary)
             .args(["mapping", "purge"])
             .env("PG_PSEUDO_DATA_DIR", dir.path())
+            .env(
+                "PG_PSEUDO_CONNECTIONS_FILE",
+                dir.path().join("absent-connections.toml"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

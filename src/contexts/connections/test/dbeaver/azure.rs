@@ -321,13 +321,15 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
     let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
     use_pgpass(&setup);
     mixed_workspace(&setup);
+    let ssh_config = setup.home.path().join("ssh_config");
+    fs::write(&ssh_config, "").unwrap();
     let context = ConnectionsContext::with_azure_command(
         &AppConfig {
             dbeaver_home: Some(setup.home.path().to_path_buf()),
             data_dir: None,
             ssh_known_hosts: None,
-            ssh_config: None,
-            connections_file: None,
+            ssh_config: Some(ssh_config),
+            connections_file: Some(setup.home.path().join("absent-connections.toml")),
         },
         Some(setup.bin.path().join("az")),
     );

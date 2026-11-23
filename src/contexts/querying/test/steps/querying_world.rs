@@ -63,12 +63,14 @@ impl QueryingWorld {
 
     pub fn connect_to_test_database(&mut self) {
         write_workspace(self._dbeaver.path(), &database_target(), true, None);
+        let ssh_config = self._data.path().join("ssh_config");
+        std::fs::write(&ssh_config, "").expect("empty ssh config");
         let config = AppConfig {
             dbeaver_home: Some(self._dbeaver.path().to_path_buf()),
             data_dir: Some(self._data.path().to_path_buf()),
             ssh_known_hosts: None,
-            ssh_config: None,
-            connections_file: None,
+            ssh_config: Some(ssh_config),
+            connections_file: Some(self._data.path().join("absent-connections.toml")),
         };
         let anonymization = AnonymizationInjector::new(self._data.path()).use_cases();
         self.contexts = Some(Arc::new(Contexts::with_anonymization(

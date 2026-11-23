@@ -24,6 +24,14 @@ impl McpProcess {
         let mut child = Command::new(env!("CARGO_BIN_EXE_pg-pseudo-mcp"))
             .env("PG_PSEUDO_DBEAVER_HOME", dbeaver.path())
             .env("PG_PSEUDO_DATA_DIR", data.path())
+            .env(
+                "PG_PSEUDO_CONNECTIONS_FILE",
+                data.path().join("absent-connections.toml"),
+            )
+            .env(
+                "PG_PSEUDO_SSH_CONFIG",
+                common::isolated_ssh_config(data.path()),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

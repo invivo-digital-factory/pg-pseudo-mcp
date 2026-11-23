@@ -41,7 +41,12 @@ impl ConnectionsWorld {
             import_outcome: None,
         };
         std::fs::write(world.connections_file(), "").expect("empty connection file");
-        world
+        let ssh_config = world.config_dir.path().join("ssh_config");
+        std::fs::write(&ssh_config, "").expect("empty ssh config");
+        Self {
+            ssh_config: Some(ssh_config),
+            ..world
+        }
     }
 
     pub fn connections_file(&self) -> PathBuf {
