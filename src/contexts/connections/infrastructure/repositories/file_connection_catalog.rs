@@ -5,14 +5,15 @@ use std::sync::Arc;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::types::Discovery;
 use crate::contexts::connections::infrastructure::data_sources::connection_file::{
-    FileEvaluator, Location, locate_from_environment, parse_file,
+    DbeaverAccess, FileEvaluator, Location, locate_from_environment, parse_file,
 };
 use crate::contexts::connections::infrastructure::data_sources::openssh::OpenSshResolver;
 
 pub struct FileLoad {
     pub discovery: Discovery,
-    pub read_dbeaver: bool,
+    pub dbeaver: DbeaverAccess,
     pub empty_hint: String,
+    pub path: Option<PathBuf>,
 }
 
 pub struct FileConnectionCatalog {
@@ -42,8 +43,9 @@ impl FileConnectionCatalog {
                 connections: Vec::new(),
                 hint: None,
             },
-            read_dbeaver: true,
+            dbeaver: DbeaverAccess::Read,
             empty_hint,
+            path: location.as_ref().map(|location| location.path.clone()),
         };
         let Some(location) = location else {
             return load;
@@ -54,6 +56,11 @@ impl FileConnectionCatalog {
                 return load;
             }
             Err(error) => {
+                load.dbeaver = if error.kind() == ErrorKind::NotFound {
+                    DbeaverAccess::Read
+                } else {
+                    DbeaverAccess::Blocked
+                };
                 load.discovery.hint = Some(if error.kind() == ErrorKind::NotFound {
                     format!(
                         "PG_PSEUDO_CONNECTIONS_FILE points at {}, which does not exist",
@@ -71,8 +78,9 @@ impl FileConnectionCatalog {
         let parsed = match parse_file(&contents) {
             Ok(parsed) => parsed,
             Err(error) => {
+                load.dbeaver = DbeaverAccess::Blocked;
                 load.discovery.hint = Some(format!(
-                    "the connection file {} cannot be parsed (line {}, column {}); fix its syntax",
+                    "the connection file {} cannot be parsed (line {}, column {}); fix its syntax; DBeaver connections are unavailable until then",
                     location.path.display(),
                     error.line,
                     error.column
@@ -86,7 +94,7 @@ impl FileConnectionCatalog {
             .iter()
             .map(|entry| evaluator.entry(entry))
             .collect();
-        load.read_dbeaver = parsed.read_dbeaver;
+        load.dbeaver = parsed.dbeaver;
         if !parsed.notes.is_empty() {
             load.discovery.hint = Some(format!(
                 "the connection file {} has problems: {}",

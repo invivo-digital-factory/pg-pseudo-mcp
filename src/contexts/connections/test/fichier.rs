@@ -11,6 +11,7 @@ use crate::contexts::connections::domain::types::{
     ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery, SslMode,
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
+use crate::contexts::connections::infrastructure::data_sources::connection_file::DbeaverAccess;
 use crate::contexts::connections::infrastructure::data_sources::openssh::{
     LocalEnvironment, OpenSshResolver, SshCommand,
 };
@@ -210,18 +211,18 @@ fn un_fichier_nomme_par_la_variable_et_absent_est_signale_avec_son_chemin() {
     assert!(hint.contains("does not exist"), "{hint}");
     assert!(hint.contains(&setup.file().display().to_string()), "{hint}");
     assert!(load.discovery.connections.is_empty());
-    assert!(load.read_dbeaver);
+    assert_eq!(load.dbeaver, DbeaverAccess::Read);
 }
 
 #[test]
-fn un_fichier_illisible_comme_toml_est_signale_avec_sa_ligne_et_laisse_dbeaver_actif() {
+fn un_fichier_illisible_comme_toml_est_signale_avec_sa_ligne_et_bloque_dbeaver() {
     let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     setup.write("[[connection]]\nname = \"a\" \"b\"\n");
     let load = setup.catalog_with(None).load(None);
     let hint = load.discovery.hint.expect("hint");
     assert!(hint.contains("line 2"), "{hint}");
-    assert!(load.read_dbeaver);
+    assert_eq!(load.dbeaver, DbeaverAccess::Blocked);
 }
 
 fn context_for(path: &Path) -> ConnectionsContext {

@@ -83,7 +83,7 @@ ssh_alias = "corp-jump-ledger"
 | `ssh_alias` | A `Host` alias of `~/.ssh/config` |
 | `read_dbeaver` | Top-level; `false` turns the DBeaver source off entirely (default `true`) |
 
-Edits to the file are picked up at the next tool call. A key that holds a secret (`password`, `token`, `passphrase`, any key containing `password` except `password_command`), an unknown key or an invalid value makes that entry unavailable, with a reason that names the field; two entries with the same name are both unavailable. A file that cannot be parsed is reported in the `list_connections` hint with its line and column (never its content), and the DBeaver connections stay listed. A missing default file is silent; a missing file named by `PG_PSEUDO_CONNECTIONS_FILE` is reported with its path.
+Edits to the file are picked up at the next tool call. A key that holds a secret (`password`, `token`, `passphrase`, any key containing `password` except `password_command`), an unknown key or an invalid value makes that entry unavailable, with a reason that names the field; two entries with the same name are both unavailable. A file that exists but cannot be parsed or read, or that has an invalid `read_dbeaver` value or an unknown or secret-shaped top-level key, is reported in the `list_connections` hint (with its line and column for a syntax error, never its content), and the DBeaver connections stay listed but unavailable, with a reason naming the connection file, until it is fixed: a broken file cannot silently re-expose connections it was meant to shadow or turn off. With a readable `read_dbeaver = false`, DBeaver stays off. A missing default file is silent; a missing file named by `PG_PSEUDO_CONNECTIONS_FILE` is reported with its path.
 
 ### Authentication modes
 

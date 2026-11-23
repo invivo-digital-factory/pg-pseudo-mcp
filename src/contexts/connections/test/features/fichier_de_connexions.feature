@@ -35,7 +35,7 @@ Fonctionnalité: Fichier de connexions
     Alors la connexion "canary-local" n'est listée qu'une seule fois
     Et la connexion "canary-local" est listée avec la source "file"
 
-  Scénario: Un fichier avec une erreur de syntaxe est signalé avec sa ligne et laisse DBeaver listé
+  Scénario: Un fichier avec une erreur de syntaxe est signalé avec sa ligne et rend les connexions DBeaver indisponibles
     Étant donné un espace de travail DBeaver avec les connexions "dbeaver-a" et "dbeaver-b" dont les mots de passe sont enregistrés
     Et le fichier de connexions suivant :
       """
@@ -54,8 +54,30 @@ Fonctionnalité: Fichier de connexions
       """
     Quand l'agent liste les connexions
     Alors l'indice cite la ligne 12
-    Et la connexion "dbeaver-a" est listée comme disponible
-    Et la connexion "dbeaver-b" est listée comme disponible
+    Et la connexion "dbeaver-a" est listée comme indisponible
+    Et la connexion "dbeaver-b" est listée comme indisponible
+    Et la raison de la connexion "dbeaver-a" contient "connection file"
+
+  Scénario: Une valeur invalide de read_dbeaver rend les connexions DBeaver indisponibles
+    Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
+    Et le fichier de connexions suivant :
+      """
+      read_dbeaver = "no"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "canary-local" est listée comme indisponible
+    Et la raison de la connexion "canary-local" contient "connection file"
+
+  Scénario: Une clé de premier niveau qui porte un secret rend les connexions DBeaver indisponibles sans le recopier
+    Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
+    Et le fichier de connexions suivant :
+      """
+      password = "zq7x-top-level"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "canary-local" est listée comme indisponible
+    Et la raison de la connexion "canary-local" contient "connection file"
+    Et l'indice ne contient pas "zq7x-top-level"
 
   Scénario: Une erreur de syntaxe sur une ligne qui porte un mot de passe ne le recopie pas dans l'indice
     Étant donné le fichier de connexions suivant :

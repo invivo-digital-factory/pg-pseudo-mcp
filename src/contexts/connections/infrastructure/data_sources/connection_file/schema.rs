@@ -34,9 +34,16 @@ pub struct RawEntry {
     pub definition: Result<ConnectionDefinition, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbeaverAccess {
+    Read,
+    Off,
+    Blocked,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedFile {
-    pub read_dbeaver: bool,
+    pub dbeaver: DbeaverAccess,
     pub entries: Vec<RawEntry>,
     pub notes: Vec<String>,
 }
@@ -48,12 +55,17 @@ pub fn parse_file(contents: &str) -> Result<ParsedFile, SyntaxError> {
     })?;
     let mut notes = Vec::new();
     let mut read_dbeaver = true;
+    let mut file_level_problem = false;
     let mut tables: Vec<&Table> = Vec::new();
     for (key, value) in &table {
         match (key.as_str(), value) {
             ("read_dbeaver", Value::Boolean(flag)) => read_dbeaver = *flag,
             ("read_dbeaver", _) => {
-                notes.push("`read_dbeaver` must be true or false; DBeaver stays on".to_string());
+                file_level_problem = true;
+                notes.push(
+                    "`read_dbeaver` must be true or false; DBeaver connections are unavailable until it is fixed"
+                        .to_string(),
+                );
             }
             ("connection", Value::Array(items)) => {
                 for item in items {
@@ -66,7 +78,10 @@ pub fn parse_file(contents: &str) -> Result<ParsedFile, SyntaxError> {
             ("connection", _) => notes.push(
                 "`connection` must be an array of tables, written [[connection]]".to_string(),
             ),
-            (other, _) => notes.push(top_level_note(other)),
+            (other, _) => {
+                file_level_problem = true;
+                notes.push(top_level_note(other));
+            }
         }
     }
     let mut entries: Vec<RawEntry> = tables
@@ -75,8 +90,13 @@ pub fn parse_file(contents: &str) -> Result<ParsedFile, SyntaxError> {
         .map(|(index, entry)| raw_entry(entry, index + 1))
         .collect();
     flag_duplicates(&mut entries);
+    let dbeaver = match (read_dbeaver, file_level_problem) {
+        (false, _) => DbeaverAccess::Off,
+        (true, true) => DbeaverAccess::Blocked,
+        (true, false) => DbeaverAccess::Read,
+    };
     Ok(ParsedFile {
-        read_dbeaver,
+        dbeaver,
         entries,
         notes,
     })
@@ -403,13 +423,27 @@ ssh_alias = "bastion"
     }
 
     #[test]
-    fn read_dbeaver_false_est_lu_et_la_valeur_par_defaut_est_vraie() {
-        assert!(parse_file(VALID).unwrap().read_dbeaver);
+    fn read_dbeaver_false_lisible_coupe_dbeaver_et_la_valeur_par_defaut_le_laisse_lu() {
+        assert_eq!(parse_file(VALID).unwrap().dbeaver, DbeaverAccess::Read);
         let parsed = parse_file(&format!("read_dbeaver = false\n{VALID}")).unwrap();
-        assert!(!parsed.read_dbeaver);
+        assert_eq!(parsed.dbeaver, DbeaverAccess::Off);
+        let parsed = parse_file(&format!("read_dbeaver = false\ncolour = 1\n{VALID}")).unwrap();
+        assert_eq!(parsed.dbeaver, DbeaverAccess::Off);
+    }
+
+    #[test]
+    fn une_valeur_invalide_de_read_dbeaver_bloque_dbeaver() {
         let parsed = parse_file(&format!("read_dbeaver = \"no\"\n{VALID}")).unwrap();
-        assert!(parsed.read_dbeaver);
+        assert_eq!(parsed.dbeaver, DbeaverAccess::Blocked);
         assert!(parsed.notes[0].contains("read_dbeaver"));
+    }
+
+    #[test]
+    fn une_cle_de_premier_niveau_inconnue_ou_secrete_bloque_dbeaver() {
+        for contents in ["colour = 1\n", "password = \"x\"\n", "api_token = \"x\"\n"] {
+            let parsed = parse_file(&format!("{contents}{VALID}")).unwrap();
+            assert_eq!(parsed.dbeaver, DbeaverAccess::Blocked, "{contents}");
+        }
     }
 
     #[test]
