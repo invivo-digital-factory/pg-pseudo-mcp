@@ -67,7 +67,7 @@ impl ConfigDump for SshCommand {
         if let Some(port) = target.port {
             process.arg("-p").arg(port.to_string());
         }
-        process.arg(target.host);
+        process.arg("--").arg(target.host);
         let output =
             run_bounded(&mut process, self.deadline, MAX_OUTPUT).map_err(
                 |failure| match failure {
@@ -127,9 +127,19 @@ mod integration {
                 port: Some(2200),
             })
             .unwrap();
-        assert_eq!(output.trim(), "-G -F /cfg/ssh_config -l alice -p 2200 jump");
+        assert_eq!(output.trim(), "-G -F /cfg/ssh_config -l alice -p 2200 -- jump");
         let bare = SshCommand::new(Some(dir.path().join("ssh")), None);
-        assert_eq!(bare.dump(&target("alias")).unwrap().trim(), "-G alias");
+        assert_eq!(bare.dump(&target("alias")).unwrap().trim(), "-G -- alias");
+    }
+
+    #[test]
+    fn un_hote_qui_commence_par_un_tiret_est_passe_apres_le_separateur_d_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = fake_ssh(dir.path(), "echo \"$*\"");
+        let output = SshCommand::new(Some(ssh), None)
+            .dump(&target("-oProxyCommand=x"))
+            .unwrap();
+        assert_eq!(output.trim(), "-G -- -oProxyCommand=x");
     }
 
     #[test]
