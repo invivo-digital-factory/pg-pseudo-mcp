@@ -65,6 +65,11 @@ impl OpenSshResolver {
         if alias.is_empty() || alias.starts_with('-') || alias.contains(char::is_whitespace) {
             return Err(unavailable("the SSH alias is not a valid host name"));
         }
+        if !self.aliases.defines(alias) {
+            return Err(unavailable(format!(
+                "SSH alias {alias} is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)"
+            )));
+        }
         let target = Target {
             host: alias,
             user: None,
@@ -130,12 +135,6 @@ impl OpenSshResolver {
     }
 
     fn configuration(&self, target: &Target<'_>) -> Result<ResolvedConfig, ConnectionStatus> {
-        if !self.aliases.defines(target.host) {
-            return Err(unavailable(format!(
-                "SSH alias {} is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)",
-                target.host
-            )));
-        }
         let output = self.dump.dump(target).map_err(|failure| match failure {
             DumpFailure::NotInstalled => unavailable(
                 "the OpenSSH client (ssh) was not found on PATH; it is needed to resolve SSH aliases",
@@ -588,51 +587,32 @@ mod unit {
     }
 
     #[test]
-    fn un_saut_proxyjump_absent_de_la_configuration_rend_l_entree_indisponible_sans_nommer_les_hotes()
-     {
-        let dump = Arc::new(
-            FakeDump::default()
-                .with(
-                    "app",
-                    &answer("secret-app.corp", 22, "carol", "proxyjump jump-ghost\n"),
-                )
-                .with("jump-ghost", &answer("secret-jump.corp", 22, "dave", "")),
-        );
-        let status =
-            OpenSshResolver::new(dump, environment(), Arc::new(Defined(Some(vec!["app"]))))
-                .resolve("app")
-                .unwrap_err();
-        let ConnectionStatus::Unavailable { reason } = status else {
-            panic!("a missing hop alias is unavailable");
-        };
-        assert!(
-            reason.contains("SSH alias jump-ghost is not defined"),
-            "{reason}"
-        );
-        for leaked in ["secret", "carol", "dave", "corp"] {
-            assert!(!reason.contains(leaked), "{reason}");
-        }
-    }
-
-    #[test]
-    fn un_second_saut_proxyjump_absent_de_la_configuration_est_aussi_refuse() {
+    fn un_saut_proxyjump_litteral_n_a_pas_besoin_d_un_bloc_host() {
         let dump = FakeDump::default()
             .with(
                 "app",
-                &answer("app.real", 22, "a", "proxyjump j1,j2-ghost\n"),
+                &answer(
+                    "app.real",
+                    22,
+                    "a",
+                    "proxyjump admin@bastion.example.com:2222,10.0.0.5\n",
+                ),
             )
-            .with("j1", &answer("j1.real", 22, "a", ""))
-            .with("j2-ghost", &answer("j2.real", 22, "a", ""));
-        let status = OpenSshResolver::new(
+            .with(
+                "bastion.example.com",
+                &answer("bastion.example.com", 2222, "admin", ""),
+            )
+            .with("10.0.0.5", &answer("10.0.0.5", 22, "a", ""));
+        let hops = OpenSshResolver::new(
             Arc::new(dump),
             environment(),
-            Arc::new(Defined(Some(vec!["app", "j1"]))),
+            Arc::new(Defined(Some(vec!["app"]))),
         )
         .resolve("app")
-        .unwrap_err();
-        assert!(
-            matches!(&status, ConnectionStatus::Unavailable { reason } if reason.contains("j2-ghost")),
-            "{status:?}"
+        .unwrap();
+        assert_eq!(
+            hosts_of(&hops),
+            vec!["bastion.example.com", "10.0.0.5", "app.real"]
         );
     }
 }

@@ -370,18 +370,15 @@ fn un_bloc_host_etoile_et_un_motif_nie_ne_definissent_pas_l_alias() {
 }
 
 #[test]
-fn un_saut_proxyjump_absent_de_la_configuration_ssh_rend_l_entree_indisponible() {
+fn un_saut_proxyjump_litteral_n_exige_pas_de_bloc_host_mais_l_alias_de_l_entree_oui() {
     let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
-    let missing = tunneled_discovery(&setup, "Host app\n", "app");
-    let reason = reason_of(&entry(&missing, "tunneled"));
-    assert!(
-        reason.contains("SSH alias jump-hop is not defined"),
-        "{reason}"
-    );
-    let present = tunneled_discovery(&setup, "Host app jump-hop\n", "app");
+    let present = tunneled_discovery(&setup, "Host app\n", "app");
     assert_eq!(
         entry(&present, "tunneled").status,
         ConnectionStatus::Available
     );
+    let missing = tunneled_discovery(&setup, "Host jump-hop\n", "app");
+    let reason = reason_of(&entry(&missing, "tunneled"));
+    assert!(reason.contains("SSH alias app is not defined"), "{reason}");
 }
