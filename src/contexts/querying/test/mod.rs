@@ -1,3 +1,4 @@
+mod clear_lineage;
 mod fakes;
 mod guard;
 mod list_databases;

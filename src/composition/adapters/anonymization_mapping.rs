@@ -53,6 +53,13 @@ pub fn lineage(lineage: querying::Lineage) -> anonymization::Lineage {
     }
 }
 
+pub fn clearance(clearance: querying::Clearance) -> anonymization::Clearance {
+    match clearance {
+        querying::Clearance::ProvenClear => anonymization::Clearance::ProvenClear,
+        querying::Clearance::Unproven => anonymization::Clearance::Unproven,
+    }
+}
+
 pub fn message_in(message: &querying::DbMessage) -> anonymization::DatabaseMessage {
     anonymization::DatabaseMessage {
         severity: message.severity.clone(),

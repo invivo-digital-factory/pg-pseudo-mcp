@@ -28,6 +28,14 @@ pub trait ReadOnlyDatabase: Send + Sync {
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<QueryOutput, DatabaseFailure>> + Send;
 
+    fn read_catalog_cached(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        catalog_sql: &str,
+        limits: ExecutionLimits,
+    ) -> impl Future<Output = Result<QueryOutput, DatabaseFailure>> + Send;
+
     fn list_databases(
         &self,
         connection: &str,

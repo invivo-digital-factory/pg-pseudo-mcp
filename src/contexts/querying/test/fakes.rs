@@ -10,14 +10,15 @@ use crate::contexts::querying::domain::repositories::{
 };
 use crate::contexts::querying::domain::types::DatabaseListing;
 use crate::contexts::querying::domain::types::{
-    AnonymizedRows, Cell, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits, Lineage,
-    PseudonymLookup, QueryOutput,
+    AnonymizedRows, Cell, Clearance, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits,
+    Lineage, PseudonymLookup, QueryOutput,
 };
 
 pub struct FakeDatabase {
     response: Result<QueryOutput, DatabaseFailure>,
     listing: Result<DatabaseListing, DatabaseFailure>,
     enum_labels: Result<Vec<String>, DatabaseFailure>,
+    catalog: Result<QueryOutput, DatabaseFailure>,
     statements: Mutex<Vec<String>>,
 }
 
@@ -27,6 +28,7 @@ impl FakeDatabase {
             response: Ok(output),
             listing: Err(DatabaseFailure::MissingParams),
             enum_labels: Ok(Vec::new()),
+            catalog: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -39,6 +41,17 @@ impl FakeDatabase {
             response: Ok(output),
             listing: Err(DatabaseFailure::MissingParams),
             enum_labels,
+            catalog: Err(DatabaseFailure::MissingParams),
+            statements: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn returning_with_catalog(output: QueryOutput, catalog: QueryOutput) -> Arc<Self> {
+        Arc::new(Self {
+            response: Ok(output),
+            listing: Err(DatabaseFailure::MissingParams),
+            enum_labels: Ok(Vec::new()),
+            catalog: Ok(catalog),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -47,7 +60,8 @@ impl FakeDatabase {
         Arc::new(Self {
             response: Err(failure.clone()),
             listing: Err(failure.clone()),
-            enum_labels: Err(failure),
+            enum_labels: Err(failure.clone()),
+            catalog: Err(failure),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -57,6 +71,7 @@ impl FakeDatabase {
             response: Ok(empty_output()),
             listing: Ok(listing),
             enum_labels: Ok(Vec::new()),
+            catalog: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -102,6 +117,16 @@ impl ReadOnlyDatabase for FakeDatabase {
         self.answer(catalog_sql)
     }
 
+    async fn read_catalog_cached(
+        &self,
+        _connection: &str,
+        _database: Option<&str>,
+        _catalog_sql: &str,
+        _limits: ExecutionLimits,
+    ) -> Result<QueryOutput, DatabaseFailure> {
+        self.catalog.clone()
+    }
+
     async fn list_databases(&self, _connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
         self.listing.clone()
     }
@@ -145,6 +170,7 @@ impl PseudonymTranslator for FakeTranslator {
 pub struct FakeAnonymizer {
     injected_seen: Mutex<Vec<Vec<(String, String)>>>,
     enum_labels_seen: Mutex<Vec<Vec<String>>>,
+    clearances_seen: Mutex<Vec<Vec<Clearance>>>,
     masks: Vec<(String, String)>,
 }
 
@@ -153,6 +179,7 @@ impl FakeAnonymizer {
         Arc::new(Self {
             injected_seen: Mutex::default(),
             enum_labels_seen: Mutex::default(),
+            clearances_seen: Mutex::default(),
             masks: vec![(real.to_string(), pseudonym.to_string())],
         })
     }
@@ -163,6 +190,10 @@ impl FakeAnonymizer {
 
     pub fn enum_labels_seen(&self) -> Vec<Vec<String>> {
         self.enum_labels_seen.lock().unwrap().clone()
+    }
+
+    pub fn clearances_seen(&self) -> Vec<Vec<Clearance>> {
+        self.clearances_seen.lock().unwrap().clone()
     }
 
     fn replace(&self, text: &str, injected: &[(String, String)]) -> String {
@@ -184,7 +215,12 @@ impl ResultAnonymizer for FakeAnonymizer {
         _lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
         enum_labels: &[String],
+        clearances: &[Clearance],
     ) -> AnonymizedRows {
+        self.clearances_seen
+            .lock()
+            .unwrap()
+            .push(clearances.to_vec());
         self.injected_seen.lock().unwrap().push(injected.to_vec());
         self.enum_labels_seen
             .lock()
@@ -240,10 +276,10 @@ impl PersonalColumnDictionary for FakeDictionary {
         (column_name == "email").then(|| "email".to_string())
     }
 
-    fn classify(&self, _column_name: &str, _type_name: &str) -> ColumnClassification {
+    fn classify(&self, _column_name: &str, type_name: &str) -> ColumnClassification {
         ColumnClassification {
             forced_kind: None,
-            clear_by_type: false,
+            clear_by_type: type_name == "enum",
         }
     }
 }

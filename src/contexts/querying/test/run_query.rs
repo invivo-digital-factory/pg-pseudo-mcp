@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use super::fakes::{FakeAnonymizer, FakeDatabase, FakeTranslator, empty_output, ports, sql_error};
 use crate::contexts::querying::domain::errors::{DatabaseFailure, QueryingError};
+use crate::contexts::querying::domain::types::Clearance::{ProvenClear, Unproven};
+use crate::contexts::querying::domain::types::{Cell, ColumnMeta, ColumnSource, QueryOutput};
 use crate::contexts::querying::domain::types::{ExplainRequest, QueryRequest};
 use crate::contexts::querying::use_cases::{ExplainQuery, RunQuery};
 
@@ -213,5 +215,102 @@ mod unit {
 
         assert!(response.warnings.is_empty());
         assert_eq!(anonymizer.enum_labels_seen(), vec![Vec::<String>::new()]);
+    }
+
+    fn output(columns: Vec<ColumnMeta>, rows: Vec<Vec<Cell>>) -> QueryOutput {
+        QueryOutput {
+            columns,
+            rows,
+            more_rows: false,
+            notices: Vec::new(),
+        }
+    }
+
+    fn text_column(name: &str, source: Option<&str>) -> ColumnMeta {
+        ColumnMeta {
+            name: name.into(),
+            type_name: "text".into(),
+            source: source.map(|column| ColumnSource {
+                schema: "public".into(),
+                table: "orders".into(),
+                column: column.into(),
+            }),
+        }
+    }
+
+    fn orders_catalog() -> QueryOutput {
+        output(
+            Vec::new(),
+            vec![
+                vec![Cell::Text("id".into()), Cell::Text("int4".into())],
+                vec![Cell::Text("status".into()), Cell::Text("enum".into())],
+                vec![
+                    Cell::Text("payment_method".into()),
+                    Cell::Text("enum".into()),
+                ],
+                vec![Cell::Text("titulaire".into()), Cell::Text("text".into())],
+            ],
+        )
+    }
+
+    #[tokio::test]
+    async fn une_colonne_derivee_de_colonnes_en_clair_est_signalee_prouvee_a_l_anonymiseur() {
+        let database = FakeDatabase::returning_with_catalog(
+            output(
+                vec![
+                    text_column("etiquette", None),
+                    text_column("titulaire", Some("titulaire")),
+                    text_column("nom", None),
+                ],
+                vec![vec![
+                    Cell::Text("paid - CASH".into()),
+                    Cell::Text("Ylwenna Kervadec".into()),
+                    Cell::Text("YLWENNA KERVADEC".into()),
+                ]],
+            ),
+            orders_catalog(),
+        );
+        let anonymizer: Arc<FakeAnonymizer> = Arc::default();
+        let use_case = RunQuery::new(
+            Arc::clone(&database),
+            ports(FakeTranslator::default(), Arc::clone(&anonymizer)),
+        );
+
+        use_case
+            .execute(request(
+                "SELECT concat(status, ' - ', payment_method) AS etiquette, titulaire, upper(titulaire) AS nom FROM orders",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            anonymizer.clearances_seen(),
+            vec![vec![ProvenClear, Unproven, Unproven]]
+        );
+    }
+
+    #[tokio::test]
+    async fn un_catalogue_illisible_laisse_les_colonnes_derivees_au_jugement_habituel() {
+        let database = FakeDatabase::returning_with_enum_labels(
+            output(
+                vec![text_column("etiquette", None)],
+                vec![vec![Cell::Text("paid - CASH".into())]],
+            ),
+            Ok(Vec::new()),
+        );
+        let anonymizer: Arc<FakeAnonymizer> = Arc::default();
+        let use_case = RunQuery::new(
+            Arc::clone(&database),
+            ports(FakeTranslator::default(), Arc::clone(&anonymizer)),
+        );
+
+        use_case
+            .execute(request(
+                "SELECT concat(status, ' - ', payment_method) AS etiquette FROM orders",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(anonymizer.clearances_seen(), vec![vec![Unproven]]);
     }
 }

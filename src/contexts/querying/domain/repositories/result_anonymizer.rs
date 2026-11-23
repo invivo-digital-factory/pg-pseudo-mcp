@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::contexts::querying::domain::types::{
-    AnonymizedRows, Cell, ColumnMeta, DbMessage, Lineage,
+    AnonymizedRows, Cell, Clearance, ColumnMeta, DbMessage, Lineage,
 };
 
 pub trait ResultAnonymizer: Send + Sync {
@@ -12,6 +12,7 @@ pub trait ResultAnonymizer: Send + Sync {
         lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
         enum_labels: &[String],
+        clearances: &[Clearance],
     ) -> AnonymizedRows;
 
     fn free_text(&self, text: &str, injected: &[(String, String)]) -> String;

@@ -1,3 +1,5 @@
+use sqlparser::ast::Statement;
+
 use super::{Lineage, Warning};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,6 +10,7 @@ pub struct Guarded {
     pub warnings: Vec<Warning>,
     pub derived_lineage: Option<Vec<Lineage>>,
     pub is_explain: bool,
+    pub statement: Statement,
 }
 
 impl Guarded {

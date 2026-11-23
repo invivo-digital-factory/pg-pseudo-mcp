@@ -75,6 +75,7 @@ impl Rewritten {
         Guarded {
             derived_lineage,
             is_explain: matches!(self.statement, Statement::Explain { .. }),
+            statement: self.statement,
             sql: self.sql,
             translated_literals: self.injected.len(),
             injected: self.injected,

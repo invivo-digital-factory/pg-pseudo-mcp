@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::contexts::anonymization::domain::services::anonymizer::Anonymizer;
 use crate::contexts::anonymization::domain::services::pseudonymizer::Pseudonymizer;
-use crate::contexts::anonymization::domain::types::{AnonymizedRows, Cell, ColumnMeta, Lineage};
+use crate::contexts::anonymization::domain::types::{
+    AnonymizedRows, Cell, Clearance, ColumnMeta, Lineage,
+};
 
 #[derive(Clone)]
 pub struct AnonymizeResultSet {
@@ -21,9 +23,11 @@ impl AnonymizeResultSet {
         lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
         enum_labels: &[String],
+        clearances: &[Clearance],
     ) -> AnonymizedRows {
         Anonymizer::new(&self.pseudonymizer, injected)
             .with_enum_labels(enum_labels)
+            .with_clearances(clearances)
             .rows(columns, rows, lineage)
     }
 }

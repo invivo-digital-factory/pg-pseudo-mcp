@@ -1,4 +1,5 @@
-use cucumber::then;
+use cucumber::{then, when};
+use serde_json::json;
 
 use crate::querying_world::QueryingWorld;
 
@@ -44,4 +45,35 @@ async fn answer_has_no_real_fragment(world: &mut QueryingWorld) {
     for fragment in REAL_FRAGMENTS {
         assert!(!text.contains(fragment), "{fragment} leaked in {text}");
     }
+}
+
+#[when(
+    regex = r"^l'agent affiche ce pseudonyme à côté du statut des commandes filtrées sur ce pseudonyme$"
+)]
+async fn agent_projects_pseudonym(world: &mut QueryingWorld) {
+    let pseudonym = world.pseudonym.clone().expect("a pseudonym was read");
+    let sql = format!(
+        "SELECT concat(o.status, ' ', '{pseudonym}') AS etiquette FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = '{pseudonym}' ORDER BY o.id"
+    );
+    world.ask(&sql).await;
+}
+
+#[then(regex = r"^chaque ligne montre le statut suivi du pseudonyme, en clair$")]
+async fn rows_show_status_and_pseudonym(world: &mut QueryingWorld) {
+    let pseudonym = world.pseudonym.clone().expect("a pseudonym was read");
+    let answer = world.answer();
+    assert_eq!(
+        answer.body()["rows"],
+        json!([
+            [format!("paid {pseudonym}")],
+            [format!("shipped {pseudonym}")]
+        ]),
+        "{}",
+        answer.text
+    );
+    assert!(
+        answer.body().get("pseudonymized").is_none(),
+        "{}",
+        answer.text
+    );
 }

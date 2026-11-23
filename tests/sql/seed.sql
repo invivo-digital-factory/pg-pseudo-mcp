@@ -27,6 +27,10 @@ CREATE TABLE customers (
 
 COMMENT ON COLUMN customers.email IS 'Primary contact, e.g. ylwenna.kervadec@canary-mail.fr';
 
+CREATE FUNCTION customer_name(customer integer) RETURNS text
+    LANGUAGE sql STABLE
+    AS $$ SELECT prenom || ' ' || nom FROM customers WHERE id = customer $$;
+
 CREATE TABLE orders (
     id integer PRIMARY KEY,
     customer_id integer NOT NULL REFERENCES customers(id),

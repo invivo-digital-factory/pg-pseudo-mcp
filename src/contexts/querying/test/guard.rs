@@ -380,6 +380,33 @@ mod unit {
     }
 
     #[test]
+    fn un_pseudonyme_ecrit_dans_la_projection_n_est_jamais_traduit_meme_filtre_ailleurs() {
+        let store = FakeStore::default().with(
+            "claire.martin@example.net",
+            "ylwenna.kervadec@canary-mail.fr",
+        );
+        let guarded = prepare(
+            "SELECT concat(o.status, ' ', 'claire.martin@example.net') AS etiquette, 'claire.martin@example.net' AS brut FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = 'claire.martin@example.net'",
+            &store,
+        )
+        .unwrap();
+        assert_eq!(guarded.translated_literals, 1);
+        assert_eq!(
+            guarded.sql.matches("'claire.martin@example.net'").count(),
+            2,
+            "{}",
+            guarded.sql
+        );
+        assert!(
+            guarded
+                .sql
+                .ends_with("WHERE c.email = 'ylwenna.kervadec@canary-mail.fr'"),
+            "{}",
+            guarded.sql
+        );
+    }
+
+    #[test]
     fn un_champ_json_compare_a_un_pseudonyme_est_traduit() {
         let store =
             FakeStore::default().with("claire.martin@example.net", "o.hazvekmor@canary-mail.fr");
