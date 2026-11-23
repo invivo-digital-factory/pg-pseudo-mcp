@@ -10,6 +10,8 @@ pub enum PasswordCommandError {
     Interrupted,
     #[error("the password command did not finish in time")]
     TimedOut,
+    #[error("the password command printed more than the allowed output")]
+    OutputTooLarge,
     #[error("the password command printed nothing")]
     NoOutput,
     #[error("the password command output is not valid UTF-8")]

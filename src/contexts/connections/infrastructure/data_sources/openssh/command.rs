@@ -1,12 +1,14 @@
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
+
+use crate::contexts::connections::infrastructure::data_sources::bounded_process::{
+    BoundedFailure, run_bounded,
+};
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(5);
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const MAX_OUTPUT: usize = 1024 * 1024;
 
 pub struct Target<'a> {
     pub host: &'a str,
@@ -66,45 +68,21 @@ impl ConfigDump for SshCommand {
             process.arg("-p").arg(port.to_string());
         }
         process.arg(target.host);
-        let mut child = process
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::NotFound => DumpFailure::NotInstalled,
-                _ => DumpFailure::Other,
-            })?;
-        let stdout = drain(child.stdout.take());
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < self.deadline => thread::sleep(POLL_INTERVAL),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(DumpFailure::Other);
-                }
-            }
-        };
-        if !status.success() {
-            return Err(status
+        let output =
+            run_bounded(&mut process, self.deadline, MAX_OUTPUT).map_err(
+                |failure| match failure {
+                    BoundedFailure::NotFound => DumpFailure::NotInstalled,
+                    _ => DumpFailure::Other,
+                },
+            )?;
+        if !output.status.success() {
+            return Err(output
+                .status
                 .code()
                 .map_or(DumpFailure::Other, DumpFailure::Status));
         }
-        String::from_utf8(stdout.join().unwrap_or_default()).map_err(|_| DumpFailure::Other)
+        String::from_utf8(output.stdout).map_err(|_| DumpFailure::Other)
     }
-}
-
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut buffer);
-        }
-        buffer
-    })
 }
 
 fn find_on_path(path: Option<OsString>) -> Option<PathBuf> {
@@ -118,6 +96,7 @@ fn find_on_path(path: Option<OsString>) -> Option<PathBuf> {
 mod integration {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    use std::time::Instant;
 
     use super::*;
 
@@ -186,6 +165,18 @@ mod integration {
         let started = Instant::now();
         let outcome = SshCommand::new(Some(ssh), None)
             .with_deadline(Duration::from_millis(200))
+            .dump(&target("alias"));
+        assert_eq!(outcome, Err(DumpFailure::Other));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn un_descendant_en_arriere_plan_qui_garde_la_sortie_ouverte_respecte_le_delai() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = fake_ssh(dir.path(), "sleep 30 &\necho 'hostname x'");
+        let started = Instant::now();
+        let outcome = SshCommand::new(Some(ssh), None)
+            .with_deadline(Duration::from_millis(300))
             .dump(&target("alias"));
         assert_eq!(outcome, Err(DumpFailure::Other));
         assert!(started.elapsed() < Duration::from_secs(3));

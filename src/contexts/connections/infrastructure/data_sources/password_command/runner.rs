@@ -1,14 +1,15 @@
-use std::io::{ErrorKind, Read};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use super::PasswordCommandRunner;
 use crate::contexts::connections::domain::errors::PasswordCommandError;
 use crate::contexts::connections::domain::types::Secret;
+use crate::contexts::connections::infrastructure::data_sources::bounded_process::{
+    BoundedFailure, run_bounded,
+};
 
 const COMMAND_DEADLINE: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const MAX_OUTPUT: usize = 64 * 1024;
 
 pub struct ProcessPasswordCommand {
     deadline: Duration,
@@ -35,47 +36,23 @@ impl PasswordCommandRunner for ProcessPasswordCommand {
         let (program, arguments) = argv
             .split_first()
             .ok_or(PasswordCommandError::CouldNotStart)?;
-        let mut child = Command::new(program)
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| match error.kind() {
-                ErrorKind::NotFound => PasswordCommandError::NotFound,
-                _ => PasswordCommandError::CouldNotStart,
-            })?;
-        let stdout = drain(child.stdout.take());
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < self.deadline => thread::sleep(POLL_INTERVAL),
-                Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(PasswordCommandError::TimedOut);
-                }
-                Err(_) => return Err(PasswordCommandError::CouldNotStart),
-            }
-        };
-        let output = stdout.join().unwrap_or_default();
-        match status.code() {
-            Some(0) => password_from(output),
+        let output = run_bounded(
+            Command::new(program).args(arguments),
+            self.deadline,
+            MAX_OUTPUT,
+        )
+        .map_err(|failure| match failure {
+            BoundedFailure::NotFound => PasswordCommandError::NotFound,
+            BoundedFailure::CouldNotStart => PasswordCommandError::CouldNotStart,
+            BoundedFailure::TimedOut => PasswordCommandError::TimedOut,
+            BoundedFailure::OutputTooLarge => PasswordCommandError::OutputTooLarge,
+        })?;
+        match output.status.code() {
+            Some(0) => password_from(output.stdout),
             Some(code) => Err(PasswordCommandError::ExitStatus(code)),
             None => Err(PasswordCommandError::Interrupted),
         }
     }
-}
-
-fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut buffer);
-        }
-        buffer
-    })
 }
 
 fn password_from(output: Vec<u8>) -> Result<Secret, PasswordCommandError> {
@@ -175,6 +152,18 @@ mod integration {
         let argv = script(dir.path(), "sleep 5");
         let started = std::time::Instant::now();
         let error = ProcessPasswordCommand::with_deadline(Duration::from_millis(200))
+            .run(&argv)
+            .unwrap_err();
+        assert_eq!(error, PasswordCommandError::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn un_descendant_en_arriere_plan_qui_garde_la_sortie_ouverte_respecte_le_delai() {
+        let dir = tempfile::tempdir().unwrap();
+        let argv = script(dir.path(), "sleep 30 &\nprintf 'pw'");
+        let started = std::time::Instant::now();
+        let error = ProcessPasswordCommand::with_deadline(Duration::from_millis(300))
             .run(&argv)
             .unwrap_err();
         assert_eq!(error, PasswordCommandError::TimedOut);
