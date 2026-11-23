@@ -365,11 +365,7 @@ fn evaluate(
         port,
         database,
         user,
-        sslmode: if password.is_azure_token() {
-            sslmode.at_least_require()
-        } else {
-            sslmode
-        },
+        sslmode: password.effective_sslmode(sslmode),
         password,
         tunnel,
     })

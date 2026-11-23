@@ -107,11 +107,7 @@ impl<'a> FileEvaluator<'a> {
                 })
             })
             .transpose()?;
-        let sslmode = if password.is_azure_token() {
-            definition.sslmode.at_least_require()
-        } else {
-            definition.sslmode
-        };
+        let sslmode = password.effective_sslmode(definition.sslmode);
         Ok(ConnectParams {
             host: definition.host.clone(),
             port: definition.port,
