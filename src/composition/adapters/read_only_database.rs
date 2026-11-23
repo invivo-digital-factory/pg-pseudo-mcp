@@ -63,6 +63,21 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
             .map_err(database_failure)
     }
 
+    async fn read_catalog_cached(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        catalog_sql: &str,
+        limits: ExecutionLimits,
+    ) -> Result<QueryOutput, DatabaseFailure> {
+        self.connections
+            .read_catalog
+            .execute_cached(connection, database, catalog_sql, execution_limits(limits))
+            .await
+            .map(query_output)
+            .map_err(database_failure)
+    }
+
     async fn list_databases(&self, connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
         self.connections
             .list_databases

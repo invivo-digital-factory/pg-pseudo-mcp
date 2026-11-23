@@ -1,13 +1,22 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::contexts::querying::domain::constants::clear_lineage::{
+    MAX_LINEAGE_RELATIONS, MAX_RELATION_COLUMNS, RELATION_COLUMNS_TIMEOUT_MS,
+};
 use crate::contexts::querying::domain::errors::{DatabaseFailure, QueryingError, ScrubbedText};
 use crate::contexts::querying::domain::repositories::{AnonymizationPorts, ReadOnlyDatabase};
+use crate::contexts::querying::domain::services::catalog_queries::relation_columns_sql;
+use crate::contexts::querying::domain::services::catalog_reading::relation_columns;
+use crate::contexts::querying::domain::services::clear_lineage::{
+    catalog_relations, clearances, is_clear_source,
+};
 use crate::contexts::querying::domain::services::result_bounds::bound_rows;
 use crate::contexts::querying::domain::services::statement_guard::inspect;
 use crate::contexts::querying::domain::types::{
-    ColumnOut, ExecutionLimits, Guarded, NoticeOut, PersonalNames, QueryLimits, QueryRequest,
-    QueryResponse, Translations, TruncatedBy, Truncation, Warning,
+    Clearance, ColumnMeta, ColumnOut, ExecutionLimits, Guarded, NoticeOut, PersonalNames,
+    QueryLimits, QueryRequest, QueryResponse, RelationCatalog, Translations, TruncatedBy,
+    Truncation, Warning,
 };
 
 pub struct RunQuery<D: ReadOnlyDatabase> {
@@ -71,12 +80,16 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             .enum_labels(&request.connection, request.database.as_deref())
             .await
             .unwrap_or_default();
+        let clearances = self
+            .clearances(ports, &request, &guarded, &output.columns)
+            .await;
         let anonymized = ports.anonymizer.rows(
             &output.columns,
             output.rows,
             guarded.derived_lineage.as_deref(),
             &guarded.injected,
             &enum_labels,
+            &clearances,
         );
         let columns: Vec<ColumnOut> = output
             .columns
@@ -127,6 +140,48 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             notices,
             elapsed_ms: started.elapsed().as_millis(),
         })
+    }
+
+    async fn clearances(
+        &self,
+        ports: &AnonymizationPorts,
+        request: &QueryRequest,
+        guarded: &Guarded,
+        columns: &[ColumnMeta],
+    ) -> Vec<Clearance> {
+        let unproven = vec![Clearance::Unproven; columns.len()];
+        if columns.iter().all(|column| column.source.is_some()) {
+            return unproven;
+        }
+        let relations = catalog_relations(&guarded.statement);
+        if relations.len() > MAX_LINEAGE_RELATIONS {
+            return unproven;
+        }
+        let mut catalog = RelationCatalog::default();
+        for relation in relations {
+            let read = self
+                .database
+                .read_catalog_cached(
+                    &request.connection,
+                    request.database.as_deref(),
+                    &relation_columns_sql(&relation),
+                    ExecutionLimits {
+                        max_rows: MAX_RELATION_COLUMNS,
+                        timeout_ms: RELATION_COLUMNS_TIMEOUT_MS,
+                    },
+                )
+                .await;
+            if let Some(columns) = read.ok().as_ref().and_then(relation_columns) {
+                catalog.insert(&relation, columns);
+            }
+        }
+        let dictionary = ports.dictionary.as_ref();
+        clearances(
+            &guarded.statement,
+            &catalog,
+            &|column| is_clear_source(dictionary, column),
+            columns.len(),
+        )
     }
 
     fn guard(&self, ports: &AnonymizationPorts, sql: &str) -> Result<Guarded, QueryingError> {

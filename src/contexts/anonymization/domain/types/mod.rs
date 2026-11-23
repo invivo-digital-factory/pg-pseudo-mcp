@@ -1,5 +1,6 @@
 pub mod anonymized_rows;
 pub mod cell;
+pub mod clearance;
 pub mod column;
 pub mod column_flag;
 pub mod column_meta;
@@ -14,6 +15,7 @@ pub mod text;
 
 pub use anonymized_rows::AnonymizedRows;
 pub use cell::Cell;
+pub use clearance::Clearance;
 pub use column::{ColumnClass, ColumnInfo};
 pub use column_flag::ColumnFlag;
 pub use column_meta::{ColumnMeta, ColumnSource};

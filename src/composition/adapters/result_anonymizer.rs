@@ -1,10 +1,12 @@
 use serde_json::Value;
 
-use super::anonymization_mapping::{cell, column, lineage, message_in, message_out, rows_out};
+use super::anonymization_mapping::{
+    cell, clearance, column, lineage, message_in, message_out, rows_out,
+};
 use crate::contexts::anonymization::injector::AnonymizationUseCases;
 use crate::contexts::querying::domain::repositories::ResultAnonymizer;
 use crate::contexts::querying::domain::types::{
-    AnonymizedRows, Cell, ColumnMeta, DbMessage, Lineage,
+    AnonymizedRows, Cell, Clearance, ColumnMeta, DbMessage, Lineage,
 };
 
 pub struct ResultAnonymizerAdapter {
@@ -25,6 +27,7 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
         lineage_per_column: Option<&[Lineage]>,
         injected: &[(String, String)],
         enum_labels: &[String],
+        clearances: &[Clearance],
     ) -> AnonymizedRows {
         let columns: Vec<_> = columns.iter().map(column).collect();
         let rows = rows
@@ -33,12 +36,14 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
             .collect();
         let lineage_per_column: Option<Vec<_>> =
             lineage_per_column.map(|items| items.iter().copied().map(lineage).collect());
+        let clearances: Vec<_> = clearances.iter().copied().map(clearance).collect();
         rows_out(self.use_cases.anonymize_result_set.execute(
             &columns,
             rows,
             lineage_per_column.as_deref(),
             injected,
             enum_labels,
+            &clearances,
         ))
     }
 

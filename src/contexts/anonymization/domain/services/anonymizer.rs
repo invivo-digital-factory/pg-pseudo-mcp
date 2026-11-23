@@ -9,14 +9,15 @@ use super::injected_text::replace_injected;
 use super::pseudonymizer::Pseudonymizer;
 use super::tracker::Tracker;
 use crate::contexts::anonymization::domain::types::{
-    AnonymizedRows, Cell, ColumnClass, ColumnFlag, ColumnInfo, ColumnMeta, DatabaseMessage, Kind,
-    Lineage, Reason, Span, TextVerdict,
+    AnonymizedRows, Cell, Clearance, ColumnClass, ColumnFlag, ColumnInfo, ColumnMeta,
+    DatabaseMessage, Kind, Lineage, Reason, Span, TextVerdict,
 };
 
 pub struct Anonymizer<'a> {
     pseudonymizer: &'a Pseudonymizer,
     injected: Vec<(String, String)>,
     enum_labels: HashSet<String>,
+    clearances: Vec<Clearance>,
 }
 
 impl<'a> Anonymizer<'a> {
@@ -31,6 +32,7 @@ impl<'a> Anonymizer<'a> {
             pseudonymizer,
             injected,
             enum_labels: HashSet::new(),
+            clearances: Vec::new(),
         }
     }
 
@@ -40,6 +42,11 @@ impl<'a> Anonymizer<'a> {
             .map(|label| fold(label.trim()))
             .filter(|label| !label.is_empty())
             .collect();
+        self
+    }
+
+    pub fn with_clearances(mut self, clearances: &[Clearance]) -> Self {
+        self.clearances = clearances.to_vec();
         self
     }
 
@@ -69,6 +76,11 @@ impl<'a> Anonymizer<'a> {
             .into_iter()
             .zip(&classes)
             .map(|(flag, class)| flag && class.derived)
+            .collect();
+        let classes: Vec<ColumnClass> = classes
+            .into_iter()
+            .enumerate()
+            .map(|(index, class)| self.cleared(index, class, tainted[index]))
             .collect();
         let mut flags: Vec<Option<ColumnFlag>> = vec![None; columns.len()];
         let rows = rows
@@ -286,6 +298,19 @@ impl<'a> Anonymizer<'a> {
                 tracker.note(Kind::PersonName, Reason::Derived, false);
                 self.pseudonymizer.opaque_token("digest", &scrubbed)
             }
+        }
+    }
+
+    fn cleared(&self, index: usize, class: ColumnClass, tainted: bool) -> ColumnClass {
+        let proven = self.clearances.get(index) == Some(&Clearance::ProvenClear);
+        if proven && class.derived && class.forced_kind.is_none() && !tainted {
+            ColumnClass {
+                forced_kind: None,
+                clear_by_type: true,
+                derived: false,
+            }
+        } else {
+            class
         }
     }
 
@@ -1014,6 +1039,124 @@ mod integration {
         assert_eq!(anonymized.rows, expected.rows);
         assert_eq!(anonymized.per_column, expected.per_column);
         assert_ne!(anonymized.rows[0][0], json!("AUTHORIZED"));
+    }
+
+    fn typed_column(name: &str, type_name: &str) -> ColumnMeta {
+        ColumnMeta {
+            name: name.to_string(),
+            type_name: type_name.to_string(),
+            source: None,
+        }
+    }
+
+    fn derived_row() -> (Vec<ColumnMeta>, Vec<Vec<Cell>>) {
+        (
+            vec![
+                text_column("concat", None),
+                typed_column("placed_at", "date"),
+                typed_column("count", "int8"),
+            ],
+            vec![vec![
+                Cell::Text("Martin".to_string()),
+                Cell::Date("1985-11-02".to_string()),
+                Cell::Int(33641278395),
+            ]],
+        )
+    }
+
+    #[test]
+    fn une_colonne_derivee_prouvee_en_clair_garde_ses_valeurs() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let (columns, rows) = derived_row();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ProvenClear; 3]);
+        let anonymized = anonymizer.rows(&columns, rows, None);
+        assert_eq!(
+            anonymized.rows[0],
+            vec![json!("Martin"), json!("1985-11-02"), json!(33641278395_i64)]
+        );
+        assert_eq!(anonymized.per_column, vec![None, None, None]);
+    }
+
+    #[test]
+    fn une_colonne_derivee_non_prouvee_reste_jugee_comme_avant() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let (columns, rows) = derived_row();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::Unproven; 3]);
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let anonymized = anonymizer.rows(&columns, rows.clone(), None);
+        let expected = baseline.rows(&columns, rows, None);
+        assert_eq!(anonymized.rows, expected.rows);
+        assert!(anonymized.per_column.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn une_colonne_prouvee_en_clair_mais_nommee_comme_une_donnee_personnelle_reste_pseudonymisee() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ProvenClear]);
+        let anonymized = single_cell(&anonymizer, text_column("nom", None), "Martin");
+        assert_ne!(anonymized.rows[0][0], json!("Martin"));
+        assert!(anonymized.per_column[0].is_some());
+    }
+
+    #[test]
+    fn une_colonne_prouvee_en_clair_mais_souillee_reste_opaque() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ProvenClear]);
+        let anonymized = anonymizer.rows(
+            &[text_column("concat", None)],
+            vec![vec![Cell::Text("paid kervadec".to_string())]],
+            Some(&[Personal]),
+        );
+        assert_ne!(anonymized.rows[0][0], json!("paid kervadec"));
+        assert!(anonymized.per_column[0].is_some());
+    }
+
+    #[test]
+    fn une_preuve_de_clarte_sur_une_colonne_lue_directement_est_ignoree() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ProvenClear]);
+        let anonymized = single_cell(&anonymizer, text_column("nom", Some("nom")), "Martin");
+        assert_ne!(anonymized.rows[0][0], json!("Martin"));
+    }
+
+    #[test]
+    fn un_pseudonyme_ecrit_en_litteral_dans_une_colonne_prouvee_revient_tel_quel() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let injected = [(
+            "ylwenna.kervadec@canary-mail.fr".to_string(),
+            "claire.martin@example.net".to_string(),
+        )];
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &injected).with_clearances(&[Clearance::ProvenClear]);
+        let value = "paid claire.martin@example.net";
+        let anonymized = single_cell(&anonymizer, text_column("etiquette", None), value);
+        assert_eq!(anonymized.rows[0][0], json!(value));
+        assert!(anonymized.per_column[0].is_none());
+    }
+
+    #[test]
+    fn une_valeur_reelle_traduite_reste_masquee_meme_dans_une_colonne_prouvee() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let injected = [(
+            "ylwenna.kervadec@canary-mail.fr".to_string(),
+            "claire.martin@example.net".to_string(),
+        )];
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &injected).with_clearances(&[Clearance::ProvenClear]);
+        let anonymized = single_cell(
+            &anonymizer,
+            text_column("etiquette", None),
+            "paid ylwenna.kervadec@canary-mail.fr",
+        );
+        assert_eq!(
+            anonymized.rows[0][0],
+            json!("paid claire.martin@example.net")
+        );
     }
 
     #[test]

@@ -199,6 +199,115 @@ mod e2e {
 
     #[tokio::test]
     #[ignore]
+    async fn une_expression_qui_ne_lit_que_des_colonnes_en_clair_reste_en_clair() {
+        let harness = Harness::new();
+        let (error, text) = run(
+            &harness,
+            "SELECT concat(status, ' - ', payment_method) AS etiquette, status::text || '/' || placed_at::date AS trace, CASE WHEN amount > 100 THEN 'gros' ELSE 'petit' END AS taille, initcap(o.payment_method::text) || ' #' || o.id AS repere FROM orders o ORDER BY id",
+        )
+        .await;
+        assert!(!error, "{text}");
+        assert_eq!(
+            rows(&text),
+            vec![
+                vec![
+                    json!("paid - CASH"),
+                    json!("paid/2026-03-01"),
+                    json!("gros"),
+                    json!("Cash #10")
+                ],
+                vec![
+                    json!("shipped - SEPA"),
+                    json!("shipped/2026-03-05"),
+                    json!("petit"),
+                    json!("Sepa #11")
+                ],
+                vec![
+                    json!("pending - BANK_CARD"),
+                    json!("pending/2026-04-11"),
+                    json!("petit"),
+                    json!("Bank_Card #12")
+                ],
+                vec![
+                    json!("pending - CASH"),
+                    json!("pending/2026-04-12"),
+                    json!("petit"),
+                    json!("Cash #13")
+                ],
+            ]
+        );
+        assert!(body_of(&text).get("pseudonymized").is_none(), "{text}");
+
+        for (sql, expected) in [
+            ("SELECT count(*)::text AS total FROM orders", json!("4")),
+            (
+                "WITH s AS (SELECT status AS etat FROM orders WHERE id = 11) SELECT upper(etat::text) AS etat FROM s",
+                json!("SHIPPED"),
+            ),
+            (
+                "SELECT d.jour FROM (SELECT placed_at::date AS jour FROM orders WHERE id = 10) d",
+                json!("2026-03-01"),
+            ),
+        ] {
+            let (error, text) = run(&harness, sql).await;
+            assert!(!error, "{sql}: {text}");
+            assert_eq!(rows(&text)[0][0], expected, "{sql}: {text}");
+            assert!(
+                body_of(&text).get("pseudonymized").is_none(),
+                "{sql}: {text}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn une_expression_qui_touche_une_donnee_personnelle_reste_pseudonymisee() {
+        let harness = Harness::new();
+        for sql in [
+            "SELECT concat(o.status, ' ', c.nom) AS v FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = 10",
+            "SELECT upper(nom) AS v FROM customers WHERE id = 1",
+            "SELECT customer_name(customer_id) AS v FROM orders WHERE id = 10",
+            "SELECT customer_name(customer_id) || ' ' || status::text AS v FROM orders WHERE id = 10",
+            "SELECT (SELECT nom FROM customers WHERE id = 1) AS v FROM orders WHERE id = 10",
+            "SELECT v FROM (SELECT nom AS v FROM customers WHERE id = 1 UNION ALL SELECT status::text FROM orders WHERE id = 10) u",
+        ] {
+            let (error, text) = run(&harness, sql).await;
+            assert!(!error, "{sql}: {text}");
+            assert_eq!(
+                body_of(&text)["pseudonymized"]["v"]["why"],
+                "derived",
+                "{sql}: {text}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn un_pseudonyme_ecrit_en_litteral_dans_la_projection_revient_tel_quel() {
+        let harness = Harness::new();
+        let (_, first) = run(&harness, "SELECT email FROM customers WHERE id = 1").await;
+        let pseudonym = rows(&first)[0][0].as_str().unwrap().to_string();
+        let (error, text) = run(
+            &harness,
+            &format!(
+                "SELECT concat(o.status, ' ', '{pseudonym}') AS etiquette, '{pseudonym}' AS brut FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.email = '{pseudonym}' ORDER BY o.id"
+            ),
+        )
+        .await;
+        assert!(!error, "{text}");
+        assert_eq!(
+            rows(&text),
+            vec![
+                vec![json!(format!("paid {pseudonym}")), json!(pseudonym)],
+                vec![json!(format!("shipped {pseudonym}")), json!(pseudonym)],
+            ]
+        );
+        assert_eq!(body_of(&text)["translated_literals"], 1, "{text}");
+        assert!(body_of(&text).get("pseudonymized").is_none(), "{text}");
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn un_texte_libre_garde_sa_structure_une_fois_pseudonymise() {
         let harness = Harness::new();
         let (_, text) = run(&harness, "SELECT body FROM notes WHERE id = 100").await;

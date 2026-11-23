@@ -60,3 +60,18 @@ pub fn known_tables_sql() -> String {
          ORDER BY 1, 2"
     )
 }
+
+pub fn relation_columns_sql(relation: &str) -> String {
+    format!(
+        "SELECT a.attname::text, \
+           CASE WHEN t.typtype = 'e' OR b.typtype = 'e' THEN 'enum' \
+                WHEN t.typtype = 'd' THEN b.typname::text \
+                ELSE t.typname::text END \
+         FROM pg_catalog.pg_attribute a \
+         JOIN pg_catalog.pg_type t ON t.oid = a.atttypid \
+         LEFT JOIN pg_catalog.pg_type b ON b.oid = t.typbasetype \
+         WHERE a.attrelid = pg_catalog.to_regclass({}) AND a.attnum > 0 AND NOT a.attisdropped \
+         ORDER BY a.attnum",
+        literal(relation)
+    )
+}

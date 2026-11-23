@@ -1,9 +1,12 @@
 pub mod anonymized_rows;
+pub mod catalog_column;
 pub mod cell;
+pub mod clearance;
 pub mod column_classification;
 pub mod column_flag;
 pub mod column_meta;
 pub mod db_message;
+pub mod derived_column;
 pub mod describe_table;
 pub mod execution_limits;
 pub mod explain;
@@ -17,17 +20,21 @@ pub mod query;
 pub mod query_limits;
 pub mod query_output;
 pub mod reason;
+pub mod relation_catalog;
 pub mod search_schema;
 pub mod translations;
 pub mod truncation;
 pub mod warning;
 
 pub use anonymized_rows::AnonymizedRows;
+pub use catalog_column::CatalogColumn;
 pub use cell::Cell;
+pub use clearance::Clearance;
 pub use column_classification::ColumnClassification;
 pub use column_flag::ColumnFlag;
 pub use column_meta::{ColumnMeta, ColumnSource};
 pub use db_message::DbMessage;
+pub use derived_column::DerivedColumn;
 pub use describe_table::{
     ColumnEntry, DescribeResponse, DescribeTableRequest, ForeignKey, IndexEntry, Reference,
 };
@@ -43,6 +50,7 @@ pub use query::{ColumnOut, NoticeOut, QueryRequest, QueryResponse};
 pub use query_limits::{ClampWarning, QueryLimits};
 pub use query_output::QueryOutput;
 pub use reason::Reason;
+pub use relation_catalog::RelationCatalog;
 pub use search_schema::{SchemaMatch, SearchResponse, SearchSchemaRequest};
 pub use translations::Translations;
 pub use truncation::{TruncatedBy, Truncation};

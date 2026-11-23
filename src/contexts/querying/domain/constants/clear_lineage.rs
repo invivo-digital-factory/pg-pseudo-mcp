@@ -1,0 +1,37 @@
+pub const CLEAR_FUNCTIONS: &[&str] = &[
+    "concat",
+    "concat_ws",
+    "lower",
+    "upper",
+    "initcap",
+    "btrim",
+    "ltrim",
+    "rtrim",
+    "trim",
+    "lpad",
+    "rpad",
+    "coalesce",
+    "nullif",
+    "greatest",
+    "least",
+    "to_char",
+    "date_trunc",
+    "date_part",
+    "extract",
+    "round",
+    "trunc",
+    "abs",
+    "count",
+    "min",
+    "max",
+    "sum",
+    "avg",
+    "string_agg",
+    "array_agg",
+    "array_to_string",
+    "length",
+];
+pub const SYSTEM_SCHEMA: &str = "pg_catalog";
+pub const MAX_LINEAGE_RELATIONS: usize = 32;
+pub const MAX_RELATION_COLUMNS: usize = 2_000;
+pub const RELATION_COLUMNS_TIMEOUT_MS: u64 = 2_000;

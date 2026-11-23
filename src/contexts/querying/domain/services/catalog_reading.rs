@@ -1,7 +1,9 @@
 use super::catalog_cells::{float, int, text};
 use super::relation::{estimate, relation_kind, short_type};
 use super::table_picker::Candidate;
-use crate::contexts::querying::domain::types::{QueryOutput, SchemaMatch, TableEntry};
+use crate::contexts::querying::domain::types::{
+    CatalogColumn, QueryOutput, SchemaMatch, TableEntry,
+};
 
 pub fn schema_matches(output: &QueryOutput) -> Vec<SchemaMatch> {
     output
@@ -55,6 +57,23 @@ pub fn known_tables(output: &QueryOutput) -> Vec<(String, String)> {
                 text(&row[0]).unwrap_or_default(),
                 text(&row[1]).unwrap_or_default(),
             )
+        })
+        .collect()
+}
+
+pub fn relation_columns(output: &QueryOutput) -> Option<Vec<CatalogColumn>> {
+    if output.rows.is_empty() || output.more_rows {
+        return None;
+    }
+    output
+        .rows
+        .iter()
+        .map(|row| match row.as_slice() {
+            [name, type_name] => Some(CatalogColumn {
+                name: text(name)?,
+                type_name: text(type_name)?,
+            }),
+            _ => None,
         })
         .collect()
 }

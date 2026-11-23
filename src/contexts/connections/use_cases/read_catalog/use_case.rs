@@ -24,4 +24,16 @@ impl<P: SessionPool> ReadCatalog<P> {
             .run_read_only(connection, database, catalog_sql, limits)
             .await
     }
+
+    pub async fn execute_cached(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        catalog_sql: &str,
+        limits: ExecutionLimits,
+    ) -> Result<QueryOutput, ConnectionError> {
+        self.pool
+            .run_cached_read_only(connection, database, catalog_sql, limits)
+            .await
+    }
 }

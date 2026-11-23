@@ -1,6 +1,7 @@
 pub mod catalog_cells;
 pub mod catalog_queries;
 pub mod catalog_reading;
+pub mod clear_lineage;
 pub mod column_pseudonymization;
 pub mod comment_cap;
 pub mod describe_sql;
