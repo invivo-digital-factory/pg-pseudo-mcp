@@ -30,6 +30,10 @@ async fn run_args(harness: &Harness, args: QueryArgs) -> (bool, String) {
     (is_error(&result), text)
 }
 
+fn body_of(text: &str) -> Value {
+    serde_json::from_str(text).unwrap()
+}
+
 fn rows(text: &str) -> Vec<Vec<Value>> {
     serde_json::from_str::<Value>(text).unwrap()["rows"]
         .as_array()
@@ -103,6 +107,94 @@ mod e2e {
         let (_, text) = run(&harness, "SELECT lower(email) AS e FROM customers").await;
         let response: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(response["pseudonymized"]["e"]["why"], "derived");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn un_libelle_d_enum_converti_en_texte_reste_en_clair_a_travers_les_expressions() {
+        let harness = Harness::new();
+        let (error, text) = run(
+            &harness,
+            "SELECT payment_method::text AS moyen, lower(payment_method::text) AS bas, initcap(payment_method::text) AS joli, status::text AS statut, CASE WHEN amount > 100 THEN status::text ELSE payment_method::text END AS choix, coalesce(payment_method::text, '') AS repli FROM orders ORDER BY id",
+        )
+        .await;
+        assert!(!error, "{text}");
+        assert_eq!(
+            rows(&text),
+            vec![
+                vec![
+                    json!("CASH"),
+                    json!("cash"),
+                    json!("Cash"),
+                    json!("paid"),
+                    json!("paid"),
+                    json!("CASH")
+                ],
+                vec![
+                    json!("SEPA"),
+                    json!("sepa"),
+                    json!("Sepa"),
+                    json!("shipped"),
+                    json!("SEPA"),
+                    json!("SEPA")
+                ],
+                vec![
+                    json!("BANK_CARD"),
+                    json!("bank_card"),
+                    json!("Bank_Card"),
+                    json!("pending"),
+                    json!("BANK_CARD"),
+                    json!("BANK_CARD")
+                ],
+                vec![
+                    json!("CASH"),
+                    json!("cash"),
+                    json!("Cash"),
+                    json!("pending"),
+                    json!("CASH"),
+                    json!("CASH")
+                ],
+            ]
+        );
+        assert!(body_of(&text).get("pseudonymized").is_none(), "{text}");
+
+        for sql in [
+            "SELECT status::text AS libelle FROM orders UNION SELECT payment_method::text FROM orders",
+            "WITH moyens AS (SELECT payment_method::text AS libelle FROM orders) SELECT libelle FROM moyens UNION SELECT upper(status::text) FROM orders",
+        ] {
+            let (error, text) = run(&harness, sql).await;
+            assert!(!error, "{sql}: {text}");
+            let mut labels: Vec<String> = rows(&text)
+                .into_iter()
+                .map(|row| row[0].as_str().unwrap().to_lowercase())
+                .collect();
+            labels.sort();
+            assert_eq!(
+                labels,
+                ["bank_card", "cash", "paid", "pending", "sepa", "shipped"],
+                "{sql}: {text}"
+            );
+            assert!(
+                body_of(&text).get("pseudonymized").is_none(),
+                "{sql}: {text}"
+            );
+        }
+
+        let (error, text) = run(
+            &harness,
+            "SELECT nom::text AS n, initcap(lower(prenom)) AS p, payment_method::text AS moyen FROM customers c JOIN orders o ON o.customer_id = c.id WHERE o.id = 10",
+        )
+        .await;
+        assert!(!error, "{text}");
+        let row = &rows(&text)[0];
+        assert_ne!(row[0], json!("Kervadec"), "{text}");
+        assert_ne!(row[1], json!("Ylwenna"), "{text}");
+        assert_eq!(row[2], json!("CASH"), "{text}");
+        let flagged = body_of(&text)["pseudonymized"].clone();
+        assert!(
+            flagged.get("n").is_some() && flagged.get("p").is_some(),
+            "{text}"
+        );
     }
 
     #[tokio::test]

@@ -32,4 +32,10 @@ pub trait ReadOnlyDatabase: Send + Sync {
         &self,
         connection: &str,
     ) -> impl Future<Output = Result<DatabaseListing, DatabaseFailure>> + Send;
+
+    fn enum_labels(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<String>, DatabaseFailure>> + Send;
 }

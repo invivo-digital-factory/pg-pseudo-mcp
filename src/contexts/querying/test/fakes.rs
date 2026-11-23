@@ -17,6 +17,7 @@ use crate::contexts::querying::domain::types::{
 pub struct FakeDatabase {
     response: Result<QueryOutput, DatabaseFailure>,
     listing: Result<DatabaseListing, DatabaseFailure>,
+    enum_labels: Result<Vec<String>, DatabaseFailure>,
     statements: Mutex<Vec<String>>,
 }
 
@@ -25,6 +26,19 @@ impl FakeDatabase {
         Arc::new(Self {
             response: Ok(output),
             listing: Err(DatabaseFailure::MissingParams),
+            enum_labels: Ok(Vec::new()),
+            statements: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn returning_with_enum_labels(
+        output: QueryOutput,
+        enum_labels: Result<Vec<String>, DatabaseFailure>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            response: Ok(output),
+            listing: Err(DatabaseFailure::MissingParams),
+            enum_labels,
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -32,7 +46,8 @@ impl FakeDatabase {
     pub fn failing(failure: DatabaseFailure) -> Arc<Self> {
         Arc::new(Self {
             response: Err(failure.clone()),
-            listing: Err(failure),
+            listing: Err(failure.clone()),
+            enum_labels: Err(failure),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -41,6 +56,7 @@ impl FakeDatabase {
         Arc::new(Self {
             response: Ok(empty_output()),
             listing: Ok(listing),
+            enum_labels: Ok(Vec::new()),
             statements: Mutex::new(Vec::new()),
         })
     }
@@ -89,6 +105,14 @@ impl ReadOnlyDatabase for FakeDatabase {
     async fn list_databases(&self, _connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
         self.listing.clone()
     }
+
+    async fn enum_labels(
+        &self,
+        _connection: &str,
+        _database: Option<&str>,
+    ) -> Result<Vec<String>, DatabaseFailure> {
+        self.enum_labels.clone()
+    }
 }
 
 #[derive(Default)]
@@ -120,6 +144,7 @@ impl PseudonymTranslator for FakeTranslator {
 #[derive(Default)]
 pub struct FakeAnonymizer {
     injected_seen: Mutex<Vec<Vec<(String, String)>>>,
+    enum_labels_seen: Mutex<Vec<Vec<String>>>,
     masks: Vec<(String, String)>,
 }
 
@@ -127,12 +152,17 @@ impl FakeAnonymizer {
     pub fn masking(real: &str, pseudonym: &str) -> Arc<Self> {
         Arc::new(Self {
             injected_seen: Mutex::default(),
+            enum_labels_seen: Mutex::default(),
             masks: vec![(real.to_string(), pseudonym.to_string())],
         })
     }
 
     pub fn injected_seen(&self) -> Vec<Vec<(String, String)>> {
         self.injected_seen.lock().unwrap().clone()
+    }
+
+    pub fn enum_labels_seen(&self) -> Vec<Vec<String>> {
+        self.enum_labels_seen.lock().unwrap().clone()
     }
 
     fn replace(&self, text: &str, injected: &[(String, String)]) -> String {
@@ -153,8 +183,13 @@ impl ResultAnonymizer for FakeAnonymizer {
         rows: Vec<Vec<Cell>>,
         _lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
+        enum_labels: &[String],
     ) -> AnonymizedRows {
         self.injected_seen.lock().unwrap().push(injected.to_vec());
+        self.enum_labels_seen
+            .lock()
+            .unwrap()
+            .push(enum_labels.to_vec());
         AnonymizedRows {
             rows: rows
                 .into_iter()

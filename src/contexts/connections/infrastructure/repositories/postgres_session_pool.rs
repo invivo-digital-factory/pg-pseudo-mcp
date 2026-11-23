@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMappedMutexGuard, OwnedMutexGuard};
 
 use crate::contexts::connections::domain::constants::CONNECT_DEADLINE;
 use crate::contexts::connections::domain::errors::ConnectionError;
@@ -71,6 +71,42 @@ impl PostgresSessionPool {
             .lock()
             .await
             .forget(connection, database, slot);
+    }
+
+    async fn session(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+    ) -> Result<OwnedMappedMutexGuard<Option<Session>, Session>, ConnectionError> {
+        let catalog = self.catalog.clone();
+        let database_unrequested = database.is_none_or(|name| name.trim().is_empty());
+        let requested = database
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_string);
+        let discovery =
+            tokio::task::spawn_blocking(move || catalog.discover_in(requested.as_deref()))
+                .await
+                .map_err(|_| ConnectionError::discovery_interrupted())?;
+        let params = resolve_connection(&discovery, connection)?;
+        let options = connect_options(&params, self.known_hosts.as_deref());
+        let slot = self
+            .slot(connection, &params.database, database_unrequested)
+            .await;
+        let mut cached = slot.clone().lock_owned().await;
+        let session = match cached.take() {
+            Some(session) if reusable(&session, &options, &params.password) => session,
+            _ => match self.connect(connection, options, &params.password).await {
+                Ok(session) => session,
+                Err(error) => {
+                    drop(cached);
+                    self.forget(connection, &params.database, &slot).await;
+                    return Err(error);
+                }
+            },
+        };
+        Ok(OwnedMutexGuard::map(cached, |cached| {
+            cached.insert(session)
+        }))
     }
 
     async fn connect(
@@ -184,37 +220,30 @@ impl SessionPool for PostgresSessionPool {
         sql: &str,
         limits: ExecutionLimits,
     ) -> Result<QueryOutput, ConnectionError> {
-        let catalog = self.catalog.clone();
-        let database_unrequested = database.is_none_or(|name| name.trim().is_empty());
-        let requested = database
-            .filter(|name| !name.trim().is_empty())
-            .map(str::to_string);
-        let discovery =
-            tokio::task::spawn_blocking(move || catalog.discover_in(requested.as_deref()))
-                .await
-                .map_err(|_| ConnectionError::discovery_interrupted())?;
-        let params = resolve_connection(&discovery, connection)?;
-        let options = connect_options(&params, self.known_hosts.as_deref());
-        let slot = self
-            .slot(connection, &params.database, database_unrequested)
-            .await;
-        let mut cached = slot.clone().lock_owned().await;
-        let session = match cached.take() {
-            Some(session) if reusable(&session, &options, &params.password) => session,
-            _ => match self.connect(connection, options, &params.password).await {
-                Ok(session) => session,
-                Err(error) => {
-                    drop(cached);
-                    self.forget(connection, &params.database, &slot).await;
-                    return Err(error);
-                }
-            },
-        };
-        let session = cached.insert(session);
+        let mut session = self.session(connection, database).await?;
         session
             .run_read_only(sql, limits.max_rows, limits.timeout_ms)
             .await
             .map_err(ConnectionError::Session)
+    }
+
+    async fn run_cached_read_only(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        sql: &str,
+        limits: ExecutionLimits,
+    ) -> Result<QueryOutput, ConnectionError> {
+        let mut session = self.session(connection, database).await?;
+        if let Some(output) = session.remembered(sql) {
+            return Ok(output.clone());
+        }
+        let output = session
+            .run_read_only(sql, limits.max_rows, limits.timeout_ms)
+            .await
+            .map_err(ConnectionError::Session)?;
+        session.remember(sql, output.clone());
+        Ok(output)
     }
 }
 
@@ -823,6 +852,24 @@ mod integration {
         let pool = azure_pool(params, tokens);
         let (pid, _) = backend_and_database(&pool, None).await;
         assert_eq!(backend_and_database(&pool, Some(&default)).await.0, pid);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn une_lecture_gardee_en_session_n_est_executee_qu_une_fois_par_base() {
+        let tokens = ScriptedTokens::new(Ok(real_password()));
+        let pool = azure_pool(local_params(real_password().expose(), false), tokens);
+        let sql = "SELECT clock_timestamp()::text";
+        let read = |database| pool.run_cached_read_only("azure", database, sql, limits());
+        let first = read(None).await.expect("the database is reachable");
+        assert_eq!(read(None).await.expect("cached"), first);
+        let other = read(Some("postgres")).await.expect("other database");
+        assert_ne!(other, first);
+        let fresh = pool
+            .run_read_only("azure", None, sql, limits())
+            .await
+            .expect("uncached");
+        assert_ne!(fresh, first);
     }
 
     #[tokio::test]

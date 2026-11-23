@@ -18,7 +18,7 @@ use crate::contexts::connections::infrastructure::repositories::{
 use crate::contexts::connections::presentation::ImportDbeaverHandler;
 use crate::contexts::connections::use_cases::{
     ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases, ReadCatalog,
-    RunReadOnlyStatement,
+    ReadEnumLabels, RunReadOnlyStatement,
 };
 
 pub struct ConnectionsContext {
@@ -27,6 +27,7 @@ pub struct ConnectionsContext {
     pub explain_statement: ExplainStatement<PostgresSessionPool>,
     pub read_catalog: ReadCatalog<PostgresSessionPool>,
     pub list_databases: ListDatabases<PostgresSessionPool>,
+    pub read_enum_labels: ReadEnumLabels<PostgresSessionPool>,
 }
 
 pub fn import_dbeaver_handler(config: &AppConfig) -> ImportDbeaverHandler {
@@ -95,7 +96,8 @@ impl ConnectionsContext {
             run_read_only_statement: RunReadOnlyStatement::new(pool.clone()),
             explain_statement: ExplainStatement::new(pool.clone()),
             read_catalog: ReadCatalog::new(pool.clone()),
-            list_databases: ListDatabases::new(pool),
+            list_databases: ListDatabases::new(pool.clone()),
+            read_enum_labels: ReadEnumLabels::new(pool),
         }
     }
 }

@@ -1,8 +1,10 @@
+use std::collections::HashSet;
+
 use serde_json::{Map, Value, json};
 
 use super::classify::{classify_column, judge_text, numeric_shape_kind};
 use super::detect::detect_spans;
-use super::dictionary::dictionary_kind;
+use super::dictionary::{dictionary_kind, fold};
 use super::injected_text::replace_injected;
 use super::pseudonymizer::Pseudonymizer;
 use super::tracker::Tracker;
@@ -14,6 +16,7 @@ use crate::contexts::anonymization::domain::types::{
 pub struct Anonymizer<'a> {
     pseudonymizer: &'a Pseudonymizer,
     injected: Vec<(String, String)>,
+    enum_labels: HashSet<String>,
 }
 
 impl<'a> Anonymizer<'a> {
@@ -27,7 +30,17 @@ impl<'a> Anonymizer<'a> {
         Self {
             pseudonymizer,
             injected,
+            enum_labels: HashSet::new(),
         }
+    }
+
+    pub fn with_enum_labels(mut self, labels: &[String]) -> Self {
+        self.enum_labels = labels
+            .iter()
+            .map(|label| fold(label.trim()))
+            .filter(|label| !label.is_empty())
+            .collect();
+        self
     }
 
     pub fn rows(
@@ -249,7 +262,12 @@ impl<'a> Anonymizer<'a> {
         if self.trusts(scrubbed.trim(), tainted) {
             return scrubbed;
         }
-        match judge_text(&scrubbed, class) {
+        let verdict = if self.is_enum_label(&scrubbed, class) {
+            TextVerdict::Clear
+        } else {
+            judge_text(&scrubbed, class)
+        };
+        match verdict {
             TextVerdict::Clear if tainted && residue_has_words(&scrubbed, &[]) => {
                 self.opaque_derived(&scrubbed, tracker)
             }
@@ -269,6 +287,12 @@ impl<'a> Anonymizer<'a> {
                 self.pseudonymizer.opaque_token("digest", &scrubbed)
             }
         }
+    }
+
+    fn is_enum_label(&self, text: &str, class: &ColumnClass) -> bool {
+        class.forced_kind.is_none()
+            && !self.enum_labels.is_empty()
+            && self.enum_labels.contains(&fold(text.trim()))
     }
 
     fn opaque_derived(&self, text: &str, tracker: &mut Tracker) -> String {
@@ -886,6 +910,110 @@ mod integration {
         let untainted = anonymizer.rows(&columns, vec![row()], Some(&[Clean, Clean]));
         assert_eq!(unknown.rows, untainted.rows);
         assert_eq!(unknown.per_column, untainted.per_column);
+    }
+
+    fn labels(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn single_cell(anonymizer: &Anonymizer, column: ColumnMeta, value: &str) -> AnonymizedRows {
+        anonymizer.rows(&[column], vec![vec![Cell::Text(value.to_string())]], None)
+    }
+
+    #[test]
+    fn un_libelle_d_enum_converti_en_texte_reste_en_clair() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["AUTHORIZED"]));
+        let anonymized = single_cell(&anonymizer, text_column("status", None), "AUTHORIZED");
+        assert_eq!(anonymized.rows[0][0], json!("AUTHORIZED"));
+        assert!(anonymized.per_column[0].is_none());
+    }
+
+    #[test]
+    fn un_libelle_d_enum_reste_en_clair_quelle_que_soit_sa_casse() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["AUTHORIZED"]));
+        for value in ["authorized", "Authorized", " Authorized "] {
+            let anonymized = single_cell(&anonymizer, text_column("lower", None), value);
+            assert_eq!(anonymized.rows[0][0], json!(value));
+            assert!(anonymized.per_column[0].is_none(), "{value}");
+        }
+    }
+
+    #[test]
+    fn un_libelle_d_enum_en_colonne_inconnue_echappe_a_l_heuristique_de_nom() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["SEPA"]));
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let column = || text_column("moyen", Some("moyen"));
+        assert!(single_cell(&baseline, column(), "Sepa").per_column[0].is_some());
+        let anonymized = single_cell(&anonymizer, column(), "Sepa");
+        assert_eq!(anonymized.rows[0][0], json!("Sepa"));
+        assert!(anonymized.per_column[0].is_none());
+    }
+
+    #[test]
+    fn un_prenom_derive_absent_des_libelles_d_enum_reste_pseudonymise() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["AUTHORIZED", "CASH"]));
+        let anonymized = single_cell(&anonymizer, text_column("initcap", None), "Marie");
+        assert_ne!(anonymized.rows[0][0], json!("Marie"));
+        assert!(anonymized.per_column[0].is_some());
+    }
+
+    #[test]
+    fn une_colonne_nom_egale_a_un_libelle_d_enum_reste_pseudonymisee() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["MARTIN"]));
+        let anonymized = single_cell(&anonymizer, text_column("nom", Some("nom")), "Martin");
+        assert_ne!(anonymized.rows[0][0], json!("Martin"));
+        assert_eq!(
+            anonymized.per_column[0],
+            Some(ColumnFlag {
+                kind: "last_name".to_string(),
+                why: Reason::Dictionary,
+            })
+        );
+    }
+
+    #[test]
+    fn un_libelle_d_enum_dans_une_colonne_souillee_reste_opaque() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&labels(&["KERVADEC"]));
+        let anonymized = anonymizer.rows(
+            &[text_column("lower", None)],
+            vec![vec![Cell::Text("kervadec".to_string())]],
+            Some(&[Personal]),
+        );
+        assert_ne!(anonymized.rows[0][0], json!("kervadec"));
+        assert!(anonymized.per_column[0].is_some());
+    }
+
+    #[test]
+    fn sans_libelle_d_enum_le_jugement_est_inchange() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]).with_enum_labels(&[]);
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let columns = [
+            text_column("status", None),
+            text_column("moyen", Some("moyen")),
+        ];
+        let row = || {
+            vec![
+                Cell::Text("AUTHORIZED".to_string()),
+                Cell::Text("Sepa".to_string()),
+            ]
+        };
+        let anonymized = anonymizer.rows(&columns, vec![row()], None);
+        let expected = baseline.rows(&columns, vec![row()], None);
+        assert_eq!(anonymized.rows, expected.rows);
+        assert_eq!(anonymized.per_column, expected.per_column);
+        assert_ne!(anonymized.rows[0][0], json!("AUTHORIZED"));
     }
 
     #[test]

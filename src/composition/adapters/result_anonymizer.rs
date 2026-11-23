@@ -24,6 +24,7 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
         rows: Vec<Vec<Cell>>,
         lineage_per_column: Option<&[Lineage]>,
         injected: &[(String, String)],
+        enum_labels: &[String],
     ) -> AnonymizedRows {
         let columns: Vec<_> = columns.iter().map(column).collect();
         let rows = rows
@@ -37,6 +38,7 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
             rows,
             lineage_per_column.as_deref(),
             injected,
+            enum_labels,
         ))
     }
 

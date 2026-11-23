@@ -71,4 +71,16 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
             .map(database_listing)
             .map_err(database_failure)
     }
+
+    async fn enum_labels(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+    ) -> Result<Vec<String>, DatabaseFailure> {
+        self.connections
+            .read_enum_labels
+            .execute(connection, database)
+            .await
+            .map_err(database_failure)
+    }
 }

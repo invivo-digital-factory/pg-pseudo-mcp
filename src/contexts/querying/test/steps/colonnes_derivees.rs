@@ -15,6 +15,29 @@ async fn column_is_flagged_derived(world: &mut QueryingWorld, column: String) {
     );
 }
 
+#[then(regex = r#"^la colonne "([^"]+)" vaut "([^"]+)" en clair$"#)]
+async fn column_is_clear(world: &mut QueryingWorld, column: String, expected: String) {
+    let answer = world.answer();
+    let body = answer.body();
+    let index = body["columns"]
+        .as_array()
+        .expect("columns array")
+        .iter()
+        .position(|item| item["name"] == column.as_str())
+        .unwrap_or_else(|| panic!("no column {column} in {}", answer.text));
+    assert_eq!(
+        answer.rows()[0][index],
+        expected.as_str(),
+        "{}",
+        answer.text
+    );
+    assert!(
+        body["pseudonymized"].get(column.as_str()).is_none(),
+        "{}",
+        answer.text
+    );
+}
+
 #[then(regex = r"^la réponse ne contient aucun fragment de l'adresse réelle$")]
 async fn answer_has_no_real_fragment(world: &mut QueryingWorld) {
     let text = world.answer().text.to_lowercase();
