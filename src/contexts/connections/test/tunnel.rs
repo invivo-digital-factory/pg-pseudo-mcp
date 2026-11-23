@@ -443,7 +443,7 @@ mod chaine_de_sauts {
         ConnectParams, PasswordSource, Secret, TunnelParams,
     };
     use crate::contexts::connections::infrastructure::data_sources::openssh::{
-        LocalEnvironment, OpenSshResolver, SshCommand,
+        LocalEnvironment, OpenSshAliasDirectory, OpenSshResolver, SshCommand,
     };
 
     struct Fixture {
@@ -456,10 +456,14 @@ mod chaine_de_sauts {
         }
 
         fn resolver(&self) -> OpenSshResolver {
-            OpenSshResolver::new(
-                Arc::new(SshCommand::from_path(Some(self.config_path()))),
-                LocalEnvironment::from_process(),
-            )
+            let dump = Arc::new(SshCommand::from_path(Some(self.config_path())));
+            let environment = LocalEnvironment::from_process();
+            let aliases = Arc::new(OpenSshAliasDirectory::new(
+                dump.clone(),
+                Some(self.config_path()),
+                environment.home.clone(),
+            ));
+            OpenSshResolver::new(dump, environment, aliases)
         }
     }
 

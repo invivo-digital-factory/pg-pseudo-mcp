@@ -28,7 +28,7 @@ impl OpenSshAliasDirectory {
             .or_else(|| self.ssh_directory().map(|dir| dir.join("config")))
     }
 
-    fn collect(&self, file: &Path, depth: usize, found: &mut Vec<String>) {
+    fn collect(&self, file: &Path, depth: usize, found: &mut Vec<Vec<String>>) {
         let Ok(contents) = std::fs::read_to_string(file) else {
             return;
         };
@@ -39,12 +39,12 @@ impl OpenSshAliasDirectory {
             };
             let arguments: Vec<&str> = words.take_while(|word| !word.starts_with('#')).collect();
             if keyword.eq_ignore_ascii_case("host") {
-                for pattern in arguments {
-                    let plain = !pattern.contains(['*', '?', '!']);
-                    if plain && !found.iter().any(|known| known == pattern) {
-                        found.push(pattern.to_string());
-                    }
-                }
+                found.push(
+                    arguments
+                        .iter()
+                        .map(|pattern| pattern.to_string())
+                        .collect(),
+                );
             } else if keyword.eq_ignore_ascii_case("include") && depth < MAX_INCLUDE_DEPTH {
                 for pattern in arguments {
                     for included in self.included_files(pattern) {
@@ -53,6 +53,14 @@ impl OpenSshAliasDirectory {
                 }
             }
         }
+    }
+
+    fn host_lines(&self) -> Vec<Vec<String>> {
+        let mut lines = Vec::new();
+        if let Some(root) = self.root_config() {
+            self.collect(&root, 0, &mut lines);
+        }
+        lines
     }
 
     fn included_files(&self, pattern: &str) -> Vec<PathBuf> {
@@ -109,12 +117,36 @@ impl SshAliasDirectory for OpenSshAliasDirectory {
     }
 
     fn known_aliases(&self) -> Vec<String> {
-        let mut found = Vec::new();
-        if let Some(root) = self.root_config() {
-            self.collect(&root, 0, &mut found);
+        let mut found: Vec<String> = Vec::new();
+        for pattern in self.host_lines().into_iter().flatten() {
+            let plain = !pattern.contains(['*', '?', '!']);
+            if plain && !found.contains(&pattern) {
+                found.push(pattern);
+            }
         }
         found
     }
+
+    fn defines(&self, alias: &str) -> bool {
+        self.root_config().is_none()
+            || self
+                .host_lines()
+                .iter()
+                .any(|patterns| host_line_matches(patterns, alias))
+    }
+}
+
+fn host_line_matches(patterns: &[String], alias: &str) -> bool {
+    let excluded = patterns
+        .iter()
+        .filter_map(|pattern| pattern.strip_prefix('!'))
+        .any(|pattern| wildcard_match(pattern, alias));
+    !excluded
+        && patterns.iter().any(|pattern| {
+            !pattern.starts_with('!')
+                && !pattern.chars().all(|character| character == '*')
+                && wildcard_match(pattern, alias)
+        })
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -256,5 +288,69 @@ mod unit {
         assert!(!wildcard_match("*.conf", "team.txt"));
         assert!(wildcard_match("a?c", "abc"));
         assert!(!wildcard_match("a?c", "ac"));
+    }
+
+    #[test]
+    fn un_alias_defini_par_un_bloc_host_exact_est_defini() {
+        let (_home, directory) = directory("Host corp-bastion other\n  HostName x\n", &[]);
+        assert!(directory.defines("corp-bastion"));
+        assert!(directory.defines("other"));
+        assert!(!directory.defines("corp-bastio"));
+    }
+
+    #[test]
+    fn un_alias_qui_correspond_a_un_motif_a_jokers_est_defini() {
+        let (_home, directory) = directory("Host *.corp web-?\n", &[]);
+        assert!(directory.defines("db.corp"));
+        assert!(directory.defines("web-1"));
+        assert!(!directory.defines("web-12"));
+        assert!(!directory.defines("db.example"));
+    }
+
+    #[test]
+    fn un_bloc_host_etoile_seul_ne_definit_aucun_alias() {
+        let (_home, directory) = directory("Host *\n  User x\nHost * !nothing\n", &[]);
+        assert!(!directory.defines("anything"));
+    }
+
+    #[test]
+    fn un_motif_nie_exclut_l_alias_de_sa_ligne_mais_pas_des_autres() {
+        let (_home, directory) = directory("Host web-* !web-old\nHost web-old-bis\n", &[]);
+        assert!(directory.defines("web-new"));
+        assert!(!directory.defines("web-old"));
+        assert!(directory.defines("web-old-bis"));
+    }
+
+    #[test]
+    fn un_alias_defini_dans_un_fichier_inclus_est_defini() {
+        let (home, directory) = directory("Include conf.d/*.conf\n", &[]);
+        std::fs::write(
+            home.path().join(".ssh/conf.d/team.conf"),
+            "Host from-include\n",
+        )
+        .unwrap();
+        assert!(directory.defines("from-include"));
+        assert!(!directory.defines("elsewhere"));
+    }
+
+    #[test]
+    fn un_bloc_match_n_est_pas_evalue_et_ne_definit_rien_par_lui_meme() {
+        let (_home, directory) = directory("Match host db\n  User x\nHost real\n", &[]);
+        assert!(directory.defines("real"));
+        assert!(!directory.defines("db"));
+    }
+
+    #[test]
+    fn sans_fichier_de_configuration_lisible_aucun_alias_n_est_defini() {
+        let home = tempfile::tempdir().unwrap();
+        let directory =
+            OpenSshAliasDirectory::new(answers(&[]), None, Some(home.path().to_path_buf()));
+        assert!(!directory.defines("any"));
+    }
+
+    #[test]
+    fn sans_emplacement_de_configuration_connu_aucun_alias_n_est_refuse() {
+        let directory = OpenSshAliasDirectory::new(answers(&[]), None, None);
+        assert!(directory.defines("any"));
     }
 }
