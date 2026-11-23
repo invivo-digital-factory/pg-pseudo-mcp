@@ -4,8 +4,9 @@ use cucumber::World;
 use pg_pseudo_mcp::common::AppConfig;
 use pg_pseudo_mcp::composition::contexts::Contexts;
 use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
+use pg_pseudo_mcp::contexts::connections::presentation::list_connections_with_warnings;
 use pg_pseudo_mcp::contexts::querying::presentation::{
-    ListDatabasesArgs, QueryArgs, list_databases, query,
+    DescribeTableArgs, ListDatabasesArgs, QueryArgs, describe_table, list_databases, query,
 };
 use serde_json::Value;
 
@@ -39,6 +40,8 @@ pub struct QueryingWorld {
     _data: tempfile::TempDir,
     pub answer: Option<Answer>,
     pub pseudonym: Option<String>,
+    pub shared_policy: Option<String>,
+    pub local_policy: Option<String>,
 }
 
 impl std::fmt::Debug for QueryingWorld {
@@ -58,6 +61,8 @@ impl QueryingWorld {
             _data: tempfile::tempdir().expect("data dir"),
             answer: None,
             pseudonym: None,
+            shared_policy: None,
+            local_policy: None,
         }
     }
 
@@ -65,12 +70,26 @@ impl QueryingWorld {
         write_workspace(self._dbeaver.path(), &database_target(), true, None);
         let ssh_config = self._data.path().join("ssh_config");
         std::fs::write(&ssh_config, "").expect("empty ssh config");
+        let columns_file = self.shared_policy.as_ref().map(|contents| {
+            let path = self._data.path().join("team-columns.toml");
+            std::fs::write(&path, contents).expect("shared column policy");
+            path
+        });
+        let xdg_config_home = self.local_policy.as_ref().map(|contents| {
+            let folder = self._data.path().join("xdg").join("pg-pseudo");
+            std::fs::create_dir_all(&folder).expect("local config folder");
+            std::fs::write(folder.join("columns.toml"), contents).expect("local column policy");
+            self._data.path().join("xdg").into_os_string()
+        });
         let config = AppConfig {
             dbeaver_home: Some(self._dbeaver.path().to_path_buf()),
             data_dir: Some(self._data.path().to_path_buf()),
             ssh_known_hosts: None,
             ssh_config: Some(ssh_config),
             connections_file: Some(self._data.path().join("absent-connections.toml")),
+            columns_file,
+            xdg_config_home,
+            home_dir: None,
         };
         let anonymization = AnonymizationInjector::new(self._data.path()).use_cases();
         self.contexts = Some(Arc::new(Contexts::with_anonymization(
@@ -114,6 +133,42 @@ impl QueryingWorld {
                 database: database.map(str::to_string),
                 ..QueryArgs::default()
             },
+        )
+        .await;
+        self.answer = Some(Answer {
+            refused: is_error(&result),
+            text: text_of(&result),
+        });
+    }
+
+    pub async fn describe(&mut self, table: &str) {
+        let contexts = self
+            .contexts
+            .as_ref()
+            .expect("connected to the test database");
+        let result = describe_table(
+            &contexts.querying.describe_table,
+            DescribeTableArgs {
+                connection: CONNECTION.to_string(),
+                table: table.to_string(),
+                database: None,
+            },
+        )
+        .await;
+        self.answer = Some(Answer {
+            refused: is_error(&result),
+            text: text_of(&result),
+        });
+    }
+
+    pub async fn list_connections(&mut self) {
+        let contexts = self
+            .contexts
+            .as_ref()
+            .expect("connected to the test database");
+        let result = list_connections_with_warnings(
+            &contexts.connections.list_connections,
+            &contexts.column_policy_warnings(),
         )
         .await;
         self.answer = Some(Answer {

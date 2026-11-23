@@ -1,4 +1,6 @@
 mod cell;
+mod column_policy_entries;
+mod column_policy_file;
 mod connect_options;
 mod connection_definition;
 mod connection_entry;
@@ -13,6 +15,8 @@ mod query_output;
 mod secret;
 
 pub use cell::Cell;
+pub use column_policy_entries::ColumnPolicyEntries;
+pub use column_policy_file::ColumnPolicyFile;
 pub use connect_options::{ConnectOptions, Hop, Tunnel, TunnelAuth};
 pub use connection_definition::{AuthMode, ConnectionDefinition, ConnectionType};
 pub use connection_entry::{ConnectionEntry, ConnectionStatus, Discovery};

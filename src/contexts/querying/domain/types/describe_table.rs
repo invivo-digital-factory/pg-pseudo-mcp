@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use super::ColumnPolicyHint;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DescribeTableRequest {
     pub connection: String,
@@ -16,6 +18,8 @@ pub struct DescribeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
     pub columns: Vec<ColumnEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub column_policy_hints: Vec<ColumnPolicyHint>,
     pub primary_key: Vec<String>,
     pub foreign_keys: Vec<ForeignKey>,
     pub referenced_by: Vec<Reference>,
@@ -31,6 +35,8 @@ pub struct ColumnEntry {
     pub not_null: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pseudonymized: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
@@ -77,6 +83,7 @@ mod unit {
                 type_name: types[index % types.len()].to_string(),
                 not_null: index % 3 == 0,
                 pseudonymized: (index % types.len() == 1).then(|| DETECTED_PER_VALUE.to_string()),
+                policy: None,
                 comment: None,
             })
             .collect();
@@ -87,6 +94,7 @@ mod unit {
             estimated_rows: Some(120_000),
             comment: None,
             columns,
+            column_policy_hints: Vec::new(),
             primary_key: vec!["column_nb_00".into()],
             foreign_keys: vec![ForeignKey {
                 columns: vec!["column_nb_02".into()],

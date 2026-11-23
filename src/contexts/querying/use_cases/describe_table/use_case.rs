@@ -2,18 +2,21 @@ use std::sync::Arc;
 
 use crate::contexts::querying::domain::constants::catalog::SUGGESTION_POOL;
 use crate::contexts::querying::domain::errors::{DatabaseFailure, QueryingError, ScrubbedText};
-use crate::contexts::querying::domain::repositories::{AnonymizationPorts, ReadOnlyDatabase};
+use crate::contexts::querying::domain::repositories::{
+    AnonymizationPorts, ColumnPolicySource, ReadOnlyDatabase,
+};
 use crate::contexts::querying::domain::services::catalog_queries::{known_tables_sql, resolve_sql};
 use crate::contexts::querying::domain::services::catalog_reading::{candidates, known_tables};
+use crate::contexts::querying::domain::services::column_policy::describe_hint;
 use crate::contexts::querying::domain::services::comment_cap::cap_comment;
 use crate::contexts::querying::domain::services::describe_sql::describe_sql;
 use crate::contexts::querying::domain::services::description::{column_entry, read_description};
 use crate::contexts::querying::domain::services::qualified_name::split_qualified;
-use crate::contexts::querying::domain::services::relation::short_type;
 use crate::contexts::querying::domain::services::table_picker::{Candidate, Pick, pick};
 use crate::contexts::querying::domain::services::table_suggestions::closest_names;
 use crate::contexts::querying::domain::types::{
-    DescribeResponse, DescribeTableRequest, ExecutionLimits, QueryLimits, QueryOutput,
+    ColumnPolicy, ColumnSource, DescribeResponse, DescribeTableRequest, ExecutionLimits,
+    QueryLimits, QueryOutput,
 };
 
 #[derive(Clone, Copy)]
@@ -25,6 +28,7 @@ struct Source<'a> {
 pub struct DescribeTable<D: ReadOnlyDatabase> {
     database: Arc<D>,
     anonymization: Result<AnonymizationPorts, String>,
+    policy: Option<Arc<dyn ColumnPolicySource>>,
 }
 
 impl<D: ReadOnlyDatabase> DescribeTable<D> {
@@ -32,7 +36,13 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
         Self {
             database,
             anonymization,
+            policy: None,
         }
+    }
+
+    pub fn with_column_policy(mut self, policy: Arc<dyn ColumnPolicySource>) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     pub async fn execute(
@@ -67,20 +77,41 @@ impl<D: ReadOnlyDatabase> DescribeTable<D> {
             .comment
             .as_deref()
             .map(|comment| self.scrubbed_comment(ports, comment));
+        let policy = self.column_policy();
+        let mut hints = Vec::new();
         let columns = description
             .take_columns()
             .into_iter()
             .map(|column| {
-                let type_name = short_type(&column.type_name);
-                let class = ports.dictionary.classify(&column.name, &type_name);
+                let class = ports
+                    .dictionary
+                    .classify(&column.name, &column.classified_type());
+                let source = ColumnSource {
+                    schema: description.schema().to_string(),
+                    table: description.name().to_string(),
+                    column: column.name.clone(),
+                };
                 let column_comment = column
                     .comment
                     .as_deref()
                     .map(|comment| self.scrubbed_comment(ports, comment));
-                column_entry(column, &class, column_comment)
+                let entry = column_entry(column, &class, policy.decide(&source), column_comment);
+                hints.extend(describe_hint(
+                    format!("{}.{}.{}", source.schema, source.table, source.column),
+                    &class,
+                    &entry,
+                ));
+                entry
             })
             .collect();
-        Ok(description.into_response(comment, columns))
+        Ok(description.into_response(comment, columns, hints))
+    }
+
+    fn column_policy(&self) -> ColumnPolicy {
+        self.policy
+            .as_ref()
+            .map(|source| source.load().policy)
+            .unwrap_or_default()
     }
 
     async fn fetch(

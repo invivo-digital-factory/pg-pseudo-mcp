@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::adapters::{
-    PersonalColumnDictionaryAdapter, PseudonymTranslatorAdapter, ReadOnlyDatabaseAdapter,
-    ResultAnonymizerAdapter,
+    ColumnPolicySourceAdapter, PersonalColumnDictionaryAdapter, PseudonymTranslatorAdapter,
+    ReadOnlyDatabaseAdapter, ResultAnonymizerAdapter,
 };
 use crate::contexts::anonymization::injector::AnonymizationUseCases;
 use crate::contexts::connections::injector::ConnectionsContext;
@@ -23,5 +23,10 @@ pub fn querying_context(
         )),
         anonymizer: Arc::new(ResultAnonymizerAdapter::new(use_cases)),
     });
-    QueryingContext::new(Arc::new(ReadOnlyDatabaseAdapter::new(connections)), ports)
+    let policy = Arc::new(ColumnPolicySourceAdapter::new(Arc::clone(&connections)));
+    QueryingContext::new(
+        Arc::new(ReadOnlyDatabaseAdapter::new(connections)),
+        ports,
+        policy,
+    )
 }

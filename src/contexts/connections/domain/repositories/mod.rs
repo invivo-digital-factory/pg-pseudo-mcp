@@ -1,4 +1,5 @@
 mod azure_sign_in_token_provider;
+mod column_policy_files;
 mod command_password_provider;
 mod connection_catalog;
 mod connection_file_writer;
@@ -7,6 +8,7 @@ mod session_pool;
 mod ssh_alias_directory;
 
 pub use azure_sign_in_token_provider::AzureSignInTokenProvider;
+pub use column_policy_files::ColumnPolicyFiles;
 pub use command_password_provider::CommandPasswordProvider;
 pub use connection_catalog::ConnectionCatalog;
 pub use connection_file_writer::ConnectionFileWriter;

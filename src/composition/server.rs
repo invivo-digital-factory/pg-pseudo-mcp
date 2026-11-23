@@ -13,7 +13,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use super::contexts::Contexts;
 use super::server_info::server_info;
 use crate::common::AppConfig;
-use crate::contexts::connections::presentation::list_connections;
+use crate::contexts::connections::presentation::list_connections_with_warnings;
 use crate::contexts::querying::presentation::{
     DescribeTableArgs, ExplainArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
     describe_table, explain, json_result, list_databases, list_tables, query, search_schema,
@@ -24,7 +24,8 @@ pg-pseudo-mcp gives read-only access to the PostgreSQL databases of the develope
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query.
 A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
-A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived).
+A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived, policy).
+When a query or describe_table result carries column_policy_hints, those columns were pseudonymized by default or taken for names by the dictionary, possibly wrongly, and no column policy classifies them: propose to the developer to classify each one as clear or personal, in their local file ~/.config/pg-pseudo/columns.toml for immediate use, and in the team's shared list through the team's own process.
 You may reuse a pseudonym verbatim in a later query: emails, phones, IBAN, SIREN, SIRET, NIR, card numbers, IP addresses, full person names and last names are translated back to the real value before execution. Check translated_literals and warnings to confirm.
 First names alone, street addresses, cities, postal codes, civility, gender and birth dates are not translated back: do not filter on them.
 Sorting, MIN/MAX, ranges, LIKE, regular expressions, length, substrings, hashing and date arithmetic act on the real values, so their results may not match the pseudonyms you see.
@@ -58,7 +59,11 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_connections(&self) -> CallToolResult {
-        list_connections(&self.contexts.connections.list_connections).await
+        list_connections_with_warnings(
+            &self.contexts.connections.list_connections,
+            &self.contexts.column_policy_warnings(),
+        )
+        .await
     }
 
     #[tool(
@@ -123,7 +128,7 @@ impl PgPseudoServer {
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn server_info(&self) -> CallToolResult {
-        json_result(&server_info())
+        json_result(&server_info(self.contexts.column_policy_warnings()))
     }
 }
 

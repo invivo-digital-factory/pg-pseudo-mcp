@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value, json};
 
-use super::classify::{classify_column, judge_text, numeric_shape_kind};
-use super::detect::detect_spans;
+use super::classify::{classify_column, forced_reason, judge_text, numeric_shape_kind};
+use super::detect::{detect_spans, structural_spans};
 use super::dictionary::{dictionary_kind, fold};
 use super::injected_text::replace_injected;
 use super::pseudonymizer::Pseudonymizer;
@@ -80,7 +80,12 @@ impl<'a> Anonymizer<'a> {
         let classes: Vec<ColumnClass> = classes
             .into_iter()
             .enumerate()
-            .map(|(index, class)| self.cleared(index, class, tainted[index]))
+            .map(|(index, class)| self.cleared(index, &columns[index], class, tainted[index]))
+            .collect();
+        let tainted: Vec<bool> = tainted
+            .into_iter()
+            .zip(&classes)
+            .map(|(flag, class)| flag && !class.structural_only)
             .collect();
         let mut flags: Vec<Option<ColumnFlag>> = vec![None; columns.len()];
         let rows = rows
@@ -187,7 +192,7 @@ impl<'a> Anonymizer<'a> {
                 self.number(&text, original, class, tracker)
             }
             Cell::Text(text) => Value::String(self.text(&text, class, tainted, tracker)),
-            Cell::Json(value) => self.json(value, None, tainted, tracker),
+            Cell::Json(value) => self.json(value, None, class.structural_only, tainted, tracker),
             Cell::Uuid(text) | Cell::Time(text) | Cell::Interval(text) => Value::String(text),
             Cell::Date(text) if class.derived && class.forced_kind.is_none() => {
                 Value::String(self.pseudonymize(Kind::BirthDate, &text, Reason::Derived, tracker))
@@ -197,7 +202,7 @@ impl<'a> Anonymizer<'a> {
                     Value::String(self.pseudonymize(
                         Kind::BirthDate,
                         &text,
-                        Reason::Dictionary,
+                        forced_reason(class),
                         tracker,
                     ))
                 } else {
@@ -217,10 +222,14 @@ impl<'a> Anonymizer<'a> {
                 let mut object = Map::new();
                 for (name, field) in fields {
                     let field_class = classify_column(&ColumnInfo {
-                        column_name: Some(&name),
+                        column_name: (!class.structural_only).then_some(name.as_str()),
                         type_name: field_type(&field),
                         derived: class.derived,
                     });
+                    let field_class = ColumnClass {
+                        structural_only: class.structural_only,
+                        ..field_class
+                    };
                     object.insert(name, self.cell(field, &field_class, tainted, tracker));
                 }
                 Value::Object(object)
@@ -254,7 +263,7 @@ impl<'a> Anonymizer<'a> {
         };
         let kind = numeric_shape_kind(digits, Some(hint)).unwrap_or(hint);
         let integral = digits.split('.').next().unwrap_or(digits);
-        let pseudonym = self.pseudonymize(kind, integral, Reason::Dictionary, tracker);
+        let pseudonym = self.pseudonymize(kind, integral, forced_reason(class), tracker);
         if original.is_number()
             && let Ok(number) = pseudonym.parse::<i64>()
         {
@@ -301,16 +310,45 @@ impl<'a> Anonymizer<'a> {
         }
     }
 
-    fn cleared(&self, index: usize, class: ColumnClass, tainted: bool) -> ColumnClass {
-        let proven = self.clearances.get(index) == Some(&Clearance::ProvenClear);
-        if proven && class.derived && class.forced_kind.is_none() && !tainted {
-            ColumnClass {
+    fn cleared(
+        &self,
+        index: usize,
+        column: &ColumnMeta,
+        class: ColumnClass,
+        tainted: bool,
+    ) -> ColumnClass {
+        let unnamed_derived = class.derived && class.forced_kind.is_none();
+        match self.clearances.get(index) {
+            Some(Clearance::ProvenClear) if unnamed_derived && !tainted => ColumnClass {
                 forced_kind: None,
                 clear_by_type: true,
                 derived: false,
-            }
-        } else {
-            class
+                structural_only: false,
+                forced_by_policy: false,
+            },
+            Some(Clearance::ClearByPolicy) if unnamed_derived => ColumnClass {
+                forced_kind: None,
+                clear_by_type: false,
+                derived: false,
+                structural_only: true,
+                forced_by_policy: false,
+            },
+            Some(Clearance::ClearByPolicy) if !class.derived => ColumnClass {
+                structural_only: true,
+                ..classify_column(&ColumnInfo {
+                    column_name: None,
+                    type_name: &column.type_name,
+                    derived: false,
+                })
+            },
+            Some(Clearance::PersonalByPolicy(kind)) if !class.derived => ColumnClass {
+                forced_kind: Some(*kind),
+                clear_by_type: false,
+                derived: false,
+                structural_only: false,
+                forced_by_policy: true,
+            },
+            _ => class,
         }
     }
 
@@ -329,6 +367,7 @@ impl<'a> Anonymizer<'a> {
         &self,
         value: Value,
         key_kind: Option<Kind>,
+        structural_only: bool,
         tainted: bool,
         tracker: &mut Tracker,
     ) -> Value {
@@ -338,6 +377,8 @@ impl<'a> Anonymizer<'a> {
                     forced_kind: key_kind,
                     clear_by_type: false,
                     derived: false,
+                    structural_only,
+                    forced_by_policy: false,
                 };
                 Value::String(self.text(&text, &class, tainted, tracker))
             }
@@ -347,6 +388,8 @@ impl<'a> Anonymizer<'a> {
                         forced_kind: Some(kind),
                         clear_by_type: false,
                         derived: false,
+                        structural_only: false,
+                        forced_by_policy: false,
                     };
                     let text = number.to_string();
                     self.number(&text, Value::Number(number), &class, tracker)
@@ -356,16 +399,20 @@ impl<'a> Anonymizer<'a> {
             Value::Array(items) => Value::Array(
                 items
                     .into_iter()
-                    .map(|item| self.json(item, key_kind, tainted, tracker))
+                    .map(|item| self.json(item, key_kind, structural_only, tainted, tracker))
                     .collect(),
             ),
             Value::Object(entries) => Value::Object(
                 entries
                     .into_iter()
                     .map(|(key, item)| {
-                        let kind = dictionary_kind(&key);
-                        let key = self.json_key(&key, tainted, tracker);
-                        let item = self.json(item, kind, tainted, tracker);
+                        let kind = if structural_only {
+                            None
+                        } else {
+                            dictionary_kind(&key)
+                        };
+                        let key = self.json_key(&key, structural_only, tainted, tracker);
+                        let item = self.json(item, kind, structural_only, tainted, tracker);
                         (key, item)
                     })
                     .collect(),
@@ -374,9 +421,19 @@ impl<'a> Anonymizer<'a> {
         }
     }
 
-    fn json_key(&self, key: &str, tainted: bool, tracker: &mut Tracker) -> String {
+    fn json_key(
+        &self,
+        key: &str,
+        structural_only: bool,
+        tainted: bool,
+        tracker: &mut Tracker,
+    ) -> String {
         let scrubbed = self.scrub_injected(key, tainted, tracker);
-        let spans = detect_spans(&scrubbed);
+        let spans = if structural_only {
+            structural_spans(&scrubbed)
+        } else {
+            detect_spans(&scrubbed)
+        };
         if tainted && !self.trusts(scrubbed.trim(), tainted) && residue_has_words(&scrubbed, &spans)
         {
             return self.opaque_derived(&scrubbed, tracker);
@@ -1177,5 +1234,189 @@ mod integration {
             json!(pseudonymizer.opaque_token("derived", "ylwenna.kervadec"))
         );
         assert_eq!(anonymized.rows[0][1], json!("PAID en_cours"));
+    }
+    fn source_column(name: &str, type_name: &str) -> ColumnMeta {
+        ColumnMeta {
+            name: name.to_string(),
+            type_name: type_name.to_string(),
+            source: Some(ColumnSource {
+                schema: "public".to_string(),
+                table: "products".to_string(),
+                column: name.to_string(),
+            }),
+        }
+    }
+
+    #[test]
+    fn une_colonne_declaree_en_clair_garde_sa_valeur_malgre_le_dictionnaire() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let column = || source_column("product_name", "text");
+        assert_eq!(
+            single_cell(&baseline, column(), "Garance Bleue").per_column[0]
+                .as_ref()
+                .map(|flag| flag.why),
+            Some(Reason::Dictionary)
+        );
+        let anonymized = single_cell(&anonymizer, column(), "Garance Bleue");
+        assert_eq!(anonymized.rows[0][0], json!("Garance Bleue"));
+        assert!(anonymized.per_column[0].is_none());
+    }
+
+    #[test]
+    fn une_colonne_declaree_en_clair_echappe_a_l_heuristique_de_nom() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let column = || source_column("libelle", "text");
+        assert!(single_cell(&baseline, column(), "Ylwenna Kervadec").per_column[0].is_some());
+        let anonymized = single_cell(&anonymizer, column(), "Ylwenna Kervadec");
+        assert_eq!(anonymized.rows[0][0], json!("Ylwenna Kervadec"));
+        assert!(anonymized.per_column[0].is_none());
+    }
+
+    #[test]
+    fn une_colonne_declaree_en_clair_remplace_quand_meme_une_adresse_e_mail() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let anonymized = single_cell(
+            &anonymizer,
+            source_column("product_name", "text"),
+            "Garance ylwenna.kervadec@canary-mail.fr",
+        );
+        let value = anonymized.rows[0][0].as_str().expect("text");
+        assert!(value.starts_with("Garance "), "{value}");
+        assert!(!value.contains("canary-mail"), "{value}");
+        assert_eq!(
+            anonymized.per_column[0],
+            Some(ColumnFlag {
+                kind: "email".to_string(),
+                why: Reason::Detected,
+            })
+        );
+    }
+
+    #[test]
+    fn une_colonne_declaree_en_clair_remplace_quand_meme_un_telephone_et_un_iban() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let value = "appel 06 41 27 83 95 iban FR76 3000 4000 0312 3456 7890 143";
+        let anonymized = single_cell(&anonymizer, source_column("reference", "text"), value);
+        let text = anonymized.rows[0][0].as_str().expect("text");
+        assert!(!text.contains("06 41 27 83 95"), "{text}");
+        assert!(!text.contains("FR76 3000"), "{text}");
+        assert!(text.starts_with("appel "), "{text}");
+    }
+
+    #[test]
+    fn le_json_d_une_colonne_declaree_en_clair_ne_garde_que_le_filet_structurel() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let anonymized = anonymizer.rows(
+            &[source_column("details", "jsonb")],
+            vec![vec![Cell::Json(json!({
+                "nom": "Garance",
+                "mail": "ylwenna.kervadec@canary-mail.fr"
+            }))]],
+            None,
+        );
+        assert_eq!(anonymized.rows[0][0]["nom"], json!("Garance"));
+        let mail = anonymized.rows[0][0]["mail"].as_str().expect("text");
+        assert!(!mail.contains("canary-mail"), "{mail}");
+    }
+
+    #[test]
+    fn une_colonne_declaree_personnelle_est_pseudonymisee_avec_le_type_donne() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let baseline = Anonymizer::new(&pseudonymizer, &[]);
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[])
+            .with_clearances(&[Clearance::PersonalByPolicy(Kind::LastName)]);
+        let column = || source_column("code_lot", "text");
+        assert!(single_cell(&baseline, column(), "lot-42").per_column[0].is_none());
+        let anonymized = single_cell(&anonymizer, column(), "lot-42");
+        assert_ne!(anonymized.rows[0][0], json!("lot-42"));
+        assert_eq!(
+            anonymized.per_column[0],
+            Some(ColumnFlag {
+                kind: "last_name".to_string(),
+                why: Reason::Policy,
+            })
+        );
+    }
+
+    #[test]
+    fn une_colonne_numerique_declaree_personnelle_est_pseudonymisee() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[])
+            .with_clearances(&[Clearance::PersonalByPolicy(Kind::Siren)]);
+        let anonymized = anonymizer.rows(
+            &[source_column("numero", "int8")],
+            vec![vec![Cell::Int(418273652)]],
+            None,
+        );
+        assert_ne!(anonymized.rows[0][0], json!(418273652));
+        assert_eq!(
+            anonymized.per_column[0],
+            Some(ColumnFlag {
+                kind: "siren".to_string(),
+                why: Reason::Policy,
+            })
+        );
+    }
+
+    #[test]
+    fn une_colonne_derivee_d_une_colonne_declaree_en_clair_garde_le_filet_structurel() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let clear = single_cell(&anonymizer, text_column("v", None), "Garance Bleue paid");
+        assert_eq!(clear.rows[0][0], json!("Garance Bleue paid"));
+        assert!(clear.per_column[0].is_none());
+        let email = single_cell(
+            &anonymizer,
+            text_column("v", None),
+            "Garance ylwenna.kervadec@canary-mail.fr",
+        );
+        let value = email.rows[0][0].as_str().expect("text");
+        assert!(!value.contains("canary-mail"), "{value}");
+    }
+
+    #[test]
+    fn une_lignee_prouvee_par_la_politique_l_emporte_sur_la_souillure_par_le_nom_mais_garde_le_filet()
+     {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let clear = anonymizer.rows(
+            &[text_column("concat", None)],
+            vec![vec![Cell::Text("Garance Bleue paid".to_string())]],
+            Some(&[Personal]),
+        );
+        assert_eq!(clear.rows[0][0], json!("Garance Bleue paid"));
+        let email = anonymizer.rows(
+            &[text_column("concat", None)],
+            vec![vec![Cell::Text(
+                "Garance ylwenna.kervadec@canary-mail.fr".to_string(),
+            )]],
+            Some(&[Personal]),
+        );
+        let value = email.rows[0][0].as_str().expect("text");
+        assert!(!value.contains("canary-mail"), "{value}");
+    }
+
+    #[test]
+    fn une_colonne_derivee_nommee_comme_une_donnee_personnelle_reste_pseudonymisee_malgre_la_politique()
+     {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer =
+            Anonymizer::new(&pseudonymizer, &[]).with_clearances(&[Clearance::ClearByPolicy]);
+        let anonymized = single_cell(&anonymizer, text_column("nom", None), "Martin");
+        assert_ne!(anonymized.rows[0][0], json!("Martin"));
     }
 }

@@ -12,4 +12,6 @@ pub struct ColumnClass {
     pub forced_kind: Option<Kind>,
     pub clear_by_type: bool,
     pub derived: bool,
+    pub structural_only: bool,
+    pub forced_by_policy: bool,
 }

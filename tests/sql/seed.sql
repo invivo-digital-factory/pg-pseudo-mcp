@@ -72,6 +72,17 @@ INSERT INTO notes (id, customer_id, body) VALUES
   (100, 1, 'Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Lilas'),
   (101, 2, 'Client prefers email odrigan.hazvekmor@canary-mail.fr, IBAN FR76 3000 4000 0312 3456 7890 143');
 
+CREATE TABLE products (
+    id integer PRIMARY KEY,
+    product_name text NOT NULL,
+    supplier_ref text NOT NULL,
+    status order_status NOT NULL
+);
+
+INSERT INTO products (id, product_name, supplier_ref, status) VALUES
+  (1, 'Garance Bleue', 'lot-42', 'paid'),
+  (2, 'Garance zivrel.quanteb@canary-mail.fr', 'lot-43', 'shipped');
+
 CREATE TABLE big_numbers AS SELECT g AS id FROM generate_series(1, 10000) AS g;
 
 RESET ROLE;

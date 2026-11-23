@@ -18,6 +18,9 @@ fn contexts_without_secret() -> (Contexts, tempfile::TempDir, tempfile::TempDir)
         ssh_known_hosts: None,
         ssh_config: Some(common::isolated_ssh_config(data.path())),
         connections_file: Some(data.path().join("absent-connections.toml")),
+        columns_file: None,
+        xdg_config_home: None,
+        home_dir: None,
     };
     (Contexts::new(&config), dbeaver, data)
 }

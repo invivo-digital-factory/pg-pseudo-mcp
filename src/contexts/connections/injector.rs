@@ -5,7 +5,9 @@ use crate::contexts::connections::domain::repositories::{
     AzureSignInTokenProvider, CommandPasswordProvider,
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
-use crate::contexts::connections::infrastructure::data_sources::connection_file::TomlConnectionFileWriter;
+use crate::contexts::connections::infrastructure::data_sources::connection_file::{
+    TomlConnectionFileWriter, user_config_file,
+};
 use crate::contexts::connections::infrastructure::data_sources::dbeaver::DbeaverWorkspaceDefinitions;
 use crate::contexts::connections::infrastructure::data_sources::openssh::{
     LocalEnvironment, OpenSshAliasDirectory, OpenSshResolver, SshCommand,
@@ -13,13 +15,15 @@ use crate::contexts::connections::infrastructure::data_sources::openssh::{
 use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
 use crate::contexts::connections::infrastructure::repositories::{
     CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog,
-    FileConnectionCatalog, LayeredConnectionCatalog, PostgresSessionPool,
+    FileConnectionCatalog, LayeredConnectionCatalog, PostgresSessionPool, TomlColumnPolicyFiles,
 };
 use crate::contexts::connections::presentation::ImportDbeaverHandler;
 use crate::contexts::connections::use_cases::{
     ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases, ReadCatalog,
-    ReadEnumLabels, RunReadOnlyStatement,
+    ReadColumnPolicyFiles, ReadEnumLabels, RunReadOnlyStatement,
 };
+
+const COLUMN_POLICY_FILE: &str = "columns.toml";
 
 pub struct ConnectionsContext {
     pub list_connections: ListConnections,
@@ -28,6 +32,7 @@ pub struct ConnectionsContext {
     pub read_catalog: ReadCatalog<PostgresSessionPool>,
     pub list_databases: ListDatabases<PostgresSessionPool>,
     pub read_enum_labels: ReadEnumLabels<PostgresSessionPool>,
+    pub read_column_policy_files: ReadColumnPolicyFiles,
 }
 
 pub fn import_dbeaver_handler(config: &AppConfig) -> ImportDbeaverHandler {
@@ -98,6 +103,16 @@ impl ConnectionsContext {
             read_catalog: ReadCatalog::new(pool.clone()),
             list_databases: ListDatabases::new(pool.clone()),
             read_enum_labels: ReadEnumLabels::new(pool),
+            read_column_policy_files: ReadColumnPolicyFiles::new(Arc::new(
+                TomlColumnPolicyFiles::new(
+                    config.columns_file.clone(),
+                    user_config_file(
+                        COLUMN_POLICY_FILE,
+                        config.xdg_config_home.clone(),
+                        config.home_dir.as_deref(),
+                    ),
+                ),
+            )),
         }
     }
 }

@@ -5,7 +5,16 @@ use crate::common::redact_home;
 use crate::contexts::connections::domain::types::{ConnectionEntry, ConnectionStatus};
 use crate::contexts::connections::use_cases::ListConnections;
 
+const COLUMN_POLICY_IGNORED: &str = "column_policy_ignored";
+
 pub async fn list_connections(use_case: &ListConnections) -> CallToolResult {
+    list_connections_with_warnings(use_case, &[]).await
+}
+
+pub async fn list_connections_with_warnings(
+    use_case: &ListConnections,
+    column_policy_warnings: &[String],
+) -> CallToolResult {
     let discovery = match use_case.execute().await {
         Ok(discovery) => discovery,
         Err(error) => {
@@ -19,6 +28,15 @@ pub async fn list_connections(use_case: &ListConnections) -> CallToolResult {
     body.insert("connections".to_string(), Value::Array(connections));
     if let Some(hint) = discovery.hint {
         body.insert("hint".to_string(), Value::String(redact_home(&hint)));
+    }
+    if !column_policy_warnings.is_empty() {
+        let warnings = column_policy_warnings
+            .iter()
+            .map(
+                |message| json!({ "code": COLUMN_POLICY_IGNORED, "message": redact_home(message) }),
+            )
+            .collect();
+        body.insert("warnings".to_string(), Value::Array(warnings));
     }
     CallToolResult::success(vec![ContentBlock::text(Value::Object(body).to_string())])
 }

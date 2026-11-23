@@ -5,13 +5,13 @@ use serde_json::Value;
 
 use crate::contexts::querying::domain::errors::DatabaseFailure;
 use crate::contexts::querying::domain::repositories::{
-    AnonymizationPorts, PersonalColumnDictionary, PseudonymTranslator, ReadOnlyDatabase,
-    ResultAnonymizer,
+    AnonymizationPorts, ColumnPolicySource, PersonalColumnDictionary, PseudonymTranslator,
+    ReadOnlyDatabase, ResultAnonymizer,
 };
 use crate::contexts::querying::domain::types::DatabaseListing;
 use crate::contexts::querying::domain::types::{
-    AnonymizedRows, Cell, Clearance, ColumnClassification, ColumnMeta, DbMessage, ExecutionLimits,
-    Lineage, PseudonymLookup, QueryOutput,
+    AnonymizedRows, Cell, Clearance, ColumnClassification, ColumnFlag, ColumnMeta,
+    ColumnPolicyLoad, DbMessage, ExecutionLimits, Lineage, PseudonymLookup, QueryOutput,
 };
 
 pub struct FakeDatabase {
@@ -172,6 +172,7 @@ pub struct FakeAnonymizer {
     enum_labels_seen: Mutex<Vec<Vec<String>>>,
     clearances_seen: Mutex<Vec<Vec<Clearance>>>,
     masks: Vec<(String, String)>,
+    flags: Vec<Option<ColumnFlag>>,
 }
 
 impl FakeAnonymizer {
@@ -181,6 +182,14 @@ impl FakeAnonymizer {
             enum_labels_seen: Mutex::default(),
             clearances_seen: Mutex::default(),
             masks: vec![(real.to_string(), pseudonym.to_string())],
+            flags: Vec::new(),
+        })
+    }
+
+    pub fn flagging(flags: Vec<Option<ColumnFlag>>) -> Arc<Self> {
+        Arc::new(Self {
+            flags,
+            ..Self::default()
         })
     }
 
@@ -240,7 +249,11 @@ impl ResultAnonymizer for FakeAnonymizer {
                 })
                 .collect(),
             pseudonymized: Default::default(),
-            per_column: vec![None; columns.len()],
+            per_column: if self.flags.is_empty() {
+                vec![None; columns.len()]
+            } else {
+                self.flags.clone()
+            },
         }
     }
 
@@ -281,6 +294,14 @@ impl PersonalColumnDictionary for FakeDictionary {
             forced_kind: None,
             clear_by_type: type_name == "enum",
         }
+    }
+}
+
+pub struct FakePolicy(pub ColumnPolicyLoad);
+
+impl ColumnPolicySource for FakePolicy {
+    fn load(&self) -> ColumnPolicyLoad {
+        self.0.clone()
     }
 }
 

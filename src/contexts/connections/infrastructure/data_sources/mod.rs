@@ -1,5 +1,6 @@
 pub mod azure;
 pub mod bounded_process;
+pub mod column_policy_file;
 pub mod connection_file;
 pub mod dbeaver;
 pub mod openssh;

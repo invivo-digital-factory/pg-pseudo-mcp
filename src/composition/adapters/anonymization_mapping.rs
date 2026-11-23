@@ -53,9 +53,14 @@ pub fn lineage(lineage: querying::Lineage) -> anonymization::Lineage {
     }
 }
 
-pub fn clearance(clearance: querying::Clearance) -> anonymization::Clearance {
+pub fn clearance(clearance: &querying::Clearance) -> anonymization::Clearance {
     match clearance {
         querying::Clearance::ProvenClear => anonymization::Clearance::ProvenClear,
+        querying::Clearance::ClearByPolicy => anonymization::Clearance::ClearByPolicy,
+        querying::Clearance::PersonalByPolicy(kind) => anonymization::Kind::parse(kind)
+            .map_or(anonymization::Clearance::Unproven, |kind| {
+                anonymization::Clearance::PersonalByPolicy(kind)
+            }),
         querying::Clearance::Unproven => anonymization::Clearance::Unproven,
     }
 }
@@ -88,6 +93,7 @@ fn reason(reason: anonymization::Reason) -> querying::Reason {
         anonymization::Reason::Dictionary => querying::Reason::Dictionary,
         anonymization::Reason::Default => querying::Reason::Default,
         anonymization::Reason::Derived => querying::Reason::Derived,
+        anonymization::Reason::Policy => querying::Reason::Policy,
     }
 }
 

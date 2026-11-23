@@ -66,8 +66,11 @@ pub fn relation_columns_sql(relation: &str) -> String {
         "SELECT a.attname::text, \
            CASE WHEN t.typtype = 'e' OR b.typtype = 'e' THEN 'enum' \
                 WHEN t.typtype = 'd' THEN b.typname::text \
-                ELSE t.typname::text END \
+                ELSE t.typname::text END, \
+           n.nspname::text, c.relname::text \
          FROM pg_catalog.pg_attribute a \
+         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
          JOIN pg_catalog.pg_type t ON t.oid = a.atttypid \
          LEFT JOIN pg_catalog.pg_type b ON b.oid = t.typbasetype \
          WHERE a.attrelid = pg_catalog.to_regclass({}) AND a.attnum > 0 AND NOT a.attisdropped \

@@ -12,7 +12,8 @@ pub fn describe_sql(oid: i64) -> String {
         "SELECT n.nspname::text, c.relname::text, c.relkind::text, c.reltuples::float8, \
            obj_description(c.oid, 'pg_class'), \
            (SELECT json_agg(json_build_object('name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), \
-                'not_null', a.attnotnull, 'comment', col_description(c.oid, a.attnum)) ORDER BY a.attnum) \
+                'not_null', a.attnotnull, 'comment', col_description(c.oid, a.attnum), \
+                'enum', (SELECT t.typtype = 'e' FROM pg_type t WHERE t.oid = a.atttypid)) ORDER BY a.attnum) \
             FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped), \
            (SELECT {own_columns} FROM pg_constraint con WHERE con.conrelid = c.oid AND con.contype = 'p'), \
            (SELECT json_agg(json_build_object('columns', {own_columns}, 'ref_schema', rn.nspname, \

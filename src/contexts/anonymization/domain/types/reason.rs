@@ -7,4 +7,5 @@ pub enum Reason {
     Dictionary,
     Default,
     Derived,
+    Policy,
 }

@@ -1,10 +1,11 @@
 use serde::Deserialize;
 
 use super::catalog_cells::{float, json_cell, text};
-use super::column_pseudonymization::pseudonymization;
+use super::column_pseudonymization::policy_pseudonymization;
 use super::relation::{estimate, relation_kind, short_type};
 use crate::contexts::querying::domain::types::{
-    Cell, ColumnClassification, ColumnEntry, DescribeResponse, ForeignKey, IndexEntry, Reference,
+    Cell, ColumnClassification, ColumnEntry, ColumnPolicyHint, DescribeResponse, ForeignKey,
+    IndexEntry, PolicyDecision, Reference,
 };
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +15,18 @@ pub struct RawColumn {
     pub type_name: String,
     pub not_null: bool,
     pub comment: Option<String>,
+    #[serde(default, rename = "enum")]
+    pub enum_type: Option<bool>,
+}
+
+impl RawColumn {
+    pub fn classified_type(&self) -> String {
+        if self.enum_type == Some(true) {
+            "enum".to_string()
+        } else {
+            short_type(&self.type_name)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,11 +84,16 @@ pub fn read_description(row: &[Cell]) -> Description {
 pub fn column_entry(
     column: RawColumn,
     class: &ColumnClassification,
+    decision: Option<&PolicyDecision>,
     comment: Option<String>,
 ) -> ColumnEntry {
     let type_name = short_type(&column.type_name);
     ColumnEntry {
-        pseudonymized: pseudonymization(class, &type_name),
+        pseudonymized: policy_pseudonymization(class, decision, &type_name),
+        policy: decision.map(|decision| match decision {
+            PolicyDecision::Clear => "clear",
+            PolicyDecision::Personal(_) => "personal",
+        }),
         name: column.name,
         type_name,
         not_null: column.not_null,
@@ -84,6 +102,14 @@ pub fn column_entry(
 }
 
 impl Description {
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn take_columns(&mut self) -> Vec<RawColumn> {
         std::mem::take(&mut self.columns)
     }
@@ -92,6 +118,7 @@ impl Description {
         self,
         comment: Option<String>,
         columns: Vec<ColumnEntry>,
+        column_policy_hints: Vec<ColumnPolicyHint>,
     ) -> DescribeResponse {
         DescribeResponse {
             schema: self.schema,
@@ -100,6 +127,7 @@ impl Description {
             estimated_rows: self.estimated_rows,
             comment,
             columns,
+            column_policy_hints,
             primary_key: self.primary_key,
             foreign_keys: self
                 .foreign_keys

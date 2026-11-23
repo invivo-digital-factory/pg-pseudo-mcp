@@ -330,6 +330,9 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
             ssh_known_hosts: None,
             ssh_config: Some(ssh_config),
             connections_file: Some(setup.home.path().join("absent-connections.toml")),
+            columns_file: None,
+            xdg_config_home: None,
+            home_dir: None,
         },
         Some(setup.bin.path().join("az")),
     );

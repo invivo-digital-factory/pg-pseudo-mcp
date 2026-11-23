@@ -48,6 +48,7 @@ pub const CANARY_VALUES: &[&str] = &[
     "Odrigan Hazvekmor",
     "06 52 18 74 30",
     "12 rue des Lilas",
+    "zivrel.quanteb@canary-mail.fr",
 ];
 
 pub fn database_url() -> String {
@@ -110,6 +111,9 @@ impl Harness {
             ssh_known_hosts: None,
             ssh_config: Some(isolated_ssh_config(data.path())),
             connections_file: Some(path),
+            columns_file: None,
+            xdg_config_home: None,
+            home_dir: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {
@@ -119,16 +123,42 @@ impl Harness {
         }
     }
 
+    pub fn with_column_policy(shared: Option<&str>, local: Option<&str>) -> Self {
+        Self::with_workspace_and_policy(write_workspace_for_test_database, shared, local)
+    }
+
     fn with_workspace(write: impl FnOnce(&Path)) -> Self {
+        Self::with_workspace_and_policy(write, None, None)
+    }
+
+    fn with_workspace_and_policy(
+        write: impl FnOnce(&Path),
+        shared: Option<&str>,
+        local: Option<&str>,
+    ) -> Self {
         let dbeaver = tempfile::tempdir().expect("dbeaver dir");
         write(dbeaver.path());
         let data = tempfile::tempdir().expect("data dir");
+        let columns_file = shared.map(|contents| {
+            let path = data.path().join("team-columns.toml");
+            std::fs::write(&path, contents).expect("shared column policy");
+            path
+        });
+        let xdg_config_home = local.map(|contents| {
+            let folder = data.path().join("xdg").join("pg-pseudo");
+            std::fs::create_dir_all(&folder).expect("local config folder");
+            std::fs::write(folder.join("columns.toml"), contents).expect("local column policy");
+            data.path().join("xdg").into_os_string()
+        });
         let config = AppConfig {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
             ssh_config: Some(isolated_ssh_config(data.path())),
             connections_file: Some(data.path().join("absent-connections.toml")),
+            columns_file,
+            xdg_config_home,
+            home_dir: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {
@@ -141,6 +171,14 @@ impl Harness {
 
 pub async fn list_connections(contexts: &Contexts) -> CallToolResult {
     presentation::list_connections(&contexts.connections.list_connections).await
+}
+
+pub async fn list_connections_with_policy_warnings(contexts: &Contexts) -> CallToolResult {
+    presentation::list_connections_with_warnings(
+        &contexts.connections.list_connections,
+        &contexts.column_policy_warnings(),
+    )
+    .await
 }
 
 pub async fn query(contexts: &Contexts, args: QueryArgs) -> CallToolResult {
