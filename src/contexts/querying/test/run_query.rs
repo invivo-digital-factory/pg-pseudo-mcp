@@ -175,4 +175,43 @@ mod unit {
             other => panic!("{other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn les_libelles_d_enum_de_la_base_sont_transmis_a_l_anonymiseur() {
+        let labels = vec!["AUTHORIZED".to_string(), "SEPA".to_string()];
+        let database = FakeDatabase::returning_with_enum_labels(empty_output(), Ok(labels.clone()));
+        let anonymizer: Arc<FakeAnonymizer> = Arc::default();
+        let use_case = RunQuery::new(
+            Arc::clone(&database),
+            ports(FakeTranslator::default(), Arc::clone(&anonymizer)),
+        );
+
+        use_case
+            .execute(request("SELECT status::text FROM payment"))
+            .await
+            .unwrap();
+
+        assert_eq!(anonymizer.enum_labels_seen(), vec![labels]);
+    }
+
+    #[tokio::test]
+    async fn une_lecture_des_libelles_d_enum_en_echec_n_empeche_pas_la_requete() {
+        let database = FakeDatabase::returning_with_enum_labels(
+            empty_output(),
+            Err(sql_error("permission denied for table pg_enum")),
+        );
+        let anonymizer: Arc<FakeAnonymizer> = Arc::default();
+        let use_case = RunQuery::new(
+            Arc::clone(&database),
+            ports(FakeTranslator::default(), Arc::clone(&anonymizer)),
+        );
+
+        let response = use_case
+            .execute(request("SELECT status::text FROM payment"))
+            .await
+            .unwrap();
+
+        assert!(response.warnings.is_empty());
+        assert_eq!(anonymizer.enum_labels_seen(), vec![Vec::<String>::new()]);
+    }
 }

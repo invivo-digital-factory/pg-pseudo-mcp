@@ -5,6 +5,7 @@ ALTER DATABASE pgpseudo OWNER TO pgpseudo;
 SET ROLE pgpseudo;
 
 CREATE TYPE order_status AS ENUM ('pending', 'paid', 'shipped');
+CREATE TYPE payment_method AS ENUM ('CASH', 'SEPA', 'BANK_CARD');
 
 CREATE TABLE customers (
     id integer PRIMARY KEY,
@@ -31,6 +32,7 @@ CREATE TABLE orders (
     customer_id integer NOT NULL REFERENCES customers(id),
     titulaire text,
     status order_status NOT NULL,
+    payment_method payment_method NOT NULL,
     status_label text NOT NULL,
     amount numeric(12, 4) NOT NULL,
     placed_at timestamptz NOT NULL
@@ -56,11 +58,11 @@ INSERT INTO customers (id, prenom, nom, email, telephone, telephone_secours, iba
   (3, 'Maëlouz', 'Brizolier', 'maelouz.brizolier@canary-mail.fr', NULL, NULL, NULL, NULL, NULL, NULL, 'Quimperlé',
    NULL, NULL, NULL);
 
-INSERT INTO orders (id, customer_id, titulaire, status, status_label, amount, placed_at) VALUES
-  (10, 1, 'Ylwenna Kervadec', 'paid', 'PAID', 12345.6700, '2026-03-01 09:30:00+00'),
-  (11, 1, 'Kervadec', 'shipped', 'en_cours', 99.9000, '2026-03-05 14:00:00+00'),
-  (12, 2, 'Odrigan Hazvekmor', 'pending', 'PENDING', 15.0000, '2026-04-11 08:15:00+00'),
-  (13, 3, '', 'pending', 'PENDING', 0.0000, '2026-04-12 08:15:00+00');
+INSERT INTO orders (id, customer_id, titulaire, status, payment_method, status_label, amount, placed_at) VALUES
+  (10, 1, 'Ylwenna Kervadec', 'paid', 'CASH', 'PAID', 12345.6700, '2026-03-01 09:30:00+00'),
+  (11, 1, 'Kervadec', 'shipped', 'SEPA', 'en_cours', 99.9000, '2026-03-05 14:00:00+00'),
+  (12, 2, 'Odrigan Hazvekmor', 'pending', 'BANK_CARD', 'PENDING', 15.0000, '2026-04-11 08:15:00+00'),
+  (13, 3, '', 'pending', 'CASH', 'PENDING', 0.0000, '2026-04-12 08:15:00+00');
 
 INSERT INTO notes (id, customer_id, body) VALUES
   (100, 1, 'Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Lilas'),

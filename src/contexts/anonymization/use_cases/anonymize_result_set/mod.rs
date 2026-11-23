@@ -20,7 +20,10 @@ impl AnonymizeResultSet {
         rows: Vec<Vec<Cell>>,
         lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
+        enum_labels: &[String],
     ) -> AnonymizedRows {
-        Anonymizer::new(&self.pseudonymizer, injected).rows(columns, rows, lineage)
+        Anonymizer::new(&self.pseudonymizer, injected)
+            .with_enum_labels(enum_labels)
+            .rows(columns, rows, lineage)
     }
 }

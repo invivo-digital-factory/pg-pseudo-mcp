@@ -11,6 +11,7 @@ pub trait ResultAnonymizer: Send + Sync {
         rows: Vec<Vec<Cell>>,
         lineage: Option<&[Lineage]>,
         injected: &[(String, String)],
+        enum_labels: &[String],
     ) -> AnonymizedRows;
 
     fn free_text(&self, text: &str, injected: &[(String, String)]) -> String;

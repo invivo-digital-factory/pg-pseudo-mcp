@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::poll_fn;
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,7 @@ pub struct Session {
     connect_deadline: Duration,
     live: Option<Live>,
     sources: SourceCache,
+    remembered: HashMap<String, QueryOutput>,
 }
 
 struct Live {
@@ -61,6 +63,7 @@ pub async fn connect_within(
         connect_deadline: deadline,
         live: Some(live),
         sources: SourceCache::default(),
+        remembered: HashMap::new(),
     })
 }
 
@@ -86,7 +89,16 @@ impl Session {
             connect_deadline: CONNECT_DEADLINE,
             live: None,
             sources: SourceCache::default(),
+            remembered: HashMap::new(),
         }
+    }
+
+    pub fn remembered(&self, sql: &str) -> Option<&QueryOutput> {
+        self.remembered.get(sql)
+    }
+
+    pub fn remember(&mut self, sql: &str, output: QueryOutput) {
+        self.remembered.insert(sql.to_string(), output);
     }
 
     pub async fn run_read_only(

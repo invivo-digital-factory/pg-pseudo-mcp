@@ -66,11 +66,17 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
                 ),
             ));
         }
+        let enum_labels = self
+            .database
+            .enum_labels(&request.connection, request.database.as_deref())
+            .await
+            .unwrap_or_default();
         let anonymized = ports.anonymizer.rows(
             &output.columns,
             output.rows,
             guarded.derived_lineage.as_deref(),
             &guarded.injected,
+            &enum_labels,
         );
         let columns: Vec<ColumnOut> = output
             .columns
