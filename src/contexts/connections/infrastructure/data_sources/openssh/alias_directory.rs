@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::command::{ConfigDump, Target};
-use super::resolved_config::parse;
+use super::resolved_config::{parse, words};
 use crate::contexts::connections::domain::repositories::SshAliasDirectory;
 
 const MAX_INCLUDE_DEPTH: usize = 4;
@@ -33,21 +33,16 @@ impl OpenSshAliasDirectory {
             return;
         };
         for line in contents.lines() {
-            let mut words = line.split_whitespace();
-            let Some(keyword) = words.next() else {
-                continue;
-            };
-            let arguments: Vec<&str> = words.take_while(|word| !word.starts_with('#')).collect();
+            let (keyword, arguments) = split_directive(line);
+            let arguments: Vec<String> = arguments
+                .into_iter()
+                .take_while(|word| !word.starts_with('#'))
+                .collect();
             if keyword.eq_ignore_ascii_case("host") {
-                found.push(
-                    arguments
-                        .iter()
-                        .map(|pattern| pattern.to_string())
-                        .collect(),
-                );
+                found.push(arguments);
             } else if keyword.eq_ignore_ascii_case("include") && depth < MAX_INCLUDE_DEPTH {
                 for pattern in arguments {
-                    for included in self.included_files(pattern) {
+                    for included in self.included_files(&pattern) {
                         self.collect(&included, depth + 1, found);
                     }
                 }
@@ -147,6 +142,17 @@ fn host_line_matches(patterns: &[String], alias: &str) -> bool {
                 && !pattern.chars().all(|character| character == '*')
                 && wildcard_match(pattern, alias)
         })
+}
+
+fn split_directive(line: &str) -> (&str, Vec<String>) {
+    let line = line.trim();
+    let end = line
+        .find(|character: char| character.is_whitespace() || character == '=')
+        .unwrap_or(line.len());
+    let (keyword, rest) = line.split_at(end);
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('=').unwrap_or(rest);
+    (keyword, words(rest))
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -352,5 +358,29 @@ mod unit {
     fn sans_emplacement_de_configuration_connu_aucun_alias_n_est_refuse() {
         let directory = OpenSshAliasDirectory::new(answers(&[]), None, None);
         assert!(directory.defines("any"));
+    }
+
+    #[test]
+    fn un_argument_entre_guillemets_est_lu_sans_ses_guillemets() {
+        let (_home, directory) = directory("Host \"quoted\"\n", &[]);
+        assert!(directory.defines("quoted"));
+        assert!(!directory.defines("\"quoted\""));
+    }
+
+    #[test]
+    fn la_forme_avec_signe_egal_est_lue_avec_ou_sans_espaces() {
+        let (_home, directory) = directory("Host=eqform\nHost = spaced-eq\nhost =tight\n", &[]);
+        assert!(directory.defines("eqform"));
+        assert!(directory.defines("spaced-eq"));
+        assert!(directory.defines("tight"));
+    }
+
+    #[test]
+    fn un_argument_entre_guillemets_avec_espace_reste_un_seul_motif() {
+        let (_home, directory) = directory("Host \"two words\" spaced\n", &[]);
+        assert!(directory.defines("two words"));
+        assert!(directory.defines("spaced"));
+        assert!(!directory.defines("two"));
+        assert!(!directory.defines("words"));
     }
 }
