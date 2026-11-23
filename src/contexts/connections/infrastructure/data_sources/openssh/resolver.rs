@@ -75,13 +75,21 @@ impl OpenSshResolver {
             user: None,
             port: None,
         };
-        self.chain(&target, alias, 0, &mut Vec::new())
+        let mut hops = self.chain(&target, 0, &mut Vec::new())?;
+        let last = hops.len() - 1;
+        for (index, hop) in hops.iter_mut().enumerate() {
+            hop.label = if index == last {
+                alias.to_string()
+            } else {
+                format!("ProxyJump hop {} of SSH alias {alias}", index + 1)
+            };
+        }
+        Ok(hops)
     }
 
     fn chain(
         &self,
         target: &Target<'_>,
-        label: &str,
         depth: usize,
         stack: &mut Vec<String>,
     ) -> Result<Vec<SshHop>, ConnectionStatus> {
@@ -98,7 +106,7 @@ impl OpenSshResolver {
             )));
         }
         stack.push(key);
-        let hops = self.chain_inner(target, label, depth, stack);
+        let hops = self.chain_inner(target, depth, stack);
         stack.pop();
         hops
     }
@@ -106,7 +114,6 @@ impl OpenSshResolver {
     fn chain_inner(
         &self,
         target: &Target<'_>,
-        label: &str,
         depth: usize,
         stack: &mut Vec<String>,
     ) -> Result<Vec<SshHop>, ConnectionStatus> {
@@ -124,13 +131,13 @@ impl OpenSshResolver {
                 port: jump.port,
             };
             if index == 0 {
-                hops.extend(self.chain(&jump_target, &jump.host, depth + 1, stack)?);
+                hops.extend(self.chain(&jump_target, depth + 1, stack)?);
             } else {
                 let configuration = self.configuration(&jump_target)?;
-                hops.push(self.hop(&configuration, &jump.host)?);
+                hops.push(self.hop(&configuration)?);
             }
         }
-        hops.push(self.hop(&config, label)?);
+        hops.push(self.hop(&config)?);
         Ok(hops)
     }
 
@@ -154,7 +161,7 @@ impl OpenSshResolver {
         }
     }
 
-    fn hop(&self, config: &ResolvedConfig, label: &str) -> Result<SshHop, ConnectionStatus> {
+    fn hop(&self, config: &ResolvedConfig) -> Result<SshHop, ConnectionStatus> {
         let context = PathContext {
             home: self.environment.home.as_deref(),
             local_user: self.environment.user.as_deref(),
@@ -198,7 +205,7 @@ impl OpenSshResolver {
             },
         };
         Ok(SshHop {
-            label: label.to_string(),
+            label: String::new(),
             host: config.hostname.clone(),
             port: config.port,
             user: config.user.clone(),
@@ -349,7 +356,11 @@ mod unit {
             hops.iter()
                 .map(|hop| hop.label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["j1", "j2", "app"]
+            vec![
+                "ProxyJump hop 1 of SSH alias app",
+                "ProxyJump hop 2 of SSH alias app",
+                "app"
+            ]
         );
         assert_eq!((hops[0].port, hops[0].user.as_str()), (2200, "jump"));
     }
@@ -614,5 +625,35 @@ mod unit {
             hosts_of(&hops),
             vec!["bastion.example.com", "10.0.0.5", "app.real"]
         );
+    }
+
+    #[test]
+    fn l_etiquette_d_un_saut_donne_sa_position_et_l_alias_de_l_entree_jamais_un_hote_ou_un_utilisateur()
+     {
+        let dump = FakeDump::default()
+            .with(
+                "app",
+                &answer("secret-app.corp", 22, "carol", "proxyjump j1\n"),
+            )
+            .with(
+                "j1",
+                &answer("secret-j1.corp", 22, "dave", "proxyjump root\n"),
+            )
+            .with("root", &answer("secret-root.corp", 22, "erin", ""));
+        let hops = resolver(dump).resolve("app").unwrap();
+        let labels: Vec<&str> = hops.iter().map(|hop| hop.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "ProxyJump hop 1 of SSH alias app",
+                "ProxyJump hop 2 of SSH alias app",
+                "app"
+            ]
+        );
+        for label in labels {
+            for leaked in ["secret", "carol", "dave", "erin", "corp", "j1", "root"] {
+                assert!(!label.contains(leaked), "{label}");
+            }
+        }
     }
 }
