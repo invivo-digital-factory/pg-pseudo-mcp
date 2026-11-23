@@ -69,10 +69,14 @@ impl ConnectionsContext {
             Arc::new(cli),
             Arc::new(SystemClock),
         ));
-        let resolver = Arc::new(OpenSshResolver::new(
-            Arc::new(SshCommand::from_path(config.ssh_config.clone())),
-            LocalEnvironment::from_process(),
+        let environment = LocalEnvironment::from_process();
+        let dump = Arc::new(SshCommand::from_path(config.ssh_config.clone()));
+        let aliases = Arc::new(OpenSshAliasDirectory::new(
+            dump.clone(),
+            config.ssh_config.clone(),
+            environment.home.clone(),
         ));
+        let resolver = Arc::new(OpenSshResolver::new(dump, environment, aliases));
         let catalog = Arc::new(LayeredConnectionCatalog::new(
             FileConnectionCatalog::new(config.connections_file.clone(), tokens.clone(), resolver),
             DbeaverConnectionCatalog::new(config.dbeaver_home.clone(), tokens.clone()),

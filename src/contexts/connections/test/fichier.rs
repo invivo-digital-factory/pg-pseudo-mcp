@@ -13,7 +13,7 @@ use crate::contexts::connections::domain::types::{
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::data_sources::connection_file::DbeaverAccess;
 use crate::contexts::connections::infrastructure::data_sources::openssh::{
-    LocalEnvironment, OpenSshResolver, SshCommand,
+    LocalEnvironment, OpenSshAliasDirectory, OpenSshResolver, SshCommand,
 };
 use crate::contexts::connections::infrastructure::repositories::{
     CachedAzureSignInTokens, FileConnectionCatalog,
@@ -54,13 +54,24 @@ impl Setup {
     }
 
     fn catalog_with(&self, ssh: Option<PathBuf>) -> FileConnectionCatalog {
+        self.catalog_with_ssh_config(ssh, None)
+    }
+
+    fn catalog_with_ssh_config(
+        &self,
+        ssh: Option<PathBuf>,
+        config: Option<PathBuf>,
+    ) -> FileConnectionCatalog {
         let tokens = Arc::new(CachedAzureSignInTokens::new(
             Arc::new(AzureCli::new(Some(self.dir.path().join("az")))),
             Arc::new(SystemClock),
         ));
+        let dump = Arc::new(SshCommand::new(ssh, config.clone()));
+        let aliases = Arc::new(OpenSshAliasDirectory::new(dump.clone(), config, None));
         let resolver = Arc::new(OpenSshResolver::new(
-            Arc::new(SshCommand::new(ssh, None)),
+            dump,
             LocalEnvironment::default(),
+            aliases,
         ));
         FileConnectionCatalog::new(Some(self.file()), tokens, resolver)
     }
@@ -226,7 +237,10 @@ fn un_fichier_illisible_comme_toml_est_signale_avec_sa_ligne_et_bloque_dbeaver()
 }
 
 fn context_for(path: &Path) -> ConnectionsContext {
+    let ssh_config = path.with_file_name("ssh_config");
+    fs::write(&ssh_config, "").unwrap();
     ConnectionsContext::new(&AppConfig {
+        ssh_config: Some(ssh_config),
         connections_file: Some(path.to_path_buf()),
         ..AppConfig::default()
     })
@@ -280,4 +294,91 @@ async fn l_argument_database_atteint_une_autre_base_du_serveur_sur_une_connexion
         .expect("other database");
     assert_ne!(default.rows[0][0], other.rows[0][0]);
     assert_eq!(other.rows[0][0], Cell::Text("postgres".into()));
+}
+
+const FAKE_SSH: &str = "touch \"$(dirname \"$0\")/ssh-ran\"\nfor last; do :; done\ncase \"$last\" in\n  app) printf 'user u\\nhostname h\\nport 22\\nproxyjump jump-hop\\n';;\n  *) printf 'user u\\nhostname h\\nport 22\\n';;\nesac";
+
+fn aliased_entry(alias: &str) -> String {
+    format!(
+        "[[connection]]\nname = \"tunneled\"\nhost = \"db\"\nuser = \"u\"\ntype = \"dev\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]\nssh_alias = \"{alias}\"\n"
+    )
+}
+
+fn tunneled_discovery(setup: &Setup, ssh_config: &str, alias: &str) -> Discovery {
+    let _ = fs::remove_file(setup.dir.path().join("ssh-ran"));
+    let ssh = setup.dir.path().join("ssh");
+    fs::write(&ssh, format!("#!/bin/sh\n{FAKE_SSH}\n")).unwrap();
+    fs::set_permissions(&ssh, fs::Permissions::from_mode(0o755)).unwrap();
+    let config = setup.dir.path().join("ssh_config");
+    fs::write(&config, ssh_config).unwrap();
+    setup.write(&aliased_entry(alias));
+    setup
+        .catalog_with_ssh_config(Some(ssh), Some(config))
+        .load(None)
+        .discovery
+}
+
+#[test]
+fn un_alias_absent_de_la_configuration_ssh_est_indisponible_et_aucun_processus_ne_se_lance() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = Setup::new("exit 1", "# empty\n");
+    let discovery = tunneled_discovery(&setup, "Host other\n  HostName x\n", "ghost");
+    let tunneled = entry(&discovery, "tunneled");
+    assert_eq!(
+        reason_of(&tunneled),
+        "SSH alias ghost is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)"
+    );
+    assert!(tunneled.params.is_none());
+    assert!(!setup.dir.path().join("ssh-ran").exists());
+}
+
+#[test]
+fn un_alias_defini_par_un_bloc_exact_un_motif_ou_un_include_est_disponible() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = Setup::new("exit 1", "# empty\n");
+    let included = setup.dir.path().join("included.conf");
+    fs::write(&included, "Host from-include\n").unwrap();
+    let include_line = format!("Include {}\n", included.display());
+    let cases = [
+        ("Host exact\n", "exact"),
+        ("Host corp-*\n", "corp-bastion"),
+        (include_line.as_str(), "from-include"),
+    ];
+    for (config, alias) in cases {
+        let discovery = tunneled_discovery(&setup, config, alias);
+        let tunneled = entry(&discovery, "tunneled");
+        assert_eq!(tunneled.status, ConnectionStatus::Available, "{alias}");
+        assert!(setup.dir.path().join("ssh-ran").exists(), "{alias}");
+    }
+}
+
+#[test]
+fn un_bloc_host_etoile_et_un_motif_nie_ne_definissent_pas_l_alias() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = Setup::new("exit 1", "# empty\n");
+    for (config, alias) in [
+        ("Host *\n  User x\n", "ghost"),
+        ("Host corp-* !corp-old\n", "corp-old"),
+    ] {
+        let discovery = tunneled_discovery(&setup, config, alias);
+        let reason = reason_of(&entry(&discovery, "tunneled"));
+        assert!(
+            reason.contains(&format!("SSH alias {alias} is not defined")),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
+fn un_saut_proxyjump_litteral_n_exige_pas_de_bloc_host_mais_l_alias_de_l_entree_oui() {
+    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let setup = Setup::new("exit 1", "# empty\n");
+    let present = tunneled_discovery(&setup, "Host app\n", "app");
+    assert_eq!(
+        entry(&present, "tunneled").status,
+        ConnectionStatus::Available
+    );
+    let missing = tunneled_discovery(&setup, "Host jump-hop\n", "app");
+    let reason = reason_of(&entry(&missing, "tunneled"));
+    assert!(reason.contains("SSH alias app is not defined"), "{reason}");
 }

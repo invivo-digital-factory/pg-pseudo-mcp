@@ -5,6 +5,7 @@ use super::command::{ConfigDump, DumpFailure, Target};
 use super::directive_policy::{PathContext, PathError, expand_path, unsupported_directive};
 use super::jump_spec::parse_list;
 use super::resolved_config::{ResolvedConfig, parse};
+use crate::contexts::connections::domain::repositories::SshAliasDirectory;
 use crate::contexts::connections::domain::types::{
     ConnectionStatus, HostKeyPolicy, OpenSshKeys, SshAgent, SshAuth, SshHop,
 };
@@ -32,6 +33,7 @@ impl LocalEnvironment {
 pub struct OpenSshResolver {
     dump: Arc<dyn ConfigDump>,
     environment: LocalEnvironment,
+    aliases: Arc<dyn SshAliasDirectory>,
 }
 
 fn unavailable(reason: impl Into<String>) -> ConnectionStatus {
@@ -47,26 +49,47 @@ fn unsupported(reason: impl Into<String>) -> ConnectionStatus {
 }
 
 impl OpenSshResolver {
-    pub fn new(dump: Arc<dyn ConfigDump>, environment: LocalEnvironment) -> Self {
-        Self { dump, environment }
+    pub fn new(
+        dump: Arc<dyn ConfigDump>,
+        environment: LocalEnvironment,
+        aliases: Arc<dyn SshAliasDirectory>,
+    ) -> Self {
+        Self {
+            dump,
+            environment,
+            aliases,
+        }
     }
 
     pub fn resolve(&self, alias: &str) -> Result<Vec<SshHop>, ConnectionStatus> {
         if alias.is_empty() || alias.starts_with('-') || alias.contains(char::is_whitespace) {
             return Err(unavailable("the SSH alias is not a valid host name"));
         }
+        if !self.aliases.defines(alias) {
+            return Err(unavailable(format!(
+                "SSH alias {alias} is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)"
+            )));
+        }
         let target = Target {
             host: alias,
             user: None,
             port: None,
         };
-        self.chain(&target, alias, 0, &mut Vec::new())
+        let mut hops = self.chain(&target, 0, &mut Vec::new())?;
+        let last = hops.len() - 1;
+        for (index, hop) in hops.iter_mut().enumerate() {
+            hop.label = if index == last {
+                alias.to_string()
+            } else {
+                format!("ProxyJump hop {} of SSH alias {alias}", index + 1)
+            };
+        }
+        Ok(hops)
     }
 
     fn chain(
         &self,
         target: &Target<'_>,
-        label: &str,
         depth: usize,
         stack: &mut Vec<String>,
     ) -> Result<Vec<SshHop>, ConnectionStatus> {
@@ -83,7 +106,7 @@ impl OpenSshResolver {
             )));
         }
         stack.push(key);
-        let hops = self.chain_inner(target, label, depth, stack);
+        let hops = self.chain_inner(target, depth, stack);
         stack.pop();
         hops
     }
@@ -91,7 +114,6 @@ impl OpenSshResolver {
     fn chain_inner(
         &self,
         target: &Target<'_>,
-        label: &str,
         depth: usize,
         stack: &mut Vec<String>,
     ) -> Result<Vec<SshHop>, ConnectionStatus> {
@@ -109,13 +131,13 @@ impl OpenSshResolver {
                 port: jump.port,
             };
             if index == 0 {
-                hops.extend(self.chain(&jump_target, &jump.host, depth + 1, stack)?);
+                hops.extend(self.chain(&jump_target, depth + 1, stack)?);
             } else {
                 let configuration = self.configuration(&jump_target)?;
-                hops.push(self.hop(&configuration, &jump.host)?);
+                hops.push(self.hop(&configuration)?);
             }
         }
-        hops.push(self.hop(&config, label)?);
+        hops.push(self.hop(&config)?);
         Ok(hops)
     }
 
@@ -139,7 +161,7 @@ impl OpenSshResolver {
         }
     }
 
-    fn hop(&self, config: &ResolvedConfig, label: &str) -> Result<SshHop, ConnectionStatus> {
+    fn hop(&self, config: &ResolvedConfig) -> Result<SshHop, ConnectionStatus> {
         let context = PathContext {
             home: self.environment.home.as_deref(),
             local_user: self.environment.user.as_deref(),
@@ -183,7 +205,7 @@ impl OpenSshResolver {
             },
         };
         Ok(SshHop {
-            label: label.to_string(),
+            label: String::new(),
             host: config.hostname.clone(),
             port: config.port,
             user: config.user.clone(),
@@ -236,6 +258,26 @@ mod unit {
         }
     }
 
+    struct Defined(Option<Vec<&'static str>>);
+
+    impl SshAliasDirectory for Defined {
+        fn alias_for(&self, _host: &str, _port: u16, _user: &str) -> Option<String> {
+            None
+        }
+
+        fn known_aliases(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn defines(&self, alias: &str) -> bool {
+            self.0.as_ref().is_none_or(|names| names.contains(&alias))
+        }
+    }
+
+    fn everything_defined() -> Arc<Defined> {
+        Arc::new(Defined(None))
+    }
+
     fn environment() -> LocalEnvironment {
         LocalEnvironment {
             home: Some(PathBuf::from("/home/me")),
@@ -244,7 +286,7 @@ mod unit {
     }
 
     fn resolver(dump: FakeDump) -> OpenSshResolver {
-        OpenSshResolver::new(Arc::new(dump), environment())
+        OpenSshResolver::new(Arc::new(dump), environment(), everything_defined())
     }
 
     fn answer(hostname: &str, port: u16, user: &str, extra: &str) -> String {
@@ -314,7 +356,11 @@ mod unit {
             hops.iter()
                 .map(|hop| hop.label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["j1", "j2", "app"]
+            vec![
+                "ProxyJump hop 1 of SSH alias app",
+                "ProxyJump hop 2 of SSH alias app",
+                "app"
+            ]
         );
         assert_eq!((hops[0].port, hops[0].user.as_str()), (2200, "jump"));
     }
@@ -329,7 +375,7 @@ mod unit {
                 )
                 .with("j1", &answer("j1.real", 2200, "jump", "")),
         );
-        OpenSshResolver::new(dump.clone(), environment())
+        OpenSshResolver::new(dump.clone(), environment(), everything_defined())
             .resolve("app")
             .unwrap();
         let calls = dump.calls.lock().unwrap().clone();
@@ -427,6 +473,7 @@ mod unit {
                 &answer("app.real", 22, "a", "identityfile %d/.ssh/k_%h\n"),
             )),
             environment.clone(),
+            everything_defined(),
         )
         .resolve("app")
         .unwrap();
@@ -439,6 +486,7 @@ mod unit {
                 FakeDump::default().with("app", &answer("app.real", 22, "a", "identityfile %C\n")),
             ),
             environment,
+            everything_defined(),
         )
         .resolve("app")
         .unwrap_err();
@@ -519,7 +567,7 @@ mod unit {
     fn un_alias_qui_ressemble_a_une_option_est_refuse_sans_appeler_ssh() {
         let dump = Arc::new(FakeDump::default());
         for alias in ["-oProxyCommand=x", "", "two words"] {
-            let status = OpenSshResolver::new(dump.clone(), environment())
+            let status = OpenSshResolver::new(dump.clone(), environment(), everything_defined())
                 .resolve(alias)
                 .unwrap_err();
             assert!(
@@ -528,5 +576,84 @@ mod unit {
             );
         }
         assert!(dump.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn un_alias_absent_de_la_configuration_est_indisponible_sans_appeler_ssh() {
+        let dump = Arc::new(FakeDump::default().with("ghost", &answer("g.real", 22, "me", "")));
+        let status = OpenSshResolver::new(
+            dump.clone(),
+            environment(),
+            Arc::new(Defined(Some(vec!["other"]))),
+        )
+        .resolve("ghost")
+        .unwrap_err();
+        assert_eq!(
+            status,
+            ConnectionStatus::Unavailable {
+                reason: "SSH alias ghost is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)".to_string()
+            }
+        );
+        assert!(dump.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn un_saut_proxyjump_litteral_n_a_pas_besoin_d_un_bloc_host() {
+        let dump = FakeDump::default()
+            .with(
+                "app",
+                &answer(
+                    "app.real",
+                    22,
+                    "a",
+                    "proxyjump admin@bastion.example.com:2222,10.0.0.5\n",
+                ),
+            )
+            .with(
+                "bastion.example.com",
+                &answer("bastion.example.com", 2222, "admin", ""),
+            )
+            .with("10.0.0.5", &answer("10.0.0.5", 22, "a", ""));
+        let hops = OpenSshResolver::new(
+            Arc::new(dump),
+            environment(),
+            Arc::new(Defined(Some(vec!["app"]))),
+        )
+        .resolve("app")
+        .unwrap();
+        assert_eq!(
+            hosts_of(&hops),
+            vec!["bastion.example.com", "10.0.0.5", "app.real"]
+        );
+    }
+
+    #[test]
+    fn l_etiquette_d_un_saut_donne_sa_position_et_l_alias_de_l_entree_jamais_un_hote_ou_un_utilisateur()
+     {
+        let dump = FakeDump::default()
+            .with(
+                "app",
+                &answer("secret-app.corp", 22, "carol", "proxyjump j1\n"),
+            )
+            .with(
+                "j1",
+                &answer("secret-j1.corp", 22, "dave", "proxyjump root\n"),
+            )
+            .with("root", &answer("secret-root.corp", 22, "erin", ""));
+        let hops = resolver(dump).resolve("app").unwrap();
+        let labels: Vec<&str> = hops.iter().map(|hop| hop.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "ProxyJump hop 1 of SSH alias app",
+                "ProxyJump hop 2 of SSH alias app",
+                "app"
+            ]
+        );
+        for label in labels {
+            for leaked in ["secret", "carol", "dave", "erin", "corp", "j1", "root"] {
+                assert!(!label.contains(leaked), "{label}");
+            }
+        }
     }
 }

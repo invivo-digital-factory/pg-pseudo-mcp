@@ -198,3 +198,22 @@ Fonctionnalité: Fichier de connexions
     Quand l'agent liste les connexions
     Alors la connexion "app-prod" est listée comme disponible
     Et la commande de mot de passe n'a pas été exécutée
+
+  Scénario: Un alias SSH absent du fichier de configuration SSH rend la connexion indisponible avec une raison qui le nomme
+    Étant donné un fichier de configuration SSH de test qui ne définit pas l'alias "bastion-absent"
+    Et le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "via-absent"
+      host = "db.internal.example"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/echo", "reader-secret"]
+      ssh_alias = "bastion-absent"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "via-absent" est listée comme indisponible
+    Et la raison de la connexion "via-absent" contient "SSH alias bastion-absent is not defined in the OpenSSH config"
+    Et la raison de la connexion "via-absent" contient "add a Host block"
+    Et la liste ne montre ni hôte, ni utilisateur, ni mot de passe

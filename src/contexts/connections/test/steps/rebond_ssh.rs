@@ -25,3 +25,13 @@ async fn ssh_config_with_proxy_command(world: &mut ConnectionsWorld, alias: Stri
         format!("Host {alias}\n  HostName bastion.internal.example\n  ProxyCommand nc %h %p\n");
     write_ssh_config(world, &contents);
 }
+
+#[given(
+    regex = r#"^un fichier de configuration SSH de test qui ne définit pas l'alias "([^"]+)"$"#
+)]
+async fn ssh_config_without_alias(world: &mut ConnectionsWorld, alias: String) {
+    let contents = format!(
+        "Host autre-bastion\n  HostName bastion.internal.example\n\nHost *\n  User someone\n# {alias} is deliberately absent\n"
+    );
+    write_ssh_config(world, &contents);
+}

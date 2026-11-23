@@ -443,7 +443,7 @@ mod chaine_de_sauts {
         ConnectParams, PasswordSource, Secret, TunnelParams,
     };
     use crate::contexts::connections::infrastructure::data_sources::openssh::{
-        LocalEnvironment, OpenSshResolver, SshCommand,
+        LocalEnvironment, OpenSshAliasDirectory, OpenSshResolver, SshCommand,
     };
 
     struct Fixture {
@@ -456,10 +456,14 @@ mod chaine_de_sauts {
         }
 
         fn resolver(&self) -> OpenSshResolver {
-            OpenSshResolver::new(
-                Arc::new(SshCommand::from_path(Some(self.config_path()))),
-                LocalEnvironment::from_process(),
-            )
+            let dump = Arc::new(SshCommand::from_path(Some(self.config_path())));
+            let environment = LocalEnvironment::from_process();
+            let aliases = Arc::new(OpenSshAliasDirectory::new(
+                dump.clone(),
+                Some(self.config_path()),
+                environment.home.clone(),
+            ));
+            OpenSshResolver::new(dump, environment, aliases)
         }
     }
 
@@ -538,7 +542,10 @@ mod chaine_de_sauts {
     async fn une_cle_inconnue_au_premier_saut_est_refusee_avec_l_alias_et_l_empreinte() {
         let fixture = fixture(&known(false, true), "tunnel_test_ed25519", "", "");
         let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
-        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(
+            message.contains("SSH hop 1 of 2 (ProxyJump hop 1 of SSH alias app-via-jump)"),
+            "{message}"
+        );
         assert!(message.contains("SHA256:"), "{message}");
         assert!(message.contains("not in known_hosts"), "{message}");
     }
@@ -553,7 +560,10 @@ mod chaine_de_sauts {
             STRICT_NO,
         );
         let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
-        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(
+            message.contains("SSH hop 1 of 2 (ProxyJump hop 1 of SSH alias app-via-jump)"),
+            "{message}"
+        );
         assert!(message.contains("SHA256:"), "{message}");
     }
 

@@ -38,12 +38,14 @@ impl AnonymizationWorld {
     }
 
     pub fn purge(&self) {
+        let ssh_config = self.data_dir.path().join("ssh_config");
+        std::fs::write(&ssh_config, "").expect("empty ssh config");
         let config = AppConfig {
             dbeaver_home: None,
             data_dir: Some(self.data_dir.path().to_path_buf()),
             ssh_known_hosts: None,
-            ssh_config: None,
-            connections_file: None,
+            ssh_config: Some(ssh_config),
+            connections_file: Some(self.data_dir.path().join("absent-connections.toml")),
         };
         let handler = mapping_purge_handler(&config).expect("purge handler");
         let status = handler.run(true);

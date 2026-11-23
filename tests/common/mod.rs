@@ -61,6 +61,12 @@ pub struct Harness {
     _data: tempfile::TempDir,
 }
 
+pub fn isolated_ssh_config(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("ssh_config");
+    std::fs::write(&path, "").expect("empty ssh config");
+    path
+}
+
 impl Harness {
     pub fn new() -> Self {
         Self::with_workspace(write_workspace_for_test_database)
@@ -102,7 +108,7 @@ impl Harness {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
-            ssh_config: None,
+            ssh_config: Some(isolated_ssh_config(data.path())),
             connections_file: Some(path),
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
@@ -121,8 +127,8 @@ impl Harness {
             dbeaver_home: Some(dbeaver.path().to_path_buf()),
             data_dir: Some(data.path().to_path_buf()),
             ssh_known_hosts: None,
-            ssh_config: None,
-            connections_file: None,
+            ssh_config: Some(isolated_ssh_config(data.path())),
+            connections_file: Some(data.path().join("absent-connections.toml")),
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {

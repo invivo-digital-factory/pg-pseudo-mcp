@@ -33,6 +33,9 @@ pub fn summary(report: &ImportReport) -> String {
         report.imported.len(),
         report.skipped.len()
     );
+    text.push_str(
+        "\nThe connection file now takes precedence over DBeaver: a connection whose SSH alias has no Host block in the OpenSSH config is listed unavailable. Add the suggested Host blocks below before using these servers, or keep the file aside until then.\n",
+    );
     text.push_str("\nWhat is left to do, per imported connection:\n");
     for connection in &report.imported {
         text.push_str(&format!("  {}\n", connection.name));
@@ -153,6 +156,16 @@ mod unit {
             text.contains("\"staging\" is not dev, test or prod"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn le_resume_annonce_en_tete_que_le_fichier_prime_sur_dbeaver_et_qu_il_faut_les_blocs_host() {
+        let text = summary(&report());
+        let notice = text.find("takes precedence over DBeaver").expect("notice");
+        assert!(notice < text.find("What is left to do").unwrap(), "{text}");
+        assert!(notice < text.find("Suggested blocks").unwrap(), "{text}");
+        assert!(text.contains("Add the suggested Host blocks"), "{text}");
+        assert!(text.contains("keep the file aside"), "{text}");
     }
 
     #[test]

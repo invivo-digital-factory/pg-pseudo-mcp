@@ -75,7 +75,7 @@ fn unquote(value: &str) -> String {
         .to_string()
 }
 
-fn words(value: &str) -> Vec<String> {
+pub(super) fn words(value: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut quoted = false;

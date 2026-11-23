@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::command::{ConfigDump, Target};
-use super::resolved_config::parse;
+use super::resolved_config::{parse, words};
 use crate::contexts::connections::domain::repositories::SshAliasDirectory;
 
-const MAX_INCLUDE_DEPTH: usize = 4;
+const MAX_INCLUDE_DEPTH: usize = 16;
 
 pub struct OpenSshAliasDirectory {
     dump: Arc<dyn ConfigDump>,
@@ -28,31 +28,45 @@ impl OpenSshAliasDirectory {
             .or_else(|| self.ssh_directory().map(|dir| dir.join("config")))
     }
 
-    fn collect(&self, file: &Path, depth: usize, found: &mut Vec<String>) {
+    fn collect(
+        &self,
+        file: &Path,
+        depth: usize,
+        ancestors: &mut Vec<PathBuf>,
+        found: &mut Vec<Vec<String>>,
+    ) {
+        if ancestors.iter().any(|ancestor| ancestor == file) {
+            return;
+        }
         let Ok(contents) = std::fs::read_to_string(file) else {
             return;
         };
+        ancestors.push(file.to_path_buf());
         for line in contents.lines() {
-            let mut words = line.split_whitespace();
-            let Some(keyword) = words.next() else {
-                continue;
-            };
-            let arguments: Vec<&str> = words.take_while(|word| !word.starts_with('#')).collect();
+            let (keyword, arguments) = split_directive(line);
+            let arguments: Vec<String> = arguments
+                .into_iter()
+                .take_while(|word| !word.starts_with('#'))
+                .collect();
             if keyword.eq_ignore_ascii_case("host") {
-                for pattern in arguments {
-                    let plain = !pattern.contains(['*', '?', '!']);
-                    if plain && !found.iter().any(|known| known == pattern) {
-                        found.push(pattern.to_string());
-                    }
-                }
+                found.push(arguments);
             } else if keyword.eq_ignore_ascii_case("include") && depth < MAX_INCLUDE_DEPTH {
                 for pattern in arguments {
-                    for included in self.included_files(pattern) {
-                        self.collect(&included, depth + 1, found);
+                    for included in self.included_files(&pattern) {
+                        self.collect(&included, depth + 1, ancestors, found);
                     }
                 }
             }
         }
+        ancestors.pop();
+    }
+
+    fn host_lines(&self) -> Vec<Vec<String>> {
+        let mut lines = Vec::new();
+        if let Some(root) = self.root_config() {
+            self.collect(&root, 0, &mut Vec::new(), &mut lines);
+        }
+        lines
     }
 
     fn included_files(&self, pattern: &str) -> Vec<PathBuf> {
@@ -109,12 +123,47 @@ impl SshAliasDirectory for OpenSshAliasDirectory {
     }
 
     fn known_aliases(&self) -> Vec<String> {
-        let mut found = Vec::new();
-        if let Some(root) = self.root_config() {
-            self.collect(&root, 0, &mut found);
+        let mut found: Vec<String> = Vec::new();
+        for pattern in self.host_lines().into_iter().flatten() {
+            let plain = !pattern.contains(['*', '?', '!']);
+            if plain && !found.contains(&pattern) {
+                found.push(pattern);
+            }
         }
         found
     }
+
+    fn defines(&self, alias: &str) -> bool {
+        self.root_config().is_none()
+            || self
+                .host_lines()
+                .iter()
+                .any(|patterns| host_line_matches(patterns, alias))
+    }
+}
+
+fn host_line_matches(patterns: &[String], alias: &str) -> bool {
+    let excluded = patterns
+        .iter()
+        .filter_map(|pattern| pattern.strip_prefix('!'))
+        .any(|pattern| wildcard_match(pattern, alias));
+    !excluded
+        && patterns.iter().any(|pattern| {
+            !pattern.starts_with('!')
+                && !pattern.chars().all(|character| character == '*')
+                && wildcard_match(pattern, alias)
+        })
+}
+
+fn split_directive(line: &str) -> (&str, Vec<String>) {
+    let line = line.trim();
+    let end = line
+        .find(|character: char| character.is_whitespace() || character == '=')
+        .unwrap_or(line.len());
+    let (keyword, rest) = line.split_at(end);
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('=').unwrap_or(rest);
+    (keyword, words(rest))
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -256,5 +305,143 @@ mod unit {
         assert!(!wildcard_match("*.conf", "team.txt"));
         assert!(wildcard_match("a?c", "abc"));
         assert!(!wildcard_match("a?c", "ac"));
+    }
+
+    #[test]
+    fn un_alias_defini_par_un_bloc_host_exact_est_defini() {
+        let (_home, directory) = directory("Host corp-bastion other\n  HostName x\n", &[]);
+        assert!(directory.defines("corp-bastion"));
+        assert!(directory.defines("other"));
+        assert!(!directory.defines("corp-bastio"));
+    }
+
+    #[test]
+    fn un_alias_qui_correspond_a_un_motif_a_jokers_est_defini() {
+        let (_home, directory) = directory("Host *.corp web-?\n", &[]);
+        assert!(directory.defines("db.corp"));
+        assert!(directory.defines("web-1"));
+        assert!(!directory.defines("web-12"));
+        assert!(!directory.defines("db.example"));
+    }
+
+    #[test]
+    fn un_bloc_host_etoile_seul_ne_definit_aucun_alias() {
+        let (_home, directory) = directory("Host *\n  User x\nHost * !nothing\n", &[]);
+        assert!(!directory.defines("anything"));
+    }
+
+    #[test]
+    fn un_motif_nie_exclut_l_alias_de_sa_ligne_mais_pas_des_autres() {
+        let (_home, directory) = directory("Host web-* !web-old\nHost web-old-bis\n", &[]);
+        assert!(directory.defines("web-new"));
+        assert!(!directory.defines("web-old"));
+        assert!(directory.defines("web-old-bis"));
+    }
+
+    #[test]
+    fn un_alias_defini_dans_un_fichier_inclus_est_defini() {
+        let (home, directory) = directory("Include conf.d/*.conf\n", &[]);
+        std::fs::write(
+            home.path().join(".ssh/conf.d/team.conf"),
+            "Host from-include\n",
+        )
+        .unwrap();
+        assert!(directory.defines("from-include"));
+        assert!(!directory.defines("elsewhere"));
+    }
+
+    #[test]
+    fn un_bloc_match_n_est_pas_evalue_et_ne_definit_rien_par_lui_meme() {
+        let (_home, directory) = directory("Match host db\n  User x\nHost real\n", &[]);
+        assert!(directory.defines("real"));
+        assert!(!directory.defines("db"));
+    }
+
+    #[test]
+    fn sans_fichier_de_configuration_lisible_aucun_alias_n_est_defini() {
+        let home = tempfile::tempdir().unwrap();
+        let directory =
+            OpenSshAliasDirectory::new(answers(&[]), None, Some(home.path().to_path_buf()));
+        assert!(!directory.defines("any"));
+    }
+
+    #[test]
+    fn sans_emplacement_de_configuration_connu_aucun_alias_n_est_refuse() {
+        let directory = OpenSshAliasDirectory::new(answers(&[]), None, None);
+        assert!(directory.defines("any"));
+    }
+
+    #[test]
+    fn un_argument_entre_guillemets_est_lu_sans_ses_guillemets() {
+        let (_home, directory) = directory("Host \"quoted\"\n", &[]);
+        assert!(directory.defines("quoted"));
+        assert!(!directory.defines("\"quoted\""));
+    }
+
+    #[test]
+    fn la_forme_avec_signe_egal_est_lue_avec_ou_sans_espaces() {
+        let (_home, directory) = directory("Host=eqform\nHost = spaced-eq\nhost =tight\n", &[]);
+        assert!(directory.defines("eqform"));
+        assert!(directory.defines("spaced-eq"));
+        assert!(directory.defines("tight"));
+    }
+
+    #[test]
+    fn un_argument_entre_guillemets_avec_espace_reste_un_seul_motif() {
+        let (_home, directory) = directory("Host \"two words\" spaced\n", &[]);
+        assert!(directory.defines("two words"));
+        assert!(directory.defines("spaced"));
+        assert!(!directory.defines("two"));
+        assert!(!directory.defines("words"));
+    }
+
+    #[test]
+    fn un_include_relatif_au_dossier_personnel_est_suivi() {
+        let (home, directory) = directory("Include ~/extra.conf\n", &[]);
+        std::fs::write(home.path().join("extra.conf"), "Host from-home\n").unwrap();
+        assert!(directory.defines("from-home"));
+    }
+
+    #[test]
+    fn un_include_d_un_fichier_absent_est_ignore_sans_erreur() {
+        let (_home, directory) = directory(
+            "Include missing.conf\nInclude ~/missing-too.conf\nHost still-read\n",
+            &[],
+        );
+        assert!(directory.defines("still-read"));
+        assert!(!directory.defines("missing"));
+    }
+
+    #[test]
+    fn des_include_imbriques_jusqu_a_seize_niveaux_sont_suivis() {
+        let (home, directory) = directory("Include level1.conf\n", &[]);
+        let ssh = home.path().join(".ssh");
+        for level in 1..16 {
+            std::fs::write(
+                ssh.join(format!("level{level}.conf")),
+                format!("Include level{}.conf\n", level + 1),
+            )
+            .unwrap();
+        }
+        std::fs::write(ssh.join("level16.conf"), "Host deep\n").unwrap();
+        assert!(directory.defines("deep"));
+        std::fs::write(ssh.join("level17.conf"), "Host deeper\n").unwrap();
+        std::fs::write(ssh.join("level16.conf"), "Include level17.conf\n").unwrap();
+        assert!(!directory.defines("deeper"));
+    }
+
+    #[test]
+    fn un_fichier_qui_s_inclut_lui_meme_par_joker_est_lu_une_seule_fois_par_branche() {
+        let (home, directory) = directory("Include conf.d/*.conf\n", &[]);
+        let conf = home.path().join(".ssh/conf.d");
+        for index in 0..5 {
+            std::fs::write(
+                conf.join(format!("f{index}.conf")),
+                format!("Include conf.d/*.conf\nHost host-{index}\n"),
+            )
+            .unwrap();
+        }
+        assert!(directory.defines("host-4"));
+        assert!(!directory.defines("host-5"));
     }
 }

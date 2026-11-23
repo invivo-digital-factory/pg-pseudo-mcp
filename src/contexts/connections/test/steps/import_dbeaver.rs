@@ -164,11 +164,6 @@ fn run_import(world: &mut ConnectionsWorld, force: bool) {
     if std::fs::metadata(&file).is_ok_and(|metadata| metadata.len() == 0) {
         std::fs::remove_file(&file).expect("remove the empty placeholder");
     }
-    if world.ssh_config.is_none() {
-        let path = world.config_dir.path().join("ssh_config");
-        std::fs::write(&path, "").expect("empty ssh config");
-        world.ssh_config = Some(path);
-    }
     let use_case = import_dbeaver_use_case(&world.config());
     world.import_outcome = Some(
         use_case

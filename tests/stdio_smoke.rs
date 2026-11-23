@@ -7,11 +7,20 @@ use serde_json::{Value, json};
 struct McpProcess {
     child: std::process::Child,
     stdout: BufReader<std::process::ChildStdout>,
+    _isolation: tempfile::TempDir,
 }
 
 impl McpProcess {
     fn start() -> Self {
+        let isolation = tempfile::tempdir().expect("isolation dir");
+        let ssh_config = isolation.path().join("ssh_config");
+        std::fs::write(&ssh_config, "").expect("empty ssh config");
         let mut child = Command::new(env!("CARGO_BIN_EXE_pg-pseudo-mcp"))
+            .env(
+                "PG_PSEUDO_CONNECTIONS_FILE",
+                isolation.path().join("absent-connections.toml"),
+            )
+            .env("PG_PSEUDO_SSH_CONFIG", &ssh_config)
             .env("RUST_LOG", "debug")
             .env("PG_PSEUDO_DBEAVER_HOME", env!("CARGO_MANIFEST_DIR"))
             .stdin(Stdio::piped())
@@ -20,7 +29,11 @@ impl McpProcess {
             .spawn()
             .expect("binary starts");
         let stdout = BufReader::new(child.stdout.take().expect("stdout piped"));
-        Self { child, stdout }
+        Self {
+            child,
+            stdout,
+            _isolation: isolation,
+        }
     }
 
     fn send(&mut self, message: Value) {

@@ -261,6 +261,10 @@ mod unit {
         fn known_aliases(&self) -> Vec<String> {
             self.taken.clone()
         }
+
+        fn defines(&self, _alias: &str) -> bool {
+            true
+        }
     }
 
     fn definition(name: &str, host: &str) -> DbeaverDefinition {
