@@ -8,7 +8,7 @@ use crate::contexts::connections::domain::repositories::{
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
     AuthMode, ConnectionDefinition, ConnectionType, DbeaverDefinition, HostBlock, ImportReport,
-    ImportedConnection,
+    ImportedConnection, SkippedConnection,
 };
 
 type TunnelKey = (String, u16, String);
@@ -40,7 +40,18 @@ impl ImportDbeaverConnections {
 
     pub fn execute(&self, force: bool) -> Result<ImportReport, ImportError> {
         let read = self.definitions.read().map_err(ImportError::Source)?;
-        if read.definitions.is_empty() {
+        let mut skipped = read.skipped;
+        let mut definitions = Vec::new();
+        for definition in read.definitions {
+            match unsafe_tunnel_reason(&definition) {
+                Some(reason) => skipped.push(SkippedConnection {
+                    name: definition.name,
+                    reason,
+                }),
+                None => definitions.push(definition),
+            }
+        }
+        if definitions.is_empty() {
             return Err(ImportError::NothingToImport);
         }
         let mut plan = AliasPlan {
@@ -50,7 +61,7 @@ impl ImportDbeaverConnections {
         };
         let mut files = Vec::new();
         let mut imported = Vec::new();
-        for definition in &read.definitions {
+        for definition in &definitions {
             let (file, summary) = self.convert(definition, &mut plan);
             files.push(file);
             imported.push(summary);
@@ -59,7 +70,7 @@ impl ImportDbeaverConnections {
         Ok(ImportReport {
             path,
             imported,
-            skipped: read.skipped,
+            skipped,
             host_blocks: plan.blocks,
         })
     }
@@ -138,6 +149,26 @@ impl ImportDbeaverConnections {
         plan.resolved.insert(key, outcome.clone());
         outcome
     }
+}
+
+fn unsafe_tunnel_reason(definition: &DbeaverDefinition) -> Option<String> {
+    let tunnel = definition.tunnel.as_ref()?;
+    let key = tunnel
+        .key_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned());
+    let unsafe_value = [Some(&tunnel.host), Some(&tunnel.user), key.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|value| {
+            value.starts_with('-')
+                || value
+                    .chars()
+                    .any(|character| character.is_whitespace() || character.is_control())
+        });
+    unsafe_value.then(|| {
+        "its SSH tunnel host, user or key path contains whitespace, control characters or starts with a dash, so it cannot be written to an OpenSSH config safely; fix it in DBeaver and import again".to_string()
+    })
 }
 
 fn tunnel_key(tunnel: &crate::contexts::connections::domain::types::DbeaverTunnel) -> TunnelKey {
@@ -407,5 +438,76 @@ mod unit {
         assert_eq!(unique_alias("10.0.0.5", &[]), "10.0.0.5");
         assert_eq!(unique_alias("my host;x", &[]), "my-host-x");
         assert_eq!(unique_alias("-bad", &[]), "bastion-bad");
+    }
+
+    fn unsafe_tunnel(host: &str, user: &str, key: &str) -> DbeaverDefinition {
+        DbeaverDefinition {
+            tunnel: Some(DbeaverTunnel {
+                host: host.to_string(),
+                port: 22,
+                user: user.to_string(),
+                key_path: Some(PathBuf::from(key)),
+            }),
+            ..definition("risky", "db.internal")
+        }
+    }
+
+    #[test]
+    fn un_tunnel_dont_l_hote_l_utilisateur_ou_la_cle_est_dangereux_est_ecarte_sans_bloc_ssh() {
+        for (host, user, key) in [
+            (
+                "bastion\n  ProxyCommand touch /tmp/pwned",
+                "jump",
+                "/keys/id",
+            ),
+            ("bastion", "jump\nProxyCommand evil", "/keys/id"),
+            ("bastion", "jump", "/keys/id\nProxyCommand evil"),
+            ("-oProxyCommand=evil", "jump", "/keys/id"),
+            ("bastion", "-oProxyCommand=evil", "/keys/id"),
+            ("bastion", "jump", "-oProxyCommand=evil"),
+            ("bast ion", "jump", "/keys/id"),
+            ("bastion", "ju\u{7}mp", "/keys/id"),
+        ] {
+            let recorder = Arc::new(Recorder::default());
+            let report = run(
+                vec![
+                    definition("safe", "db.example"),
+                    unsafe_tunnel(host, user, key),
+                ],
+                no_aliases(),
+                &recorder,
+                false,
+            )
+            .unwrap();
+            assert!(report.host_blocks.is_empty(), "{host:?} {user:?} {key:?}");
+            assert_eq!(report.imported.len(), 1);
+            let skipped = report
+                .skipped
+                .iter()
+                .find(|skipped| skipped.name == "risky")
+                .expect("the risky connection is reported as skipped");
+            assert!(skipped.reason.contains("SSH tunnel"), "{}", skipped.reason);
+            assert!(
+                !skipped.reason.contains("ProxyCommand"),
+                "{}",
+                skipped.reason
+            );
+            let written = recorder.written.lock().unwrap().clone();
+            assert_eq!(written.len(), 1);
+            assert_eq!(written[0].name, "safe");
+        }
+    }
+
+    #[test]
+    fn un_hote_de_tunnel_ordinaire_avec_un_tiret_au_milieu_reste_importe() {
+        let recorder = Arc::new(Recorder::default());
+        let report = run(
+            vec![unsafe_tunnel("bastion-eu.corp", "jump", "/keys/id_ed25519")],
+            no_aliases(),
+            &recorder,
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.host_blocks.len(), 1);
     }
 }
