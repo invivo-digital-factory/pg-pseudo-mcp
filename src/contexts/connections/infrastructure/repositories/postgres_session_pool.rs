@@ -583,6 +583,65 @@ mod integration {
         assert_eq!(commands.runs(), 1);
     }
 
+    async fn refusing_server(sqlstate: &'static str) -> (u16, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut startup = [0u8; 1024];
+                let _ = socket.read(&mut startup).await;
+                let mut fields = Vec::new();
+                for (tag, text) in [(b'S', "FATAL"), (b'C', sqlstate), (b'M', "no access")] {
+                    fields.push(tag);
+                    fields.extend_from_slice(text.as_bytes());
+                    fields.push(0);
+                }
+                fields.push(0);
+                let mut message = vec![b'E'];
+                message.extend_from_slice(&((fields.len() as u32 + 4).to_be_bytes()));
+                message.extend_from_slice(&fields);
+                let _ = socket.write_all(&message).await;
+            }
+        });
+        (port, accepted)
+    }
+
+    #[tokio::test]
+    async fn un_refus_d_autorisation_28000_relance_la_commande_exactement_une_fois() {
+        let (port, accepted) = refusing_server("28000").await;
+        let offline = ConnectParams {
+            host: "127.0.0.1".to_string(),
+            port,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["pw".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let commands = ScriptedCommand::new(vec![Ok(Secret::new("one")), Ok(Secret::new("two"))]);
+        let pool = command_pool(offline, commands.clone());
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("both passwords are refused");
+        assert!(
+            matches!(
+                &error,
+                ConnectionError::ConnectFailed { source, .. } if source.is_authentication_failure()
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("28000"), "{error}");
+        assert_eq!(commands.runs(), 2);
+        assert_eq!(commands.renewals.load(Ordering::SeqCst), 1);
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+    }
+
     #[tokio::test]
     #[ignore]
     async fn un_jeton_azure_refuse_est_remplace_par_un_jeton_neuf_exactement_une_fois() {
