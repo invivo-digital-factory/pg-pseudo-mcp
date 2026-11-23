@@ -14,7 +14,20 @@ server: Marie Dupont's orders, every personal value pseudonymized, translated_li
 
 ## Install
 
-Requires a Rust toolchain (1.88 or later) to build; the result is a single binary with no runtime.
+Each `v*` tag publishes a release with a single binary per platform (macOS arm64 and x86_64, Linux x86_64 and arm64) and a `SHA256SUMS` file:
+
+```bash
+version=0.1.0
+target=aarch64-apple-darwin
+curl -fsSLO "https://github.com/invivo-digital-factory/pg-pseudo-mcp/releases/download/v$version/pg-pseudo-mcp-$target.tar.gz"
+curl -fsSLO "https://github.com/invivo-digital-factory/pg-pseudo-mcp/releases/download/v$version/SHA256SUMS"
+grep "pg-pseudo-mcp-$target.tar.gz" SHA256SUMS | shasum -a 256 -c
+tar -xzf "pg-pseudo-mcp-$target.tar.gz"
+mkdir -p ~/.local/bin
+install -m 755 "pg-pseudo-mcp-$target/pg-pseudo-mcp" ~/.local/bin/
+```
+
+To build from source instead, with a Rust toolchain (1.88 or later):
 
 ```bash
 cargo install --path .
