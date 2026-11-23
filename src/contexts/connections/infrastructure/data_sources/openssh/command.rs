@@ -127,7 +127,10 @@ mod integration {
                 port: Some(2200),
             })
             .unwrap();
-        assert_eq!(output.trim(), "-G -F /cfg/ssh_config -l alice -p 2200 -- jump");
+        assert_eq!(
+            output.trim(),
+            "-G -F /cfg/ssh_config -l alice -p 2200 -- jump"
+        );
         let bare = SshCommand::new(Some(dir.path().join("ssh")), None);
         assert_eq!(bare.dump(&target("alias")).unwrap().trim(), "-G -- alias");
     }
