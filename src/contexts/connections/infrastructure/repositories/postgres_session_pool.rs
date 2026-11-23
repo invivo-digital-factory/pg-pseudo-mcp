@@ -90,9 +90,14 @@ impl PostgresSessionPool {
             connection: connection.to_string(),
             source: redact_connection_identity(source, &options),
         };
+        let command = source.command().map(<[String]>::to_vec);
         let refused = match connect_within(&options, self.connect_deadline).await {
             Err(refused) if refused.is_authentication_failure() => refused,
-            other => return other.map_err(connect_failed),
+            other => {
+                return other
+                    .map(|session| session.with_password_command(command))
+                    .map_err(connect_failed);
+            }
         };
         let renewed = match source {
             PasswordSource::AzureToken(_) => self.renewed_token().await?,
@@ -105,6 +110,7 @@ impl PostgresSessionPool {
         };
         connect_within(&options, self.connect_deadline)
             .await
+            .map(|session| session.with_password_command(command))
             .map_err(connect_failed)
     }
 
@@ -157,16 +163,16 @@ impl PostgresSessionPool {
     }
 }
 
-fn reusable(cached: &ConnectOptions, wanted: &ConnectOptions, source: &PasswordSource) -> bool {
+fn reusable(cached: &Session, wanted: &ConnectOptions, source: &PasswordSource) -> bool {
     match source {
-        PasswordSource::Command(_) => {
+        PasswordSource::Command(argv) => {
             let wanted = ConnectOptions {
-                password: cached.password.clone(),
+                password: cached.options().password.clone(),
                 ..wanted.clone()
             };
-            cached == &wanted
+            cached.password_command() == Some(argv.as_slice()) && cached.options() == &wanted
         }
-        _ => cached == wanted,
+        _ => cached.password_command().is_none() && cached.options() == wanted,
     }
 }
 
@@ -194,7 +200,7 @@ impl SessionPool for PostgresSessionPool {
             .await;
         let mut cached = slot.clone().lock_owned().await;
         let session = match cached.take() {
-            Some(session) if reusable(session.options(), &options, &params.password) => session,
+            Some(session) if reusable(&session, &options, &params.password) => session,
             _ => match self.connect(connection, options, &params.password).await {
                 Ok(session) => session,
                 Err(error) => {
@@ -543,6 +549,38 @@ mod integration {
                 reason: "the password command exited with status 44".to_string()
             }
         );
+    }
+
+    #[tokio::test]
+    async fn une_commande_de_mot_de_passe_modifiee_remplace_la_session_en_cache_au_prochain_appel()
+    {
+        let offline = ConnectParams {
+            host: "127.0.0.1".to_string(),
+            port: refused_port().await,
+            database: "app".to_string(),
+            user: "reader".to_string(),
+            password: PasswordSource::Command(vec!["new".to_string()]),
+            sslmode: SslMode::Disable,
+            tunnel: None,
+        };
+        let commands = ScriptedCommand::new(vec![Ok(Secret::new("fresh"))]);
+        let pool = command_pool(offline.clone(), commands.clone());
+        let params = resolve_connection(&pool.catalog.discover(), "azure").expect("params");
+        let cached = Session::idle(ConnectOptions {
+            password: "from-old-command".to_string(),
+            ..connect_options(&params, None)
+        })
+        .with_password_command(Some(vec!["old".to_string()]));
+        pool.cache_for_tests("azure", &params.database, cached);
+        let error = pool
+            .run_read_only("azure", None, "SELECT 1", limits())
+            .await
+            .expect_err("the closed port refuses the new connection");
+        assert!(
+            matches!(error, ConnectionError::ConnectFailed { .. }),
+            "{error:?}"
+        );
+        assert_eq!(commands.runs(), 1);
     }
 
     #[tokio::test]

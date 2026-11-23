@@ -32,6 +32,7 @@ const UNDEFINED_PARAMETER: &str = "42P02";
 
 pub struct Session {
     options: ConnectOptions,
+    password_command: Option<Vec<String>>,
     connect_deadline: Duration,
     live: Option<Live>,
     sources: SourceCache,
@@ -56,6 +57,7 @@ pub async fn connect_within(
     let live = open(options, deadline).await?;
     Ok(Session {
         options: options.clone(),
+        password_command: None,
         connect_deadline: deadline,
         live: Some(live),
         sources: SourceCache::default(),
@@ -67,10 +69,20 @@ impl Session {
         &self.options
     }
 
+    pub fn password_command(&self) -> Option<&[String]> {
+        self.password_command.as_deref()
+    }
+
+    pub fn with_password_command(mut self, argv: Option<Vec<String>>) -> Self {
+        self.password_command = argv;
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn idle(options: ConnectOptions) -> Self {
         Self {
             options,
+            password_command: None,
             connect_deadline: CONNECT_DEADLINE,
             live: None,
             sources: SourceCache::default(),
