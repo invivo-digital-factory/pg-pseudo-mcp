@@ -332,6 +332,90 @@ mod unit {
         );
     }
 
+    fn hinted_reasons(kind: &str, why: Reason) -> Vec<Reason> {
+        result_hints(
+            &[column("c", Some(("t", "c")))],
+            &[flag(kind, why)],
+            &ColumnPolicy::default(),
+        )
+        .into_iter()
+        .map(|hint| hint.reason)
+        .collect()
+    }
+
+    #[test]
+    fn une_colonne_email_du_dictionnaire_ne_recoit_pas_d_indice() {
+        for kind in [
+            "email",
+            "phone",
+            "iban",
+            "siren",
+            "siret",
+            "nir",
+            "card_number",
+            "ip_address",
+            "birth_date",
+            "address",
+            "city",
+            "postal_code",
+            "civility",
+            "gender",
+        ] {
+            assert!(
+                hinted_reasons(kind, Reason::Dictionary).is_empty(),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_colonne_de_nom_du_dictionnaire_recoit_toujours_un_indice() {
+        for kind in ["last_name", "first_name", "person_name"] {
+            assert_eq!(
+                hinted_reasons(kind, Reason::Dictionary),
+                vec![Reason::Dictionary],
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_colonne_pseudonymisee_par_l_heuristique_recoit_toujours_un_indice() {
+        assert_eq!(
+            hinted_reasons("person_name", Reason::Default),
+            vec![Reason::Default]
+        );
+    }
+
+    #[test]
+    fn la_description_ne_propose_pas_de_classer_une_colonne_email_du_dictionnaire() {
+        let email = ColumnClassification {
+            forced_kind: Some("email".into()),
+            clear_by_type: false,
+        };
+        let entry = ColumnEntry {
+            name: "email".into(),
+            type_name: "text".into(),
+            not_null: false,
+            pseudonymized: Some("email".into()),
+            policy: None,
+            comment: None,
+        };
+        assert_eq!(describe_hint("public.t.email".into(), &email, &entry), None);
+        let product = ColumnClassification {
+            forced_kind: Some("last_name".into()),
+            clear_by_type: false,
+        };
+        let entry = ColumnEntry {
+            pseudonymized: Some("last_name".into()),
+            ..entry
+        };
+        assert_eq!(
+            describe_hint("public.t.product_name".into(), &product, &entry).map(|hint| hint.reason),
+            Some(Reason::Dictionary)
+        );
+    }
+
     #[test]
     fn une_colonne_classee_ne_recoit_plus_d_indice() {
         let policy = merged(&[document(

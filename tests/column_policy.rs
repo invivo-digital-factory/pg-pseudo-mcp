@@ -170,7 +170,6 @@ mod e2e {
             json!([
                 { "column": "public.products.product_name", "reason": "dictionary", "hint": HINT },
                 { "column": "public.orders.titulaire", "reason": "default", "hint": HINT },
-                { "column": "public.customers.email", "reason": "dictionary", "hint": HINT },
             ]),
             "{unclassified}"
         );

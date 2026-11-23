@@ -1,12 +1,19 @@
 use crate::contexts::querying::domain::constants::catalog::DETECTED_PER_VALUE;
-use crate::contexts::querying::domain::constants::column_policy::POLICY_HINT;
+use crate::contexts::querying::domain::constants::column_policy::{
+    HINTED_DICTIONARY_KINDS, POLICY_HINT,
+};
 use crate::contexts::querying::domain::types::{
     ColumnClassification, ColumnEntry, ColumnFlag, ColumnMeta, ColumnPolicy, ColumnPolicyHint,
     Reason,
 };
 
-pub fn column_hint(column: String, reason: Reason) -> Option<ColumnPolicyHint> {
-    matches!(reason, Reason::Dictionary | Reason::Default).then_some(ColumnPolicyHint {
+pub fn column_hint(column: String, reason: Reason, kind: &str) -> Option<ColumnPolicyHint> {
+    let hinted = match reason {
+        Reason::Default => true,
+        Reason::Dictionary => HINTED_DICTIONARY_KINDS.contains(&kind),
+        _ => false,
+    };
+    hinted.then_some(ColumnPolicyHint {
         column,
         reason,
         hint: POLICY_HINT,
@@ -21,11 +28,11 @@ pub fn describe_hint(
     if entry.policy.is_some() {
         return None;
     }
-    if class.forced_kind.is_some() && entry.pseudonymized.is_some() {
-        return column_hint(column, Reason::Dictionary);
+    if let (Some(kind), Some(_)) = (&class.forced_kind, &entry.pseudonymized) {
+        return column_hint(column, Reason::Dictionary, kind);
     }
     (entry.pseudonymized.as_deref() == Some(DETECTED_PER_VALUE))
-        .then(|| column_hint(column, Reason::Default))
+        .then(|| column_hint(column, Reason::Default, DETECTED_PER_VALUE))
         .flatten()
 }
 
@@ -46,7 +53,7 @@ pub fn result_hints(
         if hints.iter().any(|hint| hint.column == name) {
             continue;
         }
-        hints.extend(column_hint(name, flag.why));
+        hints.extend(column_hint(name, flag.why, &flag.kind));
     }
     hints
 }
