@@ -46,6 +46,9 @@ impl AnonymizationWorld {
             ssh_known_hosts: None,
             ssh_config: Some(ssh_config),
             connections_file: Some(self.data_dir.path().join("absent-connections.toml")),
+            columns_file: None,
+            xdg_config_home: None,
+            home_dir: None,
         };
         let handler = mapping_purge_handler(&config).expect("purge handler");
         let status = handler.run(true);

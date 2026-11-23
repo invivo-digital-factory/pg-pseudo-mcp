@@ -5,23 +5,29 @@ use crate::contexts::querying::domain::constants::clear_lineage::{
     MAX_LINEAGE_RELATIONS, MAX_RELATION_COLUMNS, RELATION_COLUMNS_TIMEOUT_MS,
 };
 use crate::contexts::querying::domain::errors::{DatabaseFailure, QueryingError, ScrubbedText};
-use crate::contexts::querying::domain::repositories::{AnonymizationPorts, ReadOnlyDatabase};
+use crate::contexts::querying::domain::repositories::{
+    AnonymizationPorts, ColumnPolicySource, ReadOnlyDatabase,
+};
 use crate::contexts::querying::domain::services::catalog_queries::relation_columns_sql;
 use crate::contexts::querying::domain::services::catalog_reading::relation_columns;
 use crate::contexts::querying::domain::services::clear_lineage::{
-    catalog_relations, clearances, is_clear_source,
+    catalog_relations, clearances, is_clear_source, is_clear_source_by_policy,
+};
+use crate::contexts::querying::domain::services::column_policy::{
+    combine_lineage, policy_clearances, result_hints,
 };
 use crate::contexts::querying::domain::services::result_bounds::bound_rows;
 use crate::contexts::querying::domain::services::statement_guard::inspect;
 use crate::contexts::querying::domain::types::{
-    Clearance, ColumnMeta, ColumnOut, ExecutionLimits, Guarded, NoticeOut, PersonalNames,
-    QueryLimits, QueryRequest, QueryResponse, RelationCatalog, Translations, TruncatedBy,
-    Truncation, Warning,
+    Clearance, ColumnMeta, ColumnOut, ColumnPolicy, ExecutionLimits, Guarded, NoticeOut,
+    PersonalNames, QueryLimits, QueryRequest, QueryResponse, RelationCatalog, Translations,
+    TruncatedBy, Truncation, Warning,
 };
 
 pub struct RunQuery<D: ReadOnlyDatabase> {
     database: Arc<D>,
     anonymization: Result<AnonymizationPorts, String>,
+    policy: Option<Arc<dyn ColumnPolicySource>>,
 }
 
 impl<D: ReadOnlyDatabase> RunQuery<D> {
@@ -29,7 +35,13 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
         Self {
             database,
             anonymization,
+            policy: None,
         }
+    }
+
+    pub fn with_column_policy(mut self, policy: Arc<dyn ColumnPolicySource>) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     pub async fn execute(&self, request: QueryRequest) -> Result<QueryResponse, QueryingError> {
@@ -40,7 +52,8 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
                 .map_err(|reason| QueryingError::StoreUnavailable {
                     reason: reason.clone(),
                 })?;
-        let guarded = self.guard(ports, &request.sql)?;
+        let policy = self.column_policy();
+        let guarded = self.guard(ports, &policy, &request.sql)?;
         let (limits, clamps) =
             QueryLimits::from_request(request.max_rows, request.max_bytes, request.timeout_ms);
         let cell_offset = usize::try_from(request.cell_offset.unwrap_or(0)).unwrap_or(usize::MAX);
@@ -81,7 +94,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             .await
             .unwrap_or_default();
         let clearances = self
-            .clearances(ports, &request, &guarded, &output.columns)
+            .clearances(ports, &policy, &request, &guarded, &output.columns)
             .await;
         let anonymized = ports.anonymizer.rows(
             &output.columns,
@@ -91,6 +104,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             &enum_labels,
             &clearances,
         );
+        let column_policy_hints = result_hints(&output.columns, &anonymized.per_column, &policy);
         let columns: Vec<ColumnOut> = output
             .columns
             .iter()
@@ -134,6 +148,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             row_count: rows.len(),
             rows,
             pseudonymized: anonymized.pseudonymized,
+            column_policy_hints,
             translated_literals: guarded.translated_literals,
             truncated,
             warnings,
@@ -142,9 +157,31 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
         })
     }
 
+    fn column_policy(&self) -> ColumnPolicy {
+        self.policy
+            .as_ref()
+            .map(|source| source.load().policy)
+            .unwrap_or_default()
+    }
+
     async fn clearances(
         &self,
         ports: &AnonymizationPorts,
+        policy: &ColumnPolicy,
+        request: &QueryRequest,
+        guarded: &Guarded,
+        columns: &[ColumnMeta],
+    ) -> Vec<Clearance> {
+        let lineage = self
+            .lineage_clearances(ports, policy, request, guarded, columns)
+            .await;
+        policy_clearances(columns, policy, lineage)
+    }
+
+    async fn lineage_clearances(
+        &self,
+        ports: &AnonymizationPorts,
+        policy: &ColumnPolicy,
         request: &QueryRequest,
         guarded: &Guarded,
         columns: &[ColumnMeta],
@@ -176,15 +213,30 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             }
         }
         let dictionary = ports.dictionary.as_ref();
-        clearances(
+        let proven = clearances(
             &guarded.statement,
             &catalog,
-            &|column| is_clear_source(dictionary, column),
+            &|column| is_clear_source(dictionary, policy, column),
             columns.len(),
-        )
+        );
+        if !policy.has_clear() {
+            return proven;
+        }
+        let with_policy = clearances(
+            &guarded.statement,
+            &catalog,
+            &|column| is_clear_source_by_policy(dictionary, policy, column),
+            columns.len(),
+        );
+        combine_lineage(proven, with_policy)
     }
 
-    fn guard(&self, ports: &AnonymizationPorts, sql: &str) -> Result<Guarded, QueryingError> {
+    fn guard(
+        &self,
+        ports: &AnonymizationPorts,
+        policy: &ColumnPolicy,
+        sql: &str,
+    ) -> Result<Guarded, QueryingError> {
         let inspected = inspect(sql).map_err(QueryingError::Refused)?;
         let mut translations = Translations::default();
         for literal in inspected.literals() {
@@ -195,7 +247,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             .map_err(QueryingError::Refused)?;
         let mut personal = PersonalNames::default();
         for name in rewritten.lineage_names() {
-            if ports.dictionary.dictionary_kind(&name).is_some() {
+            if ports.dictionary.dictionary_kind(&name).is_some() || policy.is_personal_name(&name) {
                 personal.insert(&name);
             }
         }

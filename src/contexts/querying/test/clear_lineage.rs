@@ -3,12 +3,13 @@ use crate::contexts::anonymization::use_cases::classify_column::ClassifyColumn;
 use crate::contexts::anonymization::use_cases::dictionary_kind::DictionaryKind;
 use crate::contexts::querying::domain::repositories::PersonalColumnDictionary;
 use crate::contexts::querying::domain::services::clear_lineage::{
-    catalog_relations, clearances, is_clear_source,
+    catalog_relations, clearances, is_clear_source, is_clear_source_by_policy,
 };
+use crate::contexts::querying::domain::services::column_policy::parse_pattern;
 use crate::contexts::querying::domain::services::statement_parser::parse_single;
 use crate::contexts::querying::domain::types::Clearance::{ProvenClear, Unproven};
 use crate::contexts::querying::domain::types::{
-    CatalogColumn, Clearance, ColumnClassification, RelationCatalog,
+    CatalogColumn, Clearance, ColumnClassification, ColumnPolicy, PolicyDecision, RelationCatalog,
 };
 
 struct Dictionary;
@@ -33,10 +34,12 @@ impl PersonalColumnDictionary for Dictionary {
     }
 }
 
-fn columns(definitions: &[(&str, &str)]) -> Vec<CatalogColumn> {
+fn columns(table: &str, definitions: &[(&str, &str)]) -> Vec<CatalogColumn> {
     definitions
         .iter()
         .map(|(name, type_name)| CatalogColumn {
+            schema: "public".to_string(),
+            table: table.to_string(),
             name: name.to_string(),
             type_name: type_name.to_string(),
         })
@@ -45,29 +48,35 @@ fn columns(definitions: &[(&str, &str)]) -> Vec<CatalogColumn> {
 
 fn catalog() -> RelationCatalog {
     let mut catalog = RelationCatalog::default();
-    let orders = columns(&[
-        ("id", "int4"),
-        ("customer_id", "int4"),
-        ("order_ref", "uuid"),
-        ("status", "enum"),
-        ("payment_method", "enum"),
-        ("paid", "bool"),
-        ("amount", "numeric"),
-        ("created_at", "timestamptz"),
-        ("status_label", "text"),
-    ]);
+    let orders = columns(
+        "orders",
+        &[
+            ("id", "int4"),
+            ("customer_id", "int4"),
+            ("order_ref", "uuid"),
+            ("status", "enum"),
+            ("payment_method", "enum"),
+            ("paid", "bool"),
+            ("amount", "numeric"),
+            ("created_at", "timestamptz"),
+            ("status_label", "text"),
+        ],
+    );
     catalog.insert("orders", orders.clone());
     catalog.insert("public.orders", orders);
     catalog.insert(
         "customers",
-        columns(&[
-            ("id", "int4"),
-            ("nom", "text"),
-            ("prenom", "text"),
-            ("telephone_secours", "int8"),
-            ("date_naissance", "date"),
-            ("created_at", "timestamptz"),
-        ]),
+        columns(
+            "customers",
+            &[
+                ("id", "int4"),
+                ("nom", "text"),
+                ("prenom", "text"),
+                ("telephone_secours", "int8"),
+                ("date_naissance", "date"),
+                ("created_at", "timestamptz"),
+            ],
+        ),
     );
     catalog
 }
@@ -77,13 +86,33 @@ fn verdicts(sql: &str, column_count: usize) -> Vec<Clearance> {
     clearances(
         &statement,
         &catalog(),
-        &|column| is_clear_source(&Dictionary, column),
+        &|column| is_clear_source(&Dictionary, &ColumnPolicy::default(), column),
         column_count,
     )
 }
 
 fn verdict(sql: &str) -> Clearance {
-    verdicts(sql, 1)[0]
+    verdicts(sql, 1).remove(0)
+}
+
+fn policy(entries: &[(&str, PolicyDecision)]) -> ColumnPolicy {
+    let mut policy = ColumnPolicy::default();
+    for (pattern, decision) in entries {
+        policy.insert(parse_pattern(pattern).unwrap(), decision.clone());
+    }
+    policy
+}
+
+fn verdict_under(sql: &str, policy: &ColumnPolicy, by_policy: bool) -> Clearance {
+    let statement = parse_single(sql).unwrap_or_else(|error| panic!("{sql}: {error:?}"));
+    let source = |column: &CatalogColumn| {
+        if by_policy {
+            is_clear_source_by_policy(&Dictionary, policy, column)
+        } else {
+            is_clear_source(&Dictionary, policy, column)
+        }
+    };
+    clearances(&statement, &catalog(), &source, 1).remove(0)
 }
 
 mod unit {
@@ -280,6 +309,39 @@ mod unit {
     #[test]
     fn une_requete_sans_colonne_lue_reste_en_clair() {
         assert_eq!(verdict("SELECT 'Martin' || 1"), ProvenClear);
+    }
+
+    #[test]
+    fn une_colonne_texte_declaree_en_clair_prouve_son_expression_par_la_politique() {
+        let sql = "SELECT concat(status_label, ' ', status) FROM orders";
+        let clear = policy(&[("*.status_label", PolicyDecision::Clear)]);
+        assert_eq!(verdict_under(sql, &clear, false), Unproven);
+        assert_eq!(verdict_under(sql, &clear, true), ProvenClear);
+        assert_eq!(verdict_under(sql, &ColumnPolicy::default(), true), Unproven);
+    }
+
+    #[test]
+    fn une_colonne_du_dictionnaire_declaree_en_clair_devient_une_source_claire_par_la_politique() {
+        let sql = "SELECT upper(nom) FROM customers";
+        let clear = policy(&[("public.customers.nom", PolicyDecision::Clear)]);
+        assert_eq!(verdict_under(sql, &clear, true), ProvenClear);
+        let elsewhere = policy(&[("orders.nom", PolicyDecision::Clear)]);
+        assert_eq!(verdict_under(sql, &elsewhere, true), Unproven);
+    }
+
+    #[test]
+    fn un_enum_declare_personnel_n_est_plus_une_source_claire() {
+        let sql = "SELECT upper(status::text) FROM orders";
+        let personal = policy(&[(
+            "orders.status",
+            PolicyDecision::Personal("person_name".to_string()),
+        )]);
+        assert_eq!(
+            verdict_under(sql, &ColumnPolicy::default(), false),
+            ProvenClear
+        );
+        assert_eq!(verdict_under(sql, &personal, false), Unproven);
+        assert_eq!(verdict_under(sql, &personal, true), Unproven);
     }
 
     #[test]

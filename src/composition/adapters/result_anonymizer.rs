@@ -36,7 +36,7 @@ impl ResultAnonymizer for ResultAnonymizerAdapter {
             .collect();
         let lineage_per_column: Option<Vec<_>> =
             lineage_per_column.map(|items| items.iter().copied().map(lineage).collect());
-        let clearances: Vec<_> = clearances.iter().copied().map(clearance).collect();
+        let clearances: Vec<_> = clearances.iter().map(clearance).collect();
         rows_out(self.use_cases.anonymize_result_set.execute(
             &columns,
             rows,

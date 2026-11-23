@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::{ColumnFlag, Truncation, Warning};
+use super::{ColumnFlag, ColumnPolicyHint, Truncation, Warning};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QueryRequest {
@@ -23,6 +23,8 @@ pub struct QueryResponse {
     pub row_count: usize,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub pseudonymized: BTreeMap<String, ColumnFlag>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub column_policy_hints: Vec<ColumnPolicyHint>,
     pub translated_literals: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub truncated: Vec<Truncation>,

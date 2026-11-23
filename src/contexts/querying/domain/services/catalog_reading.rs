@@ -69,7 +69,9 @@ pub fn relation_columns(output: &QueryOutput) -> Option<Vec<CatalogColumn>> {
         .rows
         .iter()
         .map(|row| match row.as_slice() {
-            [name, type_name] => Some(CatalogColumn {
+            [name, type_name, schema, table] => Some(CatalogColumn {
+                schema: text(schema)?,
+                table: text(table)?,
                 name: text(name)?,
                 type_name: text(type_name)?,
             }),

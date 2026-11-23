@@ -318,6 +318,13 @@ fn merge_names(text: &str, spans: Vec<Span>) -> Vec<Span> {
     merged
 }
 
+pub fn structural_spans(text: &str) -> Vec<Span> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    resolve(pattern_spans(text))
+}
+
 pub fn detect_spans(text: &str) -> Vec<Span> {
     if text.trim().is_empty() {
         return Vec::new();

@@ -44,6 +44,7 @@ Describe your connections in [the connection file](#connections), or generate it
 | Environment variable | Purpose |
 |---|---|
 | `PG_PSEUDO_CONNECTIONS_FILE` | Absolute path of the connection file, instead of `~/.config/pg-pseudo/connections.toml` |
+| `PG_PSEUDO_COLUMNS_FILE` | Absolute path of the shared [column policy](#column-policy); the local one is `~/.config/pg-pseudo/columns.toml` |
 | `PG_PSEUDO_SSH_CONFIG` | Absolute path of an SSH config passed to `ssh -G` with `-F`, instead of `~/.ssh/config` |
 | `PG_PSEUDO_SSH_KNOWN_HOSTS` | Absolute path of a `known_hosts` file used for every SSH hop instead of the files `ssh -G` lists |
 | `PG_PSEUDO_DBEAVER_HOME` | DBeaver data root, when it is not in the default place |
@@ -173,6 +174,31 @@ The script that wrote an access token into `~/.pgpass` before each session is no
 
 Sorting, `MIN`/`MAX`, ranges, `LIKE`, regular expressions, length, substrings, hashing and date arithmetic run on the real values inside the database, so their results may not match the pseudonyms you see.
 
+## Column policy
+
+The heuristics make mistakes in both directions: the dictionary maps the bare token `name` to a last name, so `product_name` or `table_name` are pseudonymized, and a text column of codes can look like names. A column policy fixes this by configuration.
+
+Two optional TOML files are read, in this order, on every call (no restart needed); the later one wins on the same key:
+
+1. **Shared**: the path in `PG_PSEUDO_COLUMNS_FILE` (absolute), typically a file the team maintains together.
+2. **Local**: `$XDG_CONFIG_HOME/pg-pseudo/columns.toml`, or `~/.config/pg-pseudo/columns.toml`, resolved like the connection file.
+
+```toml
+clear = ["*.product_name", "public.payment.carrier_name", "orders.reference"]
+
+[personal]
+"customer.contact" = "person_name"
+"*.siret_client" = "siret"
+```
+
+- **Keys** are column patterns: `schema.table.column`, `table.column` (any schema) or `*.column` (any table), matched without regard to case. When several patterns match a column, the most specific wins: `schema.table.column`, then `table.column`, then `*.column`. A pattern cannot be both `clear` and `personal` in the same file.
+- **Kinds** accepted in `personal` are the pseudonym kinds listed by `server_info` (`email`, `phone`, `iban`, `siren`, `siret`, `nir`, `card_number`, `ip_address`, `person_name`, `last_name`, `first_name`, `address`, `city`, `postal_code`, `civility`, `gender`, `birth_date`).
+- **Precedence** for a result column read from a table column (found through the catalog, as for the enum labels): policy `personal`, then policy `clear`, then the dictionary, then the type, then the heuristics. A computed column is never matched by its output alias.
+- **Safety net.** A `clear` column skips the dictionary and the name, address and free-text heuristics, but its values still go through the structural detectors (email, phone, IBAN mod 97, SIREN and SIRET Luhn, NIR key, card numbers, IP addresses): a value they recognise is still replaced and reported as `detected`. A `clear` column also counts as clear for the expressions over clear columns described above, with the same safety net, so `concat(product_name, ' ', status)` stays in clear.
+- **Personal.** A `personal` column is pseudonymized as the given kind whatever its name or type, reported with the reason `policy`, and an expression that reads a column of that name is treated as derived from personal data.
+- **Invalid file.** A file that cannot be read or parsed, an invalid pattern or an unknown kind makes that file ignored (the other one still applies); the server keeps working, and `server_info` and every `list_connections` result carry a `column_policy_ignored` warning naming the file and the error, never a value.
+- **Hints.** When a `query` result pseudonymizes a column read from a table column that no policy entry covers, because of the dictionary or by default, the result carries `column_policy_hints`, one entry per column: `{ "column": "schema.table.column", "reason": "dictionary" | "default", "hint": "classify it in the column policy: clear or personal" }`. `describe_table` lists the same hints for the columns it reports as pseudonymized, and shows `"policy": "clear" | "personal"` for classified columns. Hints never carry values. The agent is told to propose a classification: in the local file for immediate use, in the shared list through the team's own process.
+
 ## Read-only guarantee
 
 Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLAIN` without `ANALYZE`. Writable CTEs, `SELECT INTO`, row locks, session changes, server functions (`pg_terminate_backend`, `set_config`, `nextval`, `pg_sleep`, `dblink`, large objects, file access...) and catalog relations other than structural ones are refused with the rule that blocked them. Each call runs in a `READ ONLY` transaction with a statement timeout, then rolls back. For defence in depth, point DBeaver at a role that can only `SELECT`.
@@ -187,6 +213,7 @@ pg-pseudo-mcp protects against **accidental disclosure by a cooperative agent**.
 - **Cut free text.** SQL string functions such as `left(body, 30)` cut free text on real values, so a phone number or an email split at the cut can come back as fragments no detector recognises. Read long values with `cell_offset` instead.
 - **Detection misses.** Names absent from the built-in lists, inside long free text and without a civility marker, can pass through. Unusual identifiers without a checksum are not recognised.
 - **Enum labels are cleared database-wide.** The labels of every enum of the database are kept in clear in any text column the dictionary does not mark as personal, not only in enum columns: a value equal to one of them, ignoring case and accents, passes in clear even if it is a person's name.
+- **A wrong `clear` entry discloses its column.** The column policy is trusted configuration: a column wrongly declared `clear` is returned in clear, apart from the values the structural detectors recognise (emails, phones, IBAN, SIREN, SIRET, NIR, card numbers, IP addresses). Names, addresses and free text in it pass through. Review the shared list like code, and keep the agent's edits to the local file under your own approval.
 - **Redefined operators and functions.** An expression is cleared from its source columns only when its operators and functions are on the built-in allowlist, matched by name. A role allowed to create objects can define its own `||` or `lower(...)` on built-in or enum types that PostgreSQL then picks instead of the built-in one; the parser cannot see that, so such an override can return personal data in clear.
 - **Computed timestamps.** Computed `date` values are shifted like birth dates, but computed timestamps are kept so that `date_trunc` and time-series analysis stay exact; a birth date explicitly cast to `timestamp` therefore passes in clear. Intervals computed from birth dates (`age()`, date differences) are exact and reveal the real birth date.
 - **Every database of the server.** The `database` argument reaches any database the connection's role may connect to, not only the connection's own. This is deliberate; restrict the role's `CONNECT` privileges on the server if some databases must stay out of reach.

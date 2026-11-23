@@ -21,14 +21,22 @@ pub fn locate(
             explicit: true,
         });
     }
+    Some(Location {
+        path: user_config_file(FILE_NAME, xdg_config_home, home)?,
+        explicit: false,
+    })
+}
+
+pub fn user_config_file(
+    file_name: &str,
+    xdg_config_home: Option<OsString>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
     let base = xdg_config_home
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .or_else(|| home.map(|home| home.join(".config")))?;
-    Some(Location {
-        path: base.join(DIRECTORY).join(FILE_NAME),
-        explicit: false,
-    })
+    Some(base.join(DIRECTORY).join(file_name))
 }
 
 pub fn locate_from_environment(configured: Option<&Path>) -> Option<Location> {
@@ -96,6 +104,23 @@ mod unit {
             PathBuf::from("/home/me/.config/pg-pseudo/connections.toml")
         );
         assert!(!location.explicit);
+    }
+
+    #[test]
+    fn un_autre_fichier_de_configuration_suit_les_memes_regles_d_emplacement() {
+        assert_eq!(
+            user_config_file("columns.toml", Some(OsString::from("/xdg")), Some(&home())),
+            Some(PathBuf::from("/xdg/pg-pseudo/columns.toml"))
+        );
+        assert_eq!(
+            user_config_file(
+                "columns.toml",
+                Some(OsString::from("relative")),
+                Some(&home())
+            ),
+            Some(PathBuf::from("/home/me/.config/pg-pseudo/columns.toml"))
+        );
+        assert_eq!(user_config_file("columns.toml", None, None), None);
     }
 
     #[test]

@@ -102,7 +102,7 @@ pub fn parse_file(contents: &str) -> Result<ParsedFile, SyntaxError> {
     })
 }
 
-fn position_of(contents: &str, offset: usize) -> SyntaxError {
+pub fn position_of(contents: &str, offset: usize) -> SyntaxError {
     let end = offset.min(contents.len());
     let before = contents.get(..end).unwrap_or_default();
     let line = before.matches('\n').count() + 1;

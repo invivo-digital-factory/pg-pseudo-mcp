@@ -1,4 +1,4 @@
-use super::detect::detect_spans;
+use super::detect::{detect_spans, structural_spans};
 use super::detect::{french_phone_digits, luhn, nir_valid};
 use super::dictionary::dictionary_kind;
 use super::freetext;
@@ -47,6 +47,8 @@ pub fn classify_column(info: &ColumnInfo) -> ColumnClass {
         forced_kind,
         clear_by_type,
         derived: info.derived,
+        structural_only: false,
+        forced_by_policy: false,
     }
 }
 
@@ -58,7 +60,15 @@ pub fn judge_text(text: &str, class: &ColumnClass) -> TextVerdict {
     if let Some(kind) = class.forced_kind {
         return TextVerdict::WholeValue {
             kind,
-            reason: Reason::Dictionary,
+            reason: forced_reason(class),
+        };
+    }
+    if class.structural_only {
+        let spans = structural_spans(text);
+        return if spans.is_empty() {
+            TextVerdict::Clear
+        } else {
+            TextVerdict::Spans(spans)
         };
     }
     if class.derived && freetext::is_digest(trimmed) {
@@ -84,6 +94,14 @@ pub fn judge_text(text: &str, class: &ColumnClass) -> TextVerdict {
         TextVerdict::Clear
     } else {
         TextVerdict::Spans(spans)
+    }
+}
+
+pub fn forced_reason(class: &ColumnClass) -> Reason {
+    if class.forced_by_policy {
+        Reason::Policy
+    } else {
+        Reason::Dictionary
     }
 }
 

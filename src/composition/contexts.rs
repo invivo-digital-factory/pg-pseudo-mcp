@@ -28,4 +28,8 @@ impl Contexts {
             connections,
         }
     }
+
+    pub fn column_policy_warnings(&self) -> Vec<String> {
+        self.querying.read_column_policy.execute().warnings
+    }
 }

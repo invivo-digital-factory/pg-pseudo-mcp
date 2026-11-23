@@ -15,6 +15,14 @@ pub struct ServerInfo {
     pub non_reversible_kinds: &'static [&'static str],
     pub acts_on_real_values: &'static [&'static str],
     pub known_limits: &'static [&'static str],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<InfoWarning>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InfoWarning {
+    pub code: &'static str,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -24,7 +32,9 @@ pub struct Limits {
     pub timeout_ms: u64,
 }
 
-pub fn server_info() -> ServerInfo {
+pub const COLUMN_POLICY_IGNORED: &str = "column_policy_ignored";
+
+pub fn server_info(column_policy_warnings: Vec<String>) -> ServerInfo {
     ServerInfo {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
@@ -45,6 +55,13 @@ pub fn server_info() -> ServerInfo {
         non_reversible_kinds: NON_REVERSIBLE_KINDS,
         acts_on_real_values: ACTS_ON_REAL_VALUES,
         known_limits: KNOWN_LIMITS,
+        warnings: column_policy_warnings
+            .into_iter()
+            .map(|message| InfoWarning {
+                code: COLUMN_POLICY_IGNORED,
+                message,
+            })
+            .collect(),
     }
 }
 
@@ -87,6 +104,7 @@ pub const KNOWN_LIMITS: &[&str] = &[
     "intervals computed from birth dates (age(), date differences) are exact and reveal the real birth date",
     "free text cut by SQL string functions (left, substr) can return fragments of personal values that no detector recognises",
     "date parts extracted from birth dates (to_char, extract) are returned in clear",
+    "a column wrongly declared clear in the column policy is returned in clear, apart from values the structural detectors recognise",
 ];
 
 #[cfg(test)]
@@ -95,7 +113,7 @@ mod unit {
 
     #[test]
     fn les_infos_serveur_exposent_les_memes_limites_que_le_module_limits() {
-        let info = server_info();
+        let info = server_info(Vec::new());
         assert_eq!(info.defaults.max_rows, limits::DEFAULT_MAX_ROWS);
         assert_eq!(info.maxima.max_rows, limits::MAX_ROWS_CEILING);
         assert_eq!(info.maxima.max_bytes, limits::MAX_BYTES_CEILING);

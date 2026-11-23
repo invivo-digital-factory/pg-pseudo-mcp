@@ -9,4 +9,4 @@ mod source_clearance;
 
 pub use catalog_relations::catalog_relations;
 pub use clearances::clearances;
-pub use source_clearance::is_clear_source;
+pub use source_clearance::{is_clear_source, is_clear_source_by_policy};

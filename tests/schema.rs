@@ -246,7 +246,11 @@ mod e2e {
         let response = describe(&harness, "customers").await;
         assert!(!response.error, "{}", response.text);
         assert!(!response.text.contains("2026-01-15"), "{}", response.text);
-        assert!(!response.text.to_lowercase().contains("default"));
+        assert!(
+            !response.text.to_lowercase().contains("\"default\":"),
+            "{}",
+            response.text
+        );
     }
 
     #[tokio::test]

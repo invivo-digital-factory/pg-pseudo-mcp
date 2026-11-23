@@ -60,6 +60,9 @@ impl ConnectionsWorld {
             ssh_known_hosts: self.known_hosts.clone(),
             ssh_config: self.ssh_config.clone(),
             connections_file: Some(self.connections_file()),
+            columns_file: None,
+            xdg_config_home: None,
+            home_dir: None,
         }
     }
 
