@@ -5,7 +5,7 @@ use super::command::{ConfigDump, Target};
 use super::resolved_config::{parse, words};
 use crate::contexts::connections::domain::repositories::SshAliasDirectory;
 
-const MAX_INCLUDE_DEPTH: usize = 4;
+const MAX_INCLUDE_DEPTH: usize = 16;
 
 pub struct OpenSshAliasDirectory {
     dump: Arc<dyn ConfigDump>,
@@ -28,10 +28,20 @@ impl OpenSshAliasDirectory {
             .or_else(|| self.ssh_directory().map(|dir| dir.join("config")))
     }
 
-    fn collect(&self, file: &Path, depth: usize, found: &mut Vec<Vec<String>>) {
+    fn collect(
+        &self,
+        file: &Path,
+        depth: usize,
+        ancestors: &mut Vec<PathBuf>,
+        found: &mut Vec<Vec<String>>,
+    ) {
+        if ancestors.iter().any(|ancestor| ancestor == file) {
+            return;
+        }
         let Ok(contents) = std::fs::read_to_string(file) else {
             return;
         };
+        ancestors.push(file.to_path_buf());
         for line in contents.lines() {
             let (keyword, arguments) = split_directive(line);
             let arguments: Vec<String> = arguments
@@ -43,17 +53,18 @@ impl OpenSshAliasDirectory {
             } else if keyword.eq_ignore_ascii_case("include") && depth < MAX_INCLUDE_DEPTH {
                 for pattern in arguments {
                     for included in self.included_files(&pattern) {
-                        self.collect(&included, depth + 1, found);
+                        self.collect(&included, depth + 1, ancestors, found);
                     }
                 }
             }
         }
+        ancestors.pop();
     }
 
     fn host_lines(&self) -> Vec<Vec<String>> {
         let mut lines = Vec::new();
         if let Some(root) = self.root_config() {
-            self.collect(&root, 0, &mut lines);
+            self.collect(&root, 0, &mut Vec::new(), &mut lines);
         }
         lines
     }
@@ -382,5 +393,55 @@ mod unit {
         assert!(directory.defines("spaced"));
         assert!(!directory.defines("two"));
         assert!(!directory.defines("words"));
+    }
+
+    #[test]
+    fn un_include_relatif_au_dossier_personnel_est_suivi() {
+        let (home, directory) = directory("Include ~/extra.conf\n", &[]);
+        std::fs::write(home.path().join("extra.conf"), "Host from-home\n").unwrap();
+        assert!(directory.defines("from-home"));
+    }
+
+    #[test]
+    fn un_include_d_un_fichier_absent_est_ignore_sans_erreur() {
+        let (_home, directory) = directory(
+            "Include missing.conf\nInclude ~/missing-too.conf\nHost still-read\n",
+            &[],
+        );
+        assert!(directory.defines("still-read"));
+        assert!(!directory.defines("missing"));
+    }
+
+    #[test]
+    fn des_include_imbriques_jusqu_a_seize_niveaux_sont_suivis() {
+        let (home, directory) = directory("Include level1.conf\n", &[]);
+        let ssh = home.path().join(".ssh");
+        for level in 1..16 {
+            std::fs::write(
+                ssh.join(format!("level{level}.conf")),
+                format!("Include level{}.conf\n", level + 1),
+            )
+            .unwrap();
+        }
+        std::fs::write(ssh.join("level16.conf"), "Host deep\n").unwrap();
+        assert!(directory.defines("deep"));
+        std::fs::write(ssh.join("level17.conf"), "Host deeper\n").unwrap();
+        std::fs::write(ssh.join("level16.conf"), "Include level17.conf\n").unwrap();
+        assert!(!directory.defines("deeper"));
+    }
+
+    #[test]
+    fn un_fichier_qui_s_inclut_lui_meme_par_joker_est_lu_une_seule_fois_par_branche() {
+        let (home, directory) = directory("Include conf.d/*.conf\n", &[]);
+        let conf = home.path().join(".ssh/conf.d");
+        for index in 0..5 {
+            std::fs::write(
+                conf.join(format!("f{index}.conf")),
+                format!("Include conf.d/*.conf\nHost host-{index}\n"),
+            )
+            .unwrap();
+        }
+        assert!(directory.defines("host-4"));
+        assert!(!directory.defines("host-5"));
     }
 }
