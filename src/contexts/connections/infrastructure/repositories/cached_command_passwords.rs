@@ -27,13 +27,9 @@ impl CachedCommandPasswords {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn run_and_keep(
-        &self,
-        passwords: &mut HashMap<Key, Secret>,
-        key: Key,
-    ) -> Result<Secret, PasswordCommandError> {
+    fn run_and_keep(&self, key: Key) -> Result<Secret, PasswordCommandError> {
         let secret = self.runner.run(&key.1)?;
-        passwords.insert(key, secret.clone());
+        self.lock().insert(key, secret.clone());
         Ok(secret)
     }
 }
@@ -41,11 +37,10 @@ impl CachedCommandPasswords {
 impl CommandPasswordProvider for CachedCommandPasswords {
     fn password(&self, connection: &str, argv: &[String]) -> Result<Secret, PasswordCommandError> {
         let key = (connection.to_string(), argv.to_vec());
-        let mut passwords = self.lock();
-        if let Some(secret) = passwords.get(&key) {
+        if let Some(secret) = self.lock().get(&key) {
             return Ok(secret.clone());
         }
-        self.run_and_keep(&mut passwords, key)
+        self.run_and_keep(key)
     }
 
     fn renewed_password(
@@ -54,9 +49,8 @@ impl CommandPasswordProvider for CachedCommandPasswords {
         argv: &[String],
     ) -> Result<Secret, PasswordCommandError> {
         let key = (connection.to_string(), argv.to_vec());
-        let mut passwords = self.lock();
-        passwords.remove(&key);
-        self.run_and_keep(&mut passwords, key)
+        self.lock().remove(&key);
+        self.run_and_keep(key)
     }
 }
 
@@ -144,5 +138,51 @@ mod unit {
             Err(PasswordCommandError::ExitStatus(1))
         );
         assert_eq!(runner.runs(), 2);
+    }
+
+    struct Slow {
+        started: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl PasswordCommandRunner for Slow {
+        fn run(&self, argv: &[String]) -> Result<Secret, PasswordCommandError> {
+            if argv[0] == "slow" {
+                self.started.send(()).unwrap();
+                let _ = self.release.lock().unwrap().recv();
+            }
+            Ok(Secret::new(argv[0].clone()))
+        }
+    }
+
+    #[test]
+    fn une_commande_lente_d_une_connexion_ne_retarde_pas_le_mot_de_passe_en_memoire_d_une_autre() {
+        let (started, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let passwords = Arc::new(CachedCommandPasswords::new(Arc::new(Slow {
+            started,
+            release: Mutex::new(release),
+        })));
+        passwords.password("fast", &argv("quick")).unwrap();
+        let slow = {
+            let passwords = passwords.clone();
+            std::thread::spawn(move || passwords.password("billing", &argv("slow")))
+        };
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let other = {
+            let passwords = passwords.clone();
+            std::thread::spawn(move || {
+                let secret = passwords.password("fast", &argv("quick"));
+                done_tx.send(secret).unwrap();
+            })
+        };
+        let cached = done_rx.recv_timeout(std::time::Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        slow.join().unwrap().unwrap();
+        other.join().unwrap();
+        assert_eq!(cached.expect("not blocked").unwrap().expose(), "quick");
     }
 }
