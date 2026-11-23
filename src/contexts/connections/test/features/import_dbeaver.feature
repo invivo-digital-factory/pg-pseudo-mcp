@@ -9,6 +9,7 @@ Fonctionnalité: Import des connexions DBeaver
     Alors le fichier de connexions déclare la connexion "canary-local"
     Et le fichier de connexions ne contient pas le mot de passe enregistré dans DBeaver
 
+  @ae7
   Scénario: Un import sans option refuse d'écraser un fichier existant
     Étant donné un espace de travail DBeaver avec une connexion à mot de passe natif enregistré
     Et un fichier de connexions existant
@@ -22,6 +23,7 @@ Fonctionnalité: Import des connexions DBeaver
     Quand l'utilisateur lance l'import des connexions DBeaver avec remplacement
     Alors le fichier de connexions déclare la connexion "canary-local"
 
+  @ae8
   Scénario: Une connexion native devient pgpass et le résumé demande une entrée pgpass ou une commande
     Étant donné un espace de travail DBeaver avec une connexion à mot de passe natif enregistré
     Quand l'utilisateur lance l'import des connexions DBeaver

@@ -19,6 +19,7 @@ Fonctionnalité: Fichier de connexions
     Et la connexion "app-prod" est listée avec la source "file"
     Et la liste ne montre ni hôte, ni utilisateur, ni mot de passe
 
+  @ae1
   Scénario: Une connexion du même nom dans le fichier et dans DBeaver n'est listée qu'une fois
     Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
     Et le fichier de connexions suivant :
@@ -35,6 +36,7 @@ Fonctionnalité: Fichier de connexions
     Alors la connexion "canary-local" n'est listée qu'une seule fois
     Et la connexion "canary-local" est listée avec la source "file"
 
+  @ae2
   Scénario: Un fichier avec une erreur de syntaxe est signalé avec sa ligne et rend les connexions DBeaver indisponibles
     Étant donné un espace de travail DBeaver avec les connexions "dbeaver-a" et "dbeaver-b" dont les mots de passe sont enregistrés
     Et le fichier de connexions suivant :
@@ -165,6 +167,22 @@ Fonctionnalité: Fichier de connexions
     Étant donné aucun fichier de connexions
     Quand l'agent liste les connexions
     Alors l'indice propose de créer le fichier ou de lancer l'import
+
+  @ae3
+  Scénario: Une commande de mot de passe qui échoue rend un motif fixe avec son statut et sans sa sortie
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "app-prod"
+      host = "db.internal.example"
+      user = "reader"
+      type = "prod"
+      auth = "command"
+      password_command = ["/bin/sh", "-c", "echo out-leak-4411; echo err-leak-4411 >&2; exit 44"]
+      """
+    Quand l'agent exécute une requête de lecture sur la connexion "app-prod"
+    Alors la requête échoue avec une erreur qui contient "status 44"
+    Et l'erreur de la requête ne contient pas "leak"
 
   Scénario: Lister les connexions n'exécute jamais la commande de mot de passe
     Étant donné le fichier de connexions suivant :

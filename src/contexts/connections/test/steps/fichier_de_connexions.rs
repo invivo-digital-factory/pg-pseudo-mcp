@@ -187,3 +187,19 @@ async fn agent_runs_read_on(world: &mut ConnectionsWorld, name: String) {
             .map_err(|error| error.to_string()),
     );
 }
+
+#[then(regex = r#"^la requête échoue avec une erreur qui contient "([^"]+)"$"#)]
+async fn query_fails_with(world: &mut ConnectionsWorld, expected: String) {
+    match &world.outcome {
+        Some(Err(message)) => assert!(message.contains(&expected), "{message}"),
+        other => panic!("the query should have failed: {other:?}"),
+    }
+}
+
+#[then(regex = r#"^l'erreur de la requête ne contient pas "([^"]+)"$"#)]
+async fn query_error_does_not_contain(world: &mut ConnectionsWorld, forbidden: String) {
+    match &world.outcome {
+        Some(Err(message)) => assert!(!message.contains(&forbidden), "{message}"),
+        other => panic!("the query should have failed: {other:?}"),
+    }
+}
