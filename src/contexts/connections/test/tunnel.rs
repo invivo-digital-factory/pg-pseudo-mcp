@@ -542,7 +542,10 @@ mod chaine_de_sauts {
     async fn une_cle_inconnue_au_premier_saut_est_refusee_avec_l_alias_et_l_empreinte() {
         let fixture = fixture(&known(false, true), "tunnel_test_ed25519", "", "");
         let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
-        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(
+            message.contains("SSH hop 1 of 2 (ProxyJump hop 1 of SSH alias app-via-jump)"),
+            "{message}"
+        );
         assert!(message.contains("SHA256:"), "{message}");
         assert!(message.contains("not in known_hosts"), "{message}");
     }
@@ -557,7 +560,10 @@ mod chaine_de_sauts {
             STRICT_NO,
         );
         let message = connect_error(&options_for(&fixture, "app-via-jump")).await;
-        assert!(message.contains("SSH hop 1 of 2 (jump-a)"), "{message}");
+        assert!(
+            message.contains("SSH hop 1 of 2 (ProxyJump hop 1 of SSH alias app-via-jump)"),
+            "{message}"
+        );
         assert!(message.contains("SHA256:"), "{message}");
     }
 
