@@ -1,7 +1,7 @@
 # language: fr
 @connections
 Fonctionnalité: Fichier de connexions
-  L'agent lit les connexions du fichier propre à pg-pseudo, qui ne contient aucun secret, et garde DBeaver comme source de repli.
+  L'agent lit les connexions du fichier propre à scarif, qui ne contient aucun secret, et garde DBeaver comme source de repli.
 
   Scénario: Une connexion déclarée dans le fichier est listée comme disponible avec sa source
     Étant donné le fichier de connexions suivant :
@@ -68,7 +68,7 @@ Fonctionnalité: Fichier de connexions
       """
     Quand l'agent liste les connexions
     Alors l'indice cite la ligne 2
-    Et l'indice ne contient pas "run `pg-pseudo-mcp connections import-dbeaver`"
+    Et l'indice ne contient pas "run `scarif-database-mcp connections import-dbeaver`"
 
   Scénario: Une valeur invalide de read_dbeaver rend les connexions DBeaver indisponibles
     Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré

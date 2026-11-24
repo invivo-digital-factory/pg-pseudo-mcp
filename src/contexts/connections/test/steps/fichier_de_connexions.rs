@@ -1,6 +1,6 @@
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
-use pg_pseudo_mcp::contexts::connections::domain::types::ExecutionLimits;
+use scarif_database_mcp::contexts::connections::domain::types::ExecutionLimits;
 use serde_json::{Value, json};
 
 use crate::bdd_support::{database_target, offline_target};
@@ -84,7 +84,7 @@ async fn workspace_with_two_connections(
     .expect("data sources");
     std::fs::write(
         dir.join("credentials-config.json"),
-        pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests(
+        scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests(
             &Value::Object(credentials).to_string(),
             [7u8; 16],
         ),

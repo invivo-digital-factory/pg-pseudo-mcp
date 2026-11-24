@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use cucumber::World;
-use pg_pseudo_mcp::common::AppConfig;
-use pg_pseudo_mcp::composition::contexts::Contexts;
-use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
-use pg_pseudo_mcp::contexts::connections::presentation::list_connections_with_warnings;
-use pg_pseudo_mcp::contexts::querying::presentation::{
+use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::composition::contexts::Contexts;
+use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
+use scarif_database_mcp::contexts::connections::presentation::list_connections_with_warnings;
+use scarif_database_mcp::contexts::querying::presentation::{
     DescribeTableArgs, ListDatabasesArgs, QueryArgs, describe_table, list_databases, query,
 };
 use serde_json::Value;
@@ -76,7 +76,7 @@ impl QueryingWorld {
             path
         });
         let xdg_config_home = self.local_policy.as_ref().map(|contents| {
-            let folder = self._data.path().join("xdg").join("pg-pseudo");
+            let folder = self._data.path().join("xdg").join("scarif");
             std::fs::create_dir_all(&folder).expect("local config folder");
             std::fs::write(folder.join("columns.toml"), contents).expect("local column policy");
             self._data.path().join("xdg").into_os_string()

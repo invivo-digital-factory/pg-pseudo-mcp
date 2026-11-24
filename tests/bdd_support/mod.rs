@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
+use scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
 use serde_json::{Value, json};
 
-pub const DATABASE_URL_VAR: &str = "PG_PSEUDO_TEST_DATABASE_URL";
-pub const SSH_PORT_VAR: &str = "PG_PSEUDO_TEST_SSH_PORT";
+pub const DATABASE_URL_VAR: &str = "SCARIF_TEST_DATABASE_URL";
+pub const SSH_PORT_VAR: &str = "SCARIF_TEST_SSH_PORT";
 pub const CONNECTION: &str = "canary-local";
 pub const BASTION_HOST: &str = "localhost";
 pub const BASTION_USER: &str = "tunnel";

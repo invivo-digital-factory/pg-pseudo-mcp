@@ -86,7 +86,7 @@ mod unit {
     fn tunnel_options() -> ConnectOptions {
         let mut options = options("pgpseudo", "db.internal.example", Some("bastion.corp"));
         if let Some(tunnel) = options.tunnel.as_mut() {
-            tunnel.hops[0].user = "etienne.bernoux".into();
+            tunnel.hops[0].user = "jane.doe".into();
             tunnel.remote_host = "pg-prod.private.example".into();
         }
         options
@@ -95,11 +95,11 @@ mod unit {
     #[test]
     fn un_refus_d_authentification_ssh_ne_rend_pas_l_utilisateur_du_tunnel() {
         let error = SessionError::Connect(
-            "ssh authentication rejected for etienne.bernoux at bastion.corp".into(),
+            "ssh authentication rejected for jane.doe at bastion.corp".into(),
         );
         let text = redact_connection_identity(error, &tunnel_options()).to_string();
         assert!(text.contains("ssh authentication rejected"), "{text}");
-        assert!(!text.contains("etienne.bernoux"), "{text}");
+        assert!(!text.contains("jane.doe"), "{text}");
         assert!(!text.contains("bastion.corp"), "{text}");
     }
 

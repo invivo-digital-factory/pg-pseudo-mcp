@@ -1,7 +1,7 @@
-use pg_pseudo_mcp::contexts::anonymization::domain::services::classify::{
+use scarif_database_mcp::contexts::anonymization::domain::services::classify::{
     classify_column, judge_text,
 };
-use pg_pseudo_mcp::contexts::anonymization::domain::types::{ColumnInfo, TextVerdict};
+use scarif_database_mcp::contexts::anonymization::domain::types::{ColumnInfo, TextVerdict};
 
 mod common;
 

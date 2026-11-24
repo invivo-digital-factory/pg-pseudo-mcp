@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use super::adapters::ReadOnlyDatabaseAdapter;
+use super::notices::deprecation_notices;
 use super::querying::querying_context;
+use super::server_info::InfoWarning;
 use crate::common::AppConfig;
 use crate::contexts::anonymization::injector::{AnonymizationInjector, AnonymizationUseCases};
 use crate::contexts::connections::injector::ConnectionsContext;
@@ -10,6 +12,7 @@ use crate::contexts::querying::injector::QueryingContext;
 pub struct Contexts {
     pub connections: Arc<ConnectionsContext>,
     pub querying: QueryingContext<ReadOnlyDatabaseAdapter>,
+    deprecations: Vec<InfoWarning>,
 }
 
 impl Contexts {
@@ -26,7 +29,12 @@ impl Contexts {
         Self {
             querying: querying_context(Arc::clone(&connections), anonymization),
             connections,
+            deprecations: deprecation_notices(config),
         }
+    }
+
+    pub fn deprecation_warnings(&self) -> &[InfoWarning] {
+        &self.deprecations
     }
 
     pub fn column_policy_warnings(&self) -> Vec<String> {

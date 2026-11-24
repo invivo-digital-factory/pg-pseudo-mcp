@@ -45,23 +45,23 @@ jobs:
       - name: Smoke test the binary
         if: matrix.native
         run: |
-          output=$("target/$TARGET/release/pg-pseudo-mcp" --version)
-          [ "$output" = "pg-pseudo-mcp ${TAG#v}" ] || { echo "::error::unexpected --version output: $output"; exit 1; }
+          output=$("target/$TARGET/release/scarif-database-mcp" --version)
+          [ "$output" = "scarif-database-mcp ${TAG#v}" ] || { echo "::error::unexpected --version output: $output"; exit 1; }
       - name: Check the binary architecture
         if: ${{ !matrix.native }}
         run: |
-          archs=$(lipo -archs "target/$TARGET/release/pg-pseudo-mcp")
+          archs=$(lipo -archs "target/$TARGET/release/scarif-database-mcp")
           [ "$archs" = "x86_64" ] || { echo "::error::unexpected architecture: $archs"; exit 1; }
       - name: Package
         run: |
-          name="pg-pseudo-mcp-$TARGET"
+          name="scarif-database-mcp-$TARGET"
           mkdir "$name"
-          cp "target/$TARGET/release/pg-pseudo-mcp" LICENSE README.md data/NOTICE "$name/"
+          cp "target/$TARGET/release/scarif-database-mcp" LICENSE README.md data/NOTICE "$name/"
           tar -czf "$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: pg-pseudo-mcp-${{ matrix.target }}.tar.gz
+          path: scarif-database-mcp-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   release:

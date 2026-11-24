@@ -15,7 +15,7 @@ fn contexts(dir: &Path, shared: &str, local: Option<&str>) -> Contexts {
     fs::write(&shared_path, shared).unwrap();
     let home = dir.join("home");
     if let Some(local) = local {
-        let folder = home.join(".config").join("pg-pseudo");
+        let folder = home.join(".config").join("scarif");
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("columns.toml"), local).unwrap();
     }
@@ -74,12 +74,16 @@ mod unit {
 
     #[test]
     fn server_info_porte_les_avertissements_de_politique() {
-        let info = serde_json::to_value(server_info(vec!["policy file x ignored".into()])).unwrap();
+        let info = serde_json::to_value(server_info(
+            vec!["policy file x ignored".into()],
+            Vec::new(),
+        ))
+        .unwrap();
         assert_eq!(
             info["warnings"],
             serde_json::json!([{ "code": "column_policy_ignored", "message": "policy file x ignored" }])
         );
-        let quiet = serde_json::to_value(server_info(Vec::new())).unwrap();
+        let quiet = serde_json::to_value(server_info(Vec::new(), Vec::new())).unwrap();
         assert!(quiet.get("warnings").is_none());
     }
 
@@ -100,5 +104,52 @@ mod unit {
             "{body}"
         );
         assert!(body["connections"].is_array(), "{body}");
+    }
+
+    #[test]
+    fn un_fichier_de_colonnes_de_l_ancien_dossier_est_lu_et_signale() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path().join("home");
+        let folder = home.join(".config").join("pg-pseudo");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("columns.toml"), "clear = [\"*.product_name\"]").unwrap();
+        fs::write(folder.join("connections.toml"), "").unwrap();
+        let config = AppConfig {
+            data_dir: Some(dir.path().join("data")),
+            home_dir: Some(home.clone()),
+            ..AppConfig::default()
+        };
+        let contexts = Contexts::with_anonymization(
+            &config,
+            AnonymizationInjector::new(&dir.path().join("data")).use_cases(),
+        );
+        assert!(contexts.column_policy_warnings().is_empty());
+        let info = serde_json::to_value(server_info(
+            contexts.column_policy_warnings(),
+            contexts.deprecation_warnings().to_vec(),
+        ))
+        .unwrap();
+        let warnings = info["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 2, "{info}");
+        assert!(
+            warnings
+                .iter()
+                .all(|w| w["code"] == "config_location_deprecated"),
+            "{info}"
+        );
+        let text = info["warnings"].to_string();
+        assert!(
+            text.contains("columns.toml") && text.contains("connections.toml"),
+            "{info}"
+        );
+        assert!(text.contains(".config/scarif"), "{info}");
+        assert!(!home.join(".config/scarif").exists());
+    }
+
+    #[test]
+    fn aucun_avertissement_de_deplacement_quand_le_nouveau_dossier_porte_le_fichier() {
+        let dir = TempDir::new().unwrap();
+        let contexts = contexts(dir.path(), "clear = []", Some("clear = []"));
+        assert!(contexts.deprecation_warnings().is_empty());
     }
 }

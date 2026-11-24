@@ -439,7 +439,10 @@ mod integration {
             Ok(_) => panic!("open must fail without the secret"),
             Err(error) => error.to_string(),
         };
-        assert!(error.contains("pg-pseudo-mcp mapping purge"), "{error}");
+        assert!(
+            error.contains("scarif-database-mcp mapping purge"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use cucumber::{given, then, when};
-use pg_pseudo_mcp::contexts::connections::injector::import_dbeaver_use_case;
-use pg_pseudo_mcp::contexts::connections::presentation::summary;
+use scarif_database_mcp::contexts::connections::injector::import_dbeaver_use_case;
+use scarif_database_mcp::contexts::connections::presentation::summary;
 use serde_json::{Map, Value, json};
 
 use crate::bdd_support::{TunnelSpec, offline_target, write_workspace};
@@ -84,7 +84,7 @@ fn write_connections(world: &ConnectionsWorld, specs: &[Spec<'_>]) {
     .expect("data sources");
     std::fs::write(
         dir.join("credentials-config.json"),
-        pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests(
+        scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests(
             &Value::Object(credentials).to_string(),
             [7u8; 16],
         ),

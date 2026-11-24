@@ -1,5 +1,5 @@
 use cucumber::{given, then, when};
-use pg_pseudo_mcp::contexts::connections::domain::types::ExecutionLimits;
+use scarif_database_mcp::contexts::connections::domain::types::ExecutionLimits;
 
 use crate::bdd_support::{
     BASTION_HOST, BASTION_USER, CONNECTION, TunnelSpec, bastion_port, database_target,

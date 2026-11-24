@@ -21,15 +21,15 @@ impl McpProcess {
         let dbeaver = tempfile::tempdir().expect("dbeaver dir");
         write_workspace_for_test_database(dbeaver.path());
         let data = tempfile::tempdir().expect("data dir");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_pg-pseudo-mcp"))
-            .env("PG_PSEUDO_DBEAVER_HOME", dbeaver.path())
-            .env("PG_PSEUDO_DATA_DIR", data.path())
+        let mut child = Command::new(env!("CARGO_BIN_EXE_scarif-database-mcp"))
+            .env("SCARIF_DBEAVER_HOME", dbeaver.path())
+            .env("SCARIF_DATA_DIR", data.path())
             .env(
-                "PG_PSEUDO_CONNECTIONS_FILE",
+                "SCARIF_CONNECTIONS_FILE",
                 data.path().join("absent-connections.toml"),
             )
             .env(
-                "PG_PSEUDO_SSH_CONFIG",
+                "SCARIF_SSH_CONFIG",
                 common::isolated_ssh_config(data.path()),
             )
             .stdin(Stdio::piped())

@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use super::location::locate_from_environment;
+use super::location::locate_for_write;
 use crate::contexts::connections::domain::errors::ConnectionFileWriteError;
 use crate::contexts::connections::domain::repositories::ConnectionFileWriter;
 use crate::contexts::connections::domain::types::{AuthMode, ConnectionDefinition};
@@ -18,9 +18,13 @@ impl TomlConnectionFileWriter {
 
 impl ConnectionFileWriter for TomlConnectionFileWriter {
     fn path(&self) -> Result<PathBuf, ConnectionFileWriteError> {
-        locate_from_environment(self.configured.as_deref())
-            .map(|location| location.path)
-            .ok_or(ConnectionFileWriteError::NoLocation)
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        locate_for_write(
+            self.configured.as_deref(),
+            std::env::var_os("XDG_CONFIG_HOME"),
+            home.as_deref(),
+        )
+        .ok_or(ConnectionFileWriteError::NoLocation)
     }
 
     fn write(

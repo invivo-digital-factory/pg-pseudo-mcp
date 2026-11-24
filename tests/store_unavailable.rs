@@ -4,9 +4,9 @@ use common::{
     DescribeTableArgs, ExplainArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs, body,
     describe_table, explain, is_error, list_connections, list_tables, query, search_schema,
 };
-use pg_pseudo_mcp::common::AppConfig;
-use pg_pseudo_mcp::composition::contexts::Contexts;
 use rmcp::model::CallToolResult;
+use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::composition::contexts::Contexts;
 
 fn contexts_without_secret() -> (Contexts, tempfile::TempDir, tempfile::TempDir) {
     let dbeaver = tempfile::tempdir().expect("dbeaver dir");

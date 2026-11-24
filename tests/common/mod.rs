@@ -5,20 +5,20 @@ use std::sync::Arc;
 
 use base64::Engine;
 use md5::{Digest, Md5};
-use pg_pseudo_mcp::common::AppConfig;
-use pg_pseudo_mcp::composition::contexts::Contexts;
-use pg_pseudo_mcp::contexts::anonymization::injector::AnonymizationInjector;
-use pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
-use pg_pseudo_mcp::contexts::connections::presentation;
-use pg_pseudo_mcp::contexts::querying::presentation as querying;
+use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::composition::contexts::Contexts;
+use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
+use scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
+use scarif_database_mcp::contexts::connections::presentation;
+use scarif_database_mcp::contexts::querying::presentation as querying;
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
-pub use pg_pseudo_mcp::contexts::querying::presentation::{
+pub use scarif_database_mcp::contexts::querying::presentation::{
     DescribeTableArgs, ExplainArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs, SearchSchemaArgs,
 };
 
-pub const DATABASE_URL_VAR: &str = "PG_PSEUDO_TEST_DATABASE_URL";
+pub const DATABASE_URL_VAR: &str = "SCARIF_TEST_DATABASE_URL";
 pub const CONNECTION: &str = "canary-local";
 
 pub const CANARY_VALUES: &[&str] = &[
@@ -145,7 +145,7 @@ impl Harness {
             path
         });
         let xdg_config_home = local.map(|contents| {
-            let folder = data.path().join("xdg").join("pg-pseudo");
+            let folder = data.path().join("xdg").join("scarif");
             std::fs::create_dir_all(&folder).expect("local config folder");
             std::fs::write(folder.join("columns.toml"), contents).expect("local column policy");
             data.path().join("xdg").into_os_string()

@@ -25,7 +25,7 @@ use crate::contexts::connections::infrastructure::mappers::{
     session_error_from_postgres,
 };
 
-const APPLICATION_NAME: &str = "pg-pseudo-mcp";
+const APPLICATION_NAME: &str = "scarif-database-mcp";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CLIENT_GRACE: Duration = Duration::from_secs(5);
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);

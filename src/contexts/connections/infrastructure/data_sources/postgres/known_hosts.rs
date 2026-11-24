@@ -15,7 +15,7 @@ pub(super) fn known_hosts_path(
         (Some(path), _) => Ok(path.to_path_buf()),
         (None, Some(home)) => Ok(home.join(".ssh").join("known_hosts")),
         (None, None) => Err(
-            "cannot locate the SSH known_hosts file: no home directory found; set PG_PSEUDO_SSH_KNOWN_HOSTS to an absolute path".to_string(),
+            "cannot locate the SSH known_hosts file: no home directory found; set SCARIF_SSH_KNOWN_HOSTS to an absolute path".to_string(),
         ),
     }
 }

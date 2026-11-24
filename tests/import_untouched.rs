@@ -1,7 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use pg_pseudo_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
+use scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
 use serde_json::json;
 
 const PGPASS_CONTENT: &[u8] = b"db.internal.example:5432:shop:reader:kept-secret-9921\n";
@@ -75,13 +75,13 @@ mod e2e {
         std::fs::write(&ssh_config, SSH_CONFIG_CONTENT).unwrap();
         let connections = dir.path().join("config").join("connections.toml");
 
-        let output = Command::new(env!("CARGO_BIN_EXE_pg-pseudo-mcp"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scarif-database-mcp"))
             .args(["connections", "import-dbeaver"])
             .env("HOME", dir.path())
-            .env("PG_PSEUDO_DBEAVER_HOME", &workspace)
-            .env("PG_PSEUDO_CONNECTIONS_FILE", &connections)
+            .env("SCARIF_DBEAVER_HOME", &workspace)
+            .env("SCARIF_CONNECTIONS_FILE", &connections)
             .env("PGPASSFILE", &pgpass)
-            .env("PG_PSEUDO_SSH_CONFIG", &ssh_config)
+            .env("SCARIF_SSH_CONFIG", &ssh_config)
             .output()
             .expect("binary runs");
 

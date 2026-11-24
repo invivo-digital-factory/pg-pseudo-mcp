@@ -6,7 +6,7 @@ use crate::contexts::connections::domain::repositories::{
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::data_sources::connection_file::{
-    TomlConnectionFileWriter, user_config_file,
+    TomlConnectionFileWriter, resolve_user_config_file,
 };
 use crate::contexts::connections::infrastructure::data_sources::dbeaver::DbeaverWorkspaceDefinitions;
 use crate::contexts::connections::infrastructure::data_sources::openssh::{
@@ -106,11 +106,12 @@ impl ConnectionsContext {
             read_column_policy_files: ReadColumnPolicyFiles::new(Arc::new(
                 TomlColumnPolicyFiles::new(
                     config.columns_file.clone(),
-                    user_config_file(
+                    resolve_user_config_file(
                         COLUMN_POLICY_FILE,
                         config.xdg_config_home.clone(),
                         config.home_dir.as_deref(),
-                    ),
+                    )
+                    .map(|file| file.path),
                 ),
             )),
         }
