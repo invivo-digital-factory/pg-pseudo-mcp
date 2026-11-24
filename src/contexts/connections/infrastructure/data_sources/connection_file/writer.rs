@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use super::location::locate_for_write;
 use crate::contexts::connections::domain::errors::ConnectionFileWriteError;
 use crate::contexts::connections::domain::repositories::ConnectionFileWriter;
-use crate::contexts::connections::domain::types::{AuthMode, ConnectionDefinition, EngineSettings};
+use crate::contexts::connections::domain::types::{
+    AuthMode, ConnectionDefinition, EngineSettings, MongoTransport,
+};
 
 pub struct TomlConnectionFileWriter {
     configured: Option<PathBuf>,
@@ -68,21 +70,31 @@ fn quoted(value: &str) -> String {
 
 fn identity_lines(definition: &ConnectionDefinition) -> String {
     let name = quoted(&definition.name);
-    let host = quoted(&definition.host);
     let user = quoted(&definition.user);
     let kind = quoted(definition.connection_type.as_str());
     match &definition.settings {
-        EngineSettings::Postgresql { database, sslmode } => format!(
-            "[[connection]]\nname = {name}\nhost = {host}\nport = {}\ndatabase = {}\nuser = {user}\nsslmode = {}\ntype = {kind}\n",
-            definition.port,
+        EngineSettings::Postgresql {
+            host,
+            port,
+            database,
+            sslmode,
+        } => format!(
+            "[[connection]]\nname = {name}\nhost = {}\nport = {port}\ndatabase = {}\nuser = {user}\nsslmode = {}\ntype = {kind}\n",
+            quoted(host),
             quoted(database),
             quoted(sslmode.as_str()),
         ),
         EngineSettings::Mongodb(settings) => {
-            let mut text = format!(
-                "[[connection]]\nname = {name}\nengine = \"mongodb\"\nhost = {host}\nport = {}\nsrv = {}\ntls = {}\n",
-                definition.port, settings.srv, settings.tls,
-            );
+            let mut text = format!("[[connection]]\nname = {name}\nengine = \"mongodb\"\n");
+            match &settings.transport {
+                MongoTransport::Srv { host } => {
+                    text.push_str(&format!("host = {}\nsrv = true\n", quoted(host)));
+                }
+                MongoTransport::Seed { host, port, tls } => text.push_str(&format!(
+                    "host = {}\nport = {port}\nsrv = false\ntls = {tls}\n",
+                    quoted(host)
+                )),
+            }
             if let Some(replica_set) = &settings.replica_set {
                 text.push_str(&format!("replica_set = {}\n", quoted(replica_set)));
             }
@@ -123,16 +135,18 @@ mod integration {
     use std::path::Path;
 
     use super::*;
-    use crate::contexts::connections::domain::types::{ConnectionType, MongoSettings, SslMode};
+    use crate::contexts::connections::domain::types::{
+        ConnectionType, MongoSettings, MongoTransport, SslMode,
+    };
     use crate::contexts::connections::infrastructure::data_sources::connection_file::parse_file;
 
     fn definition(name: &str, auth: AuthMode, alias: Option<&str>) -> ConnectionDefinition {
         ConnectionDefinition {
             name: name.to_string(),
-            host: "db.internal".to_string(),
-            port: 6432,
             user: "alice".to_string(),
             settings: EngineSettings::Postgresql {
+                host: "db.internal".to_string(),
+                port: 6432,
                 database: "ap\"p".to_string(),
                 sslmode: SslMode::VerifyFull,
             },
@@ -145,8 +159,6 @@ mod integration {
     fn mongo_definition(name: &str, settings: MongoSettings) -> ConnectionDefinition {
         ConnectionDefinition {
             name: name.to_string(),
-            host: "pl-0.atlas.scarif.test".to_string(),
-            port: 1024,
             user: "alice".to_string(),
             settings: EngineSettings::Mongodb(settings),
             connection_type: ConnectionType::Dev,
@@ -189,18 +201,22 @@ mod integration {
                 "full",
                 MongoSettings {
                     database: Some("shop".to_string()),
-                    srv: false,
-                    tls: false,
                     replica_set: Some("rs0".to_string()),
+                    transport: MongoTransport::Seed {
+                        host: "pl-0.atlas.scarif.test".to_string(),
+                        port: 1024,
+                        tls: false,
+                    },
                 },
             ),
             mongo_definition(
                 "atlas",
                 MongoSettings {
                     database: None,
-                    srv: true,
-                    tls: true,
                     replica_set: None,
+                    transport: MongoTransport::Srv {
+                        host: "pl-0.atlas.scarif.test".to_string(),
+                    },
                 },
             ),
         ];

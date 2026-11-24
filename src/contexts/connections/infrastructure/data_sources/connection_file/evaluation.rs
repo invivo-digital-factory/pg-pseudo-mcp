@@ -72,23 +72,37 @@ impl<'a> FileEvaluator<'a> {
     }
 
     fn evaluation(&self, definition: &ConnectionDefinition) -> Evaluation {
-        let declared = match &definition.settings {
-            EngineSettings::Postgresql { database, .. } => Some(database.clone()),
-            EngineSettings::Mongodb(settings) => settings.database.clone(),
-        };
-        let database = self.database.map(str::to_string).or(declared);
-        let outcome = match &definition.settings {
+        let (database, outcome) = match &definition.settings {
             EngineSettings::Postgresql {
+                host,
+                port,
                 database: declared,
                 sslmode,
             } => {
-                let database = database.as_deref().unwrap_or(declared);
-                self.params(definition, database, *sslmode)
-                    .map(|params| (Some(params), None))
+                let database = self
+                    .database
+                    .map_or_else(|| declared.clone(), str::to_string);
+                let target = pgpass::Target {
+                    host,
+                    port: *port,
+                    database: &database,
+                    user: &definition.user,
+                };
+                let outcome = self
+                    .params(definition, &target, *sslmode)
+                    .map(|params| (Some(params), None));
+                (Some(database), outcome)
             }
-            EngineSettings::Mongodb(settings) => self
-                .mongo_params(definition, settings, database.clone())
-                .map(|mongo| (None, Some(mongo))),
+            EngineSettings::Mongodb(settings) => {
+                let database = self
+                    .database
+                    .map(str::to_string)
+                    .or_else(|| settings.database.clone());
+                let outcome = self
+                    .mongo_params(definition, settings, database.clone())
+                    .map(|mongo| (None, Some(mongo)));
+                (database, outcome)
+            }
         };
         let (status, params, mongo) = match outcome {
             Ok((params, mongo)) => (ConnectionStatus::Available, params, mongo),
@@ -120,14 +134,11 @@ impl<'a> FileEvaluator<'a> {
             .map(|alias| self.resolver.resolve(alias))
             .transpose()?;
         Ok(MongoConnectParams {
-            host: definition.host.clone(),
-            port: definition.port,
-            srv: settings.srv,
-            tls: settings.tls,
+            transport: settings.transport.clone(),
             replica_set: settings.replica_set.clone(),
             database,
             user: definition.user.clone(),
-            password: PasswordSource::Command(argv.clone()),
+            password_command: argv.clone(),
             ssh_hops,
         })
     }
@@ -135,24 +146,18 @@ impl<'a> FileEvaluator<'a> {
     fn params(
         &self,
         definition: &ConnectionDefinition,
-        database: &str,
+        target: &pgpass::Target,
         sslmode: SslMode,
     ) -> Result<ConnectParams, ConnectionStatus> {
-        let target = pgpass::Target {
-            host: &definition.host,
-            port: definition.port,
-            database,
-            user: &definition.user,
-        };
         let password = match &definition.auth {
-            AuthMode::Pgpass => pgpass_or_azure_token(&target, false, &self.sign_in)?,
+            AuthMode::Pgpass => pgpass_or_azure_token(target, false, &self.sign_in)?,
             AuthMode::Azure => {
-                if !is_azure_postgres_host(&definition.host) {
+                if !is_azure_postgres_host(target.host) {
                     return Err(ConnectionStatus::Unavailable {
                         reason: AZURE_HOST_REASON.to_string(),
                     });
                 }
-                pgpass_or_azure_token(&target, true, &self.sign_in)?
+                pgpass_or_azure_token(target, true, &self.sign_in)?
             }
             AuthMode::Command(argv) => PasswordSource::Command(argv.clone()),
         };
@@ -162,16 +167,16 @@ impl<'a> FileEvaluator<'a> {
             .map(|alias| {
                 self.resolver.resolve(alias).map(|hops| TunnelParams {
                     hops,
-                    remote_host: definition.host.clone(),
-                    remote_port: definition.port,
+                    remote_host: target.host.to_string(),
+                    remote_port: target.port,
                 })
             })
             .transpose()?;
         let sslmode = password.effective_sslmode(sslmode);
         Ok(ConnectParams {
-            host: definition.host.clone(),
-            port: definition.port,
-            database: database.to_string(),
+            host: target.host.to_string(),
+            port: target.port,
+            database: target.database.to_string(),
             user: definition.user.clone(),
             password,
             sslmode,

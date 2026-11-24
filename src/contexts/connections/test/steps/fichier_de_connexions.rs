@@ -195,6 +195,23 @@ async fn agent_runs_read_on(world: &mut ConnectionsWorld, name: String) {
     );
 }
 
+#[when(regex = r#"^l'agent lit le catalogue de la connexion "([^"]+)"$"#)]
+async fn agent_reads_catalog_of(world: &mut ConnectionsWorld, name: String) {
+    let context = world.context();
+    let limits = ExecutionLimits {
+        max_rows: 10,
+        timeout_ms: 10_000,
+    };
+    world.outcome = Some(
+        context
+            .read_catalog
+            .execute_cached(&name, None, "SELECT 1", limits)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+    );
+}
+
 #[then(regex = r#"^la requête échoue avec une erreur qui contient "([^"]+)"$"#)]
 async fn query_fails_with(world: &mut ConnectionsWorld, expected: String) {
     match &world.outcome {

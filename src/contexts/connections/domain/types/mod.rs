@@ -19,7 +19,7 @@ pub use column_policy_entries::ColumnPolicyEntries;
 pub use column_policy_file::ColumnPolicyFile;
 pub use connect_options::{ConnectOptions, Hop, Tunnel, TunnelAuth};
 pub use connection_definition::{
-    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoSettings,
+    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoSettings, MongoTransport,
 };
 pub use connection_entry::{ConnectionEntry, ConnectionStatus, Discovery};
 pub use connection_profile::{

@@ -99,10 +99,10 @@ impl ImportDbeaverConnections {
             .map(|tunnel| self.alias_of(tunnel_key(tunnel), definition, plan));
         let file = ConnectionDefinition {
             name: definition.name.clone(),
-            host: definition.host.clone(),
-            port: definition.port,
             user: definition.user.clone(),
             settings: EngineSettings::Postgresql {
+                host: definition.host.clone(),
+                port: definition.port,
                 database: definition.database.clone(),
                 sslmode: definition.sslmode,
             },

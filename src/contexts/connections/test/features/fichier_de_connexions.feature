@@ -391,3 +391,36 @@ Fonctionnalité: Fichier de connexions
     Alors la requête échoue avec une erreur qui contient "not supported"
     Et l'erreur de la requête ne contient pas "pl-0.atlas.scarif.test"
     Et la commande de mot de passe n'a pas été exécutée
+
+  Scénario: Un port avec srv vrai rend la connexion MongoDB indisponible avec une raison qui nomme port
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-port"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      port = 1024
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/echo", "reader-secret"]
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-port" est listée comme indisponible
+    Et la raison de la connexion "atlas-port" contient "`port`"
+
+  Scénario: La lecture du catalogue d'une connexion MongoDB est refusée sans exécuter la commande
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-dev"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
+      """
+    Quand l'agent lit le catalogue de la connexion "atlas-dev"
+    Alors la requête échoue avec une erreur qui contient "not supported"
+    Et la commande de mot de passe n'a pas été exécutée

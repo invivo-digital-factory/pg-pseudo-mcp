@@ -10,7 +10,7 @@ use crate::common::AppConfig;
 use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::services::resolve_connection;
 use crate::contexts::connections::domain::types::{
-    ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery, PasswordSource, SslMode,
+    ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery, MongoTransport, SslMode,
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::data_sources::connection_file::DbeaverAccess;
@@ -174,15 +174,20 @@ fn une_connexion_mongodb_en_mode_commande_porte_ses_parametres_sans_ouvrir_de_se
     assert_eq!(atlas.database.as_deref(), Some("shop"));
     assert!(atlas.params.is_none());
     let mongo = atlas.mongo.expect("mongodb parameters");
-    assert_eq!(mongo.host, "pl-0.atlas.scarif.test");
-    assert_eq!(mongo.port, 1024);
+    assert_eq!(
+        mongo.transport,
+        MongoTransport::Seed {
+            host: "pl-0.atlas.scarif.test".to_string(),
+            port: 1024,
+            tls: false
+        }
+    );
     assert_eq!(mongo.user, "reader");
-    assert!(!mongo.srv && !mongo.tls);
     assert_eq!(mongo.replica_set.as_deref(), Some("rs0"));
     assert_eq!(mongo.database.as_deref(), Some("shop"));
     assert_eq!(
-        mongo.password,
-        PasswordSource::Command(vec!["/bin/echo".into(), "x".into()])
+        mongo.password_command,
+        vec!["/bin/echo".to_string(), "x".to_string()]
     );
     assert!(mongo.ssh_hops.is_none());
 }
