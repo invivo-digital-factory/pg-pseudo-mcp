@@ -8,7 +8,7 @@ use scarif_database_mcp::contexts::connections::domain::types::{
     ExecutionLimits, FindRequest, MongoConnectParams, MongoTransport, Secret,
 };
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::mongodb::{
-    MongoSession, ProxyEndpoint, client_options,
+    CHANNELS_PER_MEMBER, MongoSession, ProxyEndpoint, client_options,
 };
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::socks::{
     AllowedTarget, ChannelOpener, ProxyCredentials, SocksFront, TargetPolicy,
@@ -139,7 +139,7 @@ async fn un_refus_du_front_socks_rend_un_motif_fixe_sans_identifiants_ni_cible_m
         .try_init()
         .expect("install the capturing subscriber and the log bridge");
     let policy = TargetPolicy::from_seed_host(MEMBER).expect("valid seed host");
-    let front = SocksFront::start(Arc::new(RefusingOpener), policy)
+    let front = SocksFront::start(Arc::new(RefusingOpener), policy, CHANNELS_PER_MEMBER)
         .await
         .expect("start the SOCKS5 front");
     let foreign = ProxyCredentials::generate().expect("credentials");

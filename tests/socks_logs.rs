@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use fast_socks5::client::{Config, Socks5Stream};
 use scarif_database_mcp::contexts::connections::domain::errors::SessionError;
+use scarif_database_mcp::contexts::connections::infrastructure::data_sources::mongodb::CHANNELS_PER_MEMBER;
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::socks::{
     AllowedTarget, ChannelOpener, SocksFront, TargetPolicy,
 };
@@ -61,7 +62,7 @@ async fn les_identifiants_de_session_n_apparaissent_dans_aucun_journal_meme_en_t
         .try_init()
         .expect("install the capturing subscriber and the log bridge");
     let policy = TargetPolicy::from_seed_host(MEMBER).expect("valid seed host");
-    let front = SocksFront::start(Arc::new(EchoOpener), policy)
+    let front = SocksFront::start(Arc::new(EchoOpener), policy, CHANNELS_PER_MEMBER)
         .await
         .expect("start the SOCKS5 front");
     let credentials = front.credentials();

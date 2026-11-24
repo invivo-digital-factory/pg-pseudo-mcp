@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use super::tunnel::{SSH_HOST, SSH_PASSWORD, SSH_USER, listing_container_key, ssh_port};
 use crate::contexts::connections::domain::errors::SessionError;
 use crate::contexts::connections::domain::types::{Hop, Tunnel, TunnelAuth};
+use crate::contexts::connections::infrastructure::data_sources::mongodb::CHANNELS_PER_MEMBER;
 use crate::contexts::connections::infrastructure::data_sources::socks::{
     AllowedTarget, ChannelOpener, SocksFront, TargetPolicy,
 };
@@ -217,7 +218,7 @@ mod integration {
         let known_hosts = listing_container_key();
         let link = counting_link(&known_hosts.path).await;
         let policy = TargetPolicy::from_seed_host(MEMBER_HOST).expect("valid seed host");
-        let front = SocksFront::start(link.clone(), policy)
+        let front = SocksFront::start(link.clone(), policy, CHANNELS_PER_MEMBER)
             .await
             .expect("start the SOCKS5 front");
         let (first, second) = tokio::join!(
@@ -241,7 +242,7 @@ mod integration {
         let known_hosts = listing_container_key();
         let link = counting_link(&known_hosts.path).await;
         let policy = TargetPolicy::from_seed_host(MEMBER_HOST).expect("valid seed host");
-        let front = SocksFront::start(link.clone(), policy)
+        let front = SocksFront::start(link.clone(), policy, CHANNELS_PER_MEMBER)
             .await
             .expect("start the SOCKS5 front");
         let credentials = front.credentials();

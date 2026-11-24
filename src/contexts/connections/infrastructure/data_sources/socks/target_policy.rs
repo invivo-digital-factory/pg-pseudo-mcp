@@ -12,7 +12,7 @@ enum Scope {
     Exact(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AllowedTarget {
     host: String,
     port: u16,

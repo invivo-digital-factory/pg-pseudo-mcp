@@ -6,6 +6,6 @@ mod failure;
 mod sample;
 mod session;
 
-pub use client_options::{ProxyEndpoint, SELECTION_TIMEOUT, client_options};
+pub use client_options::{CHANNELS_PER_MEMBER, ProxyEndpoint, SELECTION_TIMEOUT, client_options};
 pub use failure::MongoFailure;
 pub use session::MongoSession;

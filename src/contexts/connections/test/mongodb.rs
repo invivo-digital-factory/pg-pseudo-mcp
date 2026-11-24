@@ -29,7 +29,7 @@ use crate::contexts::connections::domain::types::{
     MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
 };
 use crate::contexts::connections::infrastructure::data_sources::mongodb::{
-    MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
+    CHANNELS_PER_MEMBER, MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
 };
 use crate::contexts::connections::infrastructure::data_sources::password_command::{
     PasswordCommandRunner, ProcessPasswordCommand,
@@ -54,7 +54,6 @@ const WRITER: (&str, &str) = ("atlas-writer", "atlas-writer-test-pw");
 const ADMIN: (&str, &str) = ("atlas-admin", "atlas-admin-test-pw");
 const MEMBER_PORTS: [u16; 3] = [1024, 1025, 1026];
 const UNPERMITTED_PORT: u16 = 1027;
-const MAX_OPEN_CHANNELS: usize = 5;
 const UNAUTHORIZED: i32 = 13;
 
 static PRIMARY: RwLock<()> = RwLock::const_new(());
@@ -296,7 +295,7 @@ async fn bastion_link(known_hosts: &Path) -> SshLink {
 
 async fn front_over<C: ChannelOpener>(opener: Arc<C>) -> SocksFront {
     let policy = TargetPolicy::from_seed_host(MEMBER_HOST).expect("valid seed host");
-    SocksFront::start(opener, policy)
+    SocksFront::start(opener, policy, CHANNELS_PER_MEMBER)
         .await
         .expect("start the SOCKS5 front")
 }
@@ -425,7 +424,7 @@ mod integration {
             recording.peak()
         );
         assert!(
-            recording.peak() <= MAX_OPEN_CHANNELS,
+            recording.peak() <= MEMBER_PORTS.len() * CHANNELS_PER_MEMBER,
             "{} channels open at once: {opened:?}",
             recording.peak()
         );
