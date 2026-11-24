@@ -10,7 +10,7 @@ use crate::contexts::connections::domain::types::{
     AggregateRequest, CollectionDescription, CollectionInfo, DatabaseNames, DocumentOutput,
     ExecutionLimits, FindRequest, SampledField,
 };
-use crate::contexts::connections::use_cases::RunAggregate;
+use crate::contexts::connections::use_cases::{ReadCollections, RunAggregate};
 
 #[derive(Default)]
 struct RecordingPool {
@@ -77,13 +77,9 @@ impl DocumentSessionPool for RecordingPool {
         _: &str,
         _: Option<&str>,
         _: &str,
-    ) -> Result<CollectionDescription, ConnectionError> {
+    ) -> Result<Option<CollectionDescription>, ConnectionError> {
         self.record();
-        Ok(CollectionDescription {
-            estimated_count: None,
-            indexes: Vec::new(),
-            validator_fields: Vec::new(),
-        })
+        Ok(None)
     }
 
     async fn sample_fields(
@@ -165,4 +161,19 @@ async fn un_pipeline_de_lecture_est_transmis_tel_quel() {
     .await;
     assert_eq!(outcome, Ok(empty_output()));
     assert_eq!(calls, 1);
+}
+
+#[tokio::test]
+async fn decrire_une_collection_absente_est_une_erreur_et_non_une_description_vide() {
+    let pool = Arc::new(RecordingPool::default());
+    let outcome = ReadCollections::new(pool.clone())
+        .describe("atlas", Some("shop"), "ghosts")
+        .await;
+    assert_eq!(
+        outcome,
+        Err(ConnectionError::UnknownCollection {
+            requested: "ghosts".into(),
+        })
+    );
+    assert_eq!(pool.calls(), 1);
 }

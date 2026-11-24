@@ -37,7 +37,7 @@ pub trait DocumentSessionPool: Send + Sync {
         connection: &str,
         database: Option<&str>,
         collection: &str,
-    ) -> impl Future<Output = Result<CollectionDescription, ConnectionError>> + Send;
+    ) -> impl Future<Output = Result<Option<CollectionDescription>, ConnectionError>> + Send;
 
     fn sample_fields(
         &self,

@@ -559,6 +559,12 @@ mod integration {
             .expect("describe the view");
         assert!(contacts.indexes.is_empty());
         assert_eq!(contacts.estimated_count, None);
+        assert_eq!(
+            use_case.describe(CONNECTION, None, "ghosts").await,
+            Err(ConnectionError::UnknownCollection {
+                requested: "ghosts".into(),
+            })
+        );
     }
 
     #[tokio::test]

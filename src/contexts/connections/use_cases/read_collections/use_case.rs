@@ -29,6 +29,9 @@ impl<P: DocumentSessionPool> ReadCollections<P> {
     ) -> Result<CollectionDescription, ConnectionError> {
         self.pool
             .describe_collection(connection, database, collection)
-            .await
+            .await?
+            .ok_or_else(|| ConnectionError::UnknownCollection {
+                requested: collection.to_string(),
+            })
     }
 }

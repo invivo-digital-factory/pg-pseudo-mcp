@@ -357,9 +357,12 @@ struct DescribeRead<'r> {
 }
 
 impl MongoRead for DescribeRead<'_> {
-    type Output = CollectionDescription;
+    type Output = Option<CollectionDescription>;
 
-    async fn read(&self, open: &mut OpenMongo) -> Result<CollectionDescription, MongoFailure> {
+    async fn read(
+        &self,
+        open: &mut OpenMongo,
+    ) -> Result<Option<CollectionDescription>, MongoFailure> {
         let database = open.database(self.database)?;
         open.session.describe(&database, self.collection).await
     }
@@ -421,7 +424,7 @@ impl DocumentSessionPool for MongoSessionPool {
         connection: &str,
         database: Option<&str>,
         collection: &str,
-    ) -> Result<CollectionDescription, ConnectionError> {
+    ) -> Result<Option<CollectionDescription>, ConnectionError> {
         self.run(
             connection,
             DescribeRead {

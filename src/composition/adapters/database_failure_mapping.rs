@@ -14,6 +14,9 @@ pub fn database_failure(error: ConnectionError) -> DatabaseFailure {
             connection,
             reason: source.to_string(),
         },
+        ConnectionError::UnknownCollection { requested } => {
+            DatabaseFailure::UnknownTable { requested }
+        }
         ConnectionError::Session(error) => session_failure(error),
     }
 }
@@ -26,5 +29,29 @@ fn session_failure(error: SessionError) -> DatabaseFailure {
             DatabaseFailure::Connect(message)
         }
         SessionError::Decode(message) => DatabaseFailure::Decode(message),
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+    use crate::contexts::querying::domain::errors::{QueryingError, ScrubbedText};
+
+    #[test]
+    fn une_collection_absente_rend_le_libelle_de_la_table_inconnue_de_postgresql() {
+        let failure = database_failure(ConnectionError::UnknownCollection {
+            requested: "ghosts".into(),
+        });
+        assert_eq!(
+            failure,
+            DatabaseFailure::UnknownTable {
+                requested: "ghosts".into(),
+            }
+        );
+        let error = QueryingError::from_failure(failure, 1_000, ScrubbedText::Nothing);
+        assert_eq!(
+            error.to_string(),
+            "no table, view or materialized view named ghosts"
+        );
     }
 }

@@ -137,7 +137,7 @@ impl MongoSession {
         &self,
         database: &str,
         collection: &str,
-    ) -> Result<CollectionDescription, MongoFailure> {
+    ) -> Result<Option<CollectionDescription>, MongoFailure> {
         let specification = self
             .client
             .database(database)
@@ -147,11 +147,7 @@ impl MongoSession {
             .try_next()
             .await?;
         let Some(specification) = specification else {
-            return Ok(CollectionDescription {
-                estimated_count: None,
-                indexes: Vec::new(),
-                validator_fields: Vec::new(),
-            });
+            return Ok(None);
         };
         let kind = collection_kind(&specification.collection_type);
         let validator = specification
@@ -172,11 +168,11 @@ impl MongoSession {
                 .await?;
             models.iter().map(|model| index_keys(&model.keys)).collect()
         };
-        Ok(CollectionDescription {
+        Ok(Some(CollectionDescription {
             estimated_count: self.estimated_count(database, collection, kind).await,
             indexes,
             validator_fields: validator,
-        })
+        }))
     }
 
     pub async fn sample(

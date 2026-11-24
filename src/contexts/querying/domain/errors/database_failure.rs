@@ -23,4 +23,6 @@ pub enum DatabaseFailure {
     Connect(String),
     #[error("cannot decode result: {0}")]
     Decode(String),
+    #[error("no table, view or materialized view named {requested}")]
+    UnknownTable { requested: String },
 }
