@@ -15,6 +15,9 @@ pub mod column_policy_load;
 pub mod db_message;
 pub mod derived_column;
 pub mod describe_table;
+pub mod document;
+pub mod document_catalog;
+pub mod documents_response;
 pub mod execution_limits;
 pub mod explain;
 pub mod field_lineage;
@@ -61,6 +64,12 @@ pub use derived_column::DerivedColumn;
 pub use describe_table::{
     ColumnEntry, DescribeResponse, DescribeTableRequest, ForeignKey, IndexEntry, Reference,
 };
+pub use document::{AnonymizedDocuments, DocumentClearance, DocumentNode, DocumentOutput};
+pub use document_catalog::{
+    CollectionDescribeResponse, CollectionDetails, CollectionEntry, CollectionLine,
+    CollectionListResponse, Engine, FieldEntry, FieldSample, IndexKey, ListCollectionsRequest,
+};
+pub use documents_response::DocumentsResponse;
 pub use execution_limits::ExecutionLimits;
 pub use explain::{ExplainRequest, ExplainResponse};
 pub use field_lineage::{FieldLineage, LineageClearance};

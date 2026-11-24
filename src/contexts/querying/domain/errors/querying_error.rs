@@ -37,6 +37,11 @@ pub enum QueryingError {
         hint: Option<String>,
     },
     #[error("{message}")]
+    DocumentServerError {
+        message: String,
+        code_name: Option<String>,
+    },
+    #[error("{message}")]
     ConnectionLost { message: String },
     #[error("{message}")]
     ResultWithheld { message: String },

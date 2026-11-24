@@ -7,6 +7,7 @@ pub mod column_pseudonymization;
 pub mod comment_cap;
 pub mod describe_sql;
 pub mod description;
+pub mod ejson_render;
 pub mod lineage;
 pub mod literal_collector;
 pub mod literal_rewriter;

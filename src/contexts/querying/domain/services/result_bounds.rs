@@ -24,6 +24,7 @@ pub fn bound_rows(
                 by: TruncatedBy::Bytes,
                 limit: limits.max_bytes as u64,
                 column: None,
+                field: None,
                 hint: "select fewer or narrower columns, or fetch fewer rows".into(),
             });
             break;
@@ -36,6 +37,7 @@ pub fn bound_rows(
             by: TruncatedBy::Cell,
             limit: limits.max_cell_chars as u64,
             column: Some(column),
+            field: None,
             hint: format!(
                 "long values are cut; repeat the same query with cell_offset={} to read the rest",
                 cell_offset.saturating_add(limits.max_cell_chars)
