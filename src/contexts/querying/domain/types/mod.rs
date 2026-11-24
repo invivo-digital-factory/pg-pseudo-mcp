@@ -17,6 +17,7 @@ pub mod derived_column;
 pub mod describe_table;
 pub mod execution_limits;
 pub mod explain;
+pub mod field_lineage;
 pub mod field_policy_hint;
 pub mod field_source;
 pub mod find_request;
@@ -62,6 +63,7 @@ pub use describe_table::{
 };
 pub use execution_limits::ExecutionLimits;
 pub use explain::{ExplainRequest, ExplainResponse};
+pub use field_lineage::{FieldLineage, LineageClearance};
 pub use field_policy_hint::FieldPolicyHint;
 pub use field_source::FieldSource;
 pub use find_request::FindRequest;

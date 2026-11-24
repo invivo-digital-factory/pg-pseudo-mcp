@@ -14,6 +14,7 @@ pub mod literal_text;
 pub mod literal_walker;
 pub mod mongo_filter_walker;
 pub mod mongo_guard;
+pub mod mongo_lineage;
 pub mod qualified_name;
 pub mod relation;
 pub mod result_bounds;

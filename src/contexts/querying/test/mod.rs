@@ -5,5 +5,6 @@ mod fakes;
 mod guard;
 mod list_databases;
 mod mongo_guard;
+mod mongo_lineage;
 mod run_query;
 mod scrubbing;

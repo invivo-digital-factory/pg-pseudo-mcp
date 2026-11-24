@@ -18,11 +18,13 @@ impl MongoFieldPattern {
     }
 
     pub fn matches(&self, source: &FieldSource) -> bool {
-        self.path == source.path.to_lowercase()
-            && self
-                .database
-                .as_deref()
-                .is_none_or(|database| database == source.database)
+        self.path == source.path.to_lowercase() && self.covers_collection(source)
+    }
+
+    pub fn covers_collection(&self, source: &FieldSource) -> bool {
+        self.database
+            .as_deref()
+            .is_none_or(|database| database == source.database)
             && self
                 .collection
                 .as_deref()

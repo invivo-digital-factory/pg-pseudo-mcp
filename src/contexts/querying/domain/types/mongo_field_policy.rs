@@ -23,4 +23,13 @@ impl MongoFieldPolicy {
             .max_by_key(|(pattern, _)| pattern.specificity())
             .map(|(_, decision)| decision)
     }
+
+    pub fn has_personal_below(&self, source: &FieldSource) -> bool {
+        let prefix = format!("{}.", source.path.to_lowercase());
+        self.entries.iter().any(|(pattern, decision)| {
+            matches!(decision, PolicyDecision::Personal(_))
+                && pattern.path.starts_with(&prefix)
+                && pattern.covers_collection(source)
+        })
+    }
 }

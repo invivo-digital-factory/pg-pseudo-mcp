@@ -7,6 +7,8 @@ mod connections_world;
 #[path = "../src/contexts/querying/test/steps/querying_world.rs"]
 mod querying_world;
 
+#[path = "../src/contexts/querying/test/steps/champs_derives_mongodb.rs"]
+mod champs_derives_mongodb;
 #[path = "../src/contexts/querying/test/steps/choix_de_la_base.rs"]
 mod choix_de_la_base;
 #[path = "../src/contexts/querying/test/steps/colonnes_derivees.rs"]
