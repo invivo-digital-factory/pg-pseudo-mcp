@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::connection_definition::MongoTransport;
 use super::password_source::PasswordSource;
 use super::secret::Secret;
 
@@ -124,6 +125,29 @@ impl fmt::Debug for ConnectParams {
             .field("password", &self.password)
             .field("sslmode", &self.sslmode)
             .field("tunnel", &self.tunnel)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct MongoConnectParams {
+    pub transport: MongoTransport,
+    pub replica_set: Option<String>,
+    pub database: Option<String>,
+    pub user: String,
+    pub password_command: Vec<String>,
+    pub ssh_hops: Option<Vec<SshHop>>,
+}
+
+impl fmt::Debug for MongoConnectParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MongoConnectParams")
+            .field("transport", &self.transport)
+            .field("replica_set", &self.replica_set)
+            .field("database", &self.database)
+            .field("user", &self.user)
+            .field("password_command", &"<command>")
+            .field("ssh_hops", &self.ssh_hops)
             .finish()
     }
 }

@@ -120,6 +120,7 @@ fn stub(project: &str, id: &str, name: Option<String>) -> ConnectionEntry {
         database: None,
         status: ConnectionStatus::Available,
         params: None,
+        mongo: None,
     }
 }
 

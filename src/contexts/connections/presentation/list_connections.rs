@@ -62,11 +62,20 @@ fn describe(entry: &ConnectionEntry) -> Value {
     if let Some(database) = &entry.database {
         item.insert("database".to_string(), json!(database));
     }
-    let bypassed = entry
+    let tunnel_hops = entry
         .params
         .as_ref()
         .and_then(|params| params.tunnel.as_ref())
-        .is_some_and(|tunnel| tunnel.hops.iter().any(|hop| !hop.host_key.is_verified()));
+        .map(|tunnel| tunnel.hops.as_slice());
+    let mongo_hops = entry
+        .mongo
+        .as_ref()
+        .and_then(|mongo| mongo.ssh_hops.as_deref());
+    let bypassed = tunnel_hops
+        .into_iter()
+        .chain(mongo_hops)
+        .flatten()
+        .any(|hop| !hop.host_key.is_verified());
     if bypassed {
         item.insert("ssh_host_key_check".to_string(), json!("bypassed"));
     }
@@ -75,4 +84,60 @@ fn describe(entry: &ConnectionEntry) -> Value {
         item.insert("folder".to_string(), json!(folder));
     }
     Value::Object(item)
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+    use crate::contexts::connections::domain::types::{
+        ConnectionSource, HostKeyPolicy, MongoConnectParams, MongoTransport, SshAuth, SshHop,
+    };
+
+    fn mongo_entry(host_key: HostKeyPolicy) -> ConnectionEntry {
+        ConnectionEntry {
+            id: "atlas".to_string(),
+            name: "atlas".to_string(),
+            declared_name: "atlas".to_string(),
+            source: ConnectionSource::File,
+            folder: None,
+            project: "file".to_string(),
+            engine: "mongodb".to_string(),
+            connection_type: "dev".to_string(),
+            database: None,
+            status: ConnectionStatus::Available,
+            params: None,
+            mongo: Some(MongoConnectParams {
+                transport: MongoTransport::Srv {
+                    host: "pl-0.atlas.scarif.test".to_string(),
+                },
+                replica_set: None,
+                database: None,
+                user: "reader".to_string(),
+                password_command: vec!["/bin/echo".to_string()],
+                ssh_hops: Some(vec![SshHop {
+                    label: "bastion".to_string(),
+                    host: "bastion.scarif.test".to_string(),
+                    port: 22,
+                    user: "jump".to_string(),
+                    auth: SshAuth::Agent,
+                    host_key,
+                }]),
+            }),
+        }
+    }
+
+    #[test]
+    fn une_connexion_mongodb_dont_un_saut_ne_verifie_pas_la_cle_est_listee_avec_le_drapeau() {
+        let listed = describe(&mongo_entry(HostKeyPolicy::Bypass));
+        assert_eq!(listed["ssh_host_key_check"], "bypassed");
+    }
+
+    #[test]
+    fn une_connexion_mongodb_dont_les_sauts_verifient_la_cle_est_listee_sans_le_drapeau() {
+        let listed = describe(&mongo_entry(HostKeyPolicy::Verify {
+            known_hosts: Vec::new(),
+            alias: None,
+        }));
+        assert!(listed.get("ssh_host_key_check").is_none(), "{listed}");
+    }
 }

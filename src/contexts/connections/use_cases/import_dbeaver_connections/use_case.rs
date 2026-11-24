@@ -7,8 +7,8 @@ use crate::contexts::connections::domain::repositories::{
 };
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
-    AuthMode, ConnectionDefinition, ConnectionType, DbeaverDefinition, HostBlock, ImportReport,
-    ImportedConnection, SkippedConnection,
+    AuthMode, ConnectionDefinition, ConnectionType, DbeaverDefinition, EngineSettings, HostBlock,
+    ImportReport, ImportedConnection, SkippedConnection,
 };
 
 type TunnelKey = (String, u16, String);
@@ -99,11 +99,13 @@ impl ImportDbeaverConnections {
             .map(|tunnel| self.alias_of(tunnel_key(tunnel), definition, plan));
         let file = ConnectionDefinition {
             name: definition.name.clone(),
-            host: definition.host.clone(),
-            port: definition.port,
-            database: definition.database.clone(),
             user: definition.user.clone(),
-            sslmode: definition.sslmode,
+            settings: EngineSettings::Postgresql {
+                host: definition.host.clone(),
+                port: definition.port,
+                database: definition.database.clone(),
+                sslmode: definition.sslmode,
+            },
             connection_type,
             auth: auth.clone(),
             ssh_alias: alias.as_ref().map(|(alias, _)| alias.clone()),

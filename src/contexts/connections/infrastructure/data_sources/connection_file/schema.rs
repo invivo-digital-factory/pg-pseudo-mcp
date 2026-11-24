@@ -2,14 +2,22 @@ use std::collections::HashMap;
 
 use toml::{Table, Value};
 
+use crate::contexts::connections::domain::constants::{ENGINE_MONGODB, ENGINE_POSTGRESQL};
 use crate::contexts::connections::domain::types::{
-    AuthMode, ConnectionDefinition, ConnectionType, SslMode,
+    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoSettings, MongoTransport,
+    SslMode,
 };
 
-const DEFAULT_PORT: u16 = 5432;
+const DEFAULT_POSTGRES_PORT: u16 = 5432;
+const DEFAULT_MONGODB_PORT: u16 = 27017;
 const DEFAULT_DATABASE: &str = "postgres";
-const KNOWN_KEYS: [&str; 10] = [
+const MONGODB_ONLY_KEYS: [&str; 3] = ["srv", "tls", "replica_set"];
+const KNOWN_KEYS: [&str; 14] = [
     "name",
+    "engine",
+    "srv",
+    "tls",
+    "replica_set",
     "host",
     "port",
     "database",
@@ -31,6 +39,7 @@ pub struct SyntaxError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawEntry {
     pub name: String,
+    pub engine: &'static str,
     pub definition: Result<ConnectionDefinition, String>,
 }
 
@@ -135,9 +144,14 @@ fn raw_entry(table: &Table, index: usize) -> RawEntry {
         .and_then(Value::as_str)
         .filter(|name| !name.trim().is_empty())
         .map(str::to_string);
+    let engine = match table.get("engine").and_then(Value::as_str) {
+        Some(ENGINE_MONGODB) => ENGINE_MONGODB,
+        _ => ENGINE_POSTGRESQL,
+    };
     let definition = definition_of(table);
     RawEntry {
         name: name.unwrap_or_else(|| format!("connection #{index}")),
+        engine,
         definition,
     }
 }
@@ -166,28 +180,24 @@ fn definition_of(table: &Table) -> Result<ConnectionDefinition, String> {
     if let Some(key) = table.keys().find(|key| !KNOWN_KEYS.contains(&key.as_str())) {
         return Err(format!("unknown key `{key}` in the connection file"));
     }
+    let engine = optional_text(table, "engine")?.unwrap_or_else(|| ENGINE_POSTGRESQL.to_string());
+    let mongodb = match engine.as_str() {
+        ENGINE_POSTGRESQL => false,
+        ENGINE_MONGODB => true,
+        _ => return Err("`engine` must be one of postgresql, mongodb".to_string()),
+    };
     let name = required_text(table, "name")?;
     let host = required_text(table, "host")?;
     let user = required_text(table, "user")?;
-    let database =
-        optional_text(table, "database")?.unwrap_or_else(|| DEFAULT_DATABASE.to_string());
-    let port = match table.get("port") {
-        None => DEFAULT_PORT,
-        Some(Value::Integer(port)) => u16::try_from(*port)
-            .ok()
-            .filter(|port| *port != 0)
-            .ok_or("`port` must be between 1 and 65535")?,
-        Some(_) => return Err("`port` must be a whole number".to_string()),
-    };
-    let sslmode = match optional_text(table, "sslmode")? {
-        None => SslMode::Prefer,
-        Some(text) => SslMode::from_name(&text).ok_or(
-            "`sslmode` must be one of disable, allow, prefer, require, verify-ca, verify-full",
-        )?,
+    let port = port_of(table)?;
+    let settings = if mongodb {
+        EngineSettings::Mongodb(mongo_settings_of(table, host, port)?)
+    } else {
+        postgres_settings_of(table, host, port.unwrap_or(DEFAULT_POSTGRES_PORT))?
     };
     let connection_type = ConnectionType::from_name(&required_text(table, "type")?)
         .ok_or("`type` must be one of dev, test, prod")?;
-    let auth = auth_of(table)?;
+    let auth = auth_of(table, mongodb)?;
     let ssh_alias = optional_text(table, "ssh_alias")?;
     if let Some(alias) = &ssh_alias
         && (alias.starts_with('-') || alias.contains(char::is_whitespace))
@@ -196,18 +206,94 @@ fn definition_of(table: &Table) -> Result<ConnectionDefinition, String> {
     }
     Ok(ConnectionDefinition {
         name,
-        host,
-        port,
-        database,
         user,
-        sslmode,
+        settings,
         connection_type,
         auth,
         ssh_alias,
     })
 }
 
-fn auth_of(table: &Table) -> Result<AuthMode, String> {
+fn port_of(table: &Table) -> Result<Option<u16>, String> {
+    match table.get("port") {
+        None => Ok(None),
+        Some(Value::Integer(port)) => u16::try_from(*port)
+            .ok()
+            .filter(|port| *port != 0)
+            .map(Some)
+            .ok_or_else(|| "`port` must be between 1 and 65535".to_string()),
+        Some(_) => Err("`port` must be a whole number".to_string()),
+    }
+}
+
+fn postgres_settings_of(table: &Table, host: String, port: u16) -> Result<EngineSettings, String> {
+    if let Some(key) = MONGODB_ONLY_KEYS
+        .iter()
+        .find(|key| table.contains_key(**key))
+    {
+        return Err(format!(
+            "`{key}` is only valid when `engine` is \"mongodb\""
+        ));
+    }
+    let database =
+        optional_text(table, "database")?.unwrap_or_else(|| DEFAULT_DATABASE.to_string());
+    let sslmode = match optional_text(table, "sslmode")? {
+        None => SslMode::Prefer,
+        Some(text) => SslMode::from_name(&text).ok_or(
+            "`sslmode` must be one of disable, allow, prefer, require, verify-ca, verify-full",
+        )?,
+    };
+    Ok(EngineSettings::Postgresql {
+        host,
+        port,
+        database,
+        sslmode,
+    })
+}
+
+fn mongo_settings_of(
+    table: &Table,
+    host: String,
+    port: Option<u16>,
+) -> Result<MongoSettings, String> {
+    if table.contains_key("sslmode") {
+        return Err("`sslmode` is not valid when `engine` is \"mongodb\"; use `tls`".to_string());
+    }
+    let srv = optional_flag(table, "srv")?.unwrap_or(true);
+    let tls = optional_flag(table, "tls")?.unwrap_or(true);
+    let transport = match (srv, tls, port) {
+        (true, false, _) => {
+            return Err(
+                "`tls` must be true while `srv` is true; `tls = false` needs `srv = false`"
+                    .to_string(),
+            );
+        }
+        (true, true, Some(_)) => {
+            return Err("`port` is not valid when `srv` is true; use `srv = false`".to_string());
+        }
+        (true, true, None) => MongoTransport::Srv { host },
+        (false, tls, port) => MongoTransport::Seed {
+            host,
+            port: port.unwrap_or(DEFAULT_MONGODB_PORT),
+            tls,
+        },
+    };
+    Ok(MongoSettings {
+        database: optional_text(table, "database")?,
+        replica_set: optional_text(table, "replica_set")?,
+        transport,
+    })
+}
+
+fn optional_flag(table: &Table, key: &str) -> Result<Option<bool>, String> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(Value::Boolean(flag)) => Ok(Some(*flag)),
+        Some(_) => Err(format!("`{key}` must be true or false")),
+    }
+}
+
+fn auth_of(table: &Table, mongodb: bool) -> Result<AuthMode, String> {
     let command = match table.get("password_command") {
         None => None,
         Some(Value::Array(items)) => {
@@ -235,7 +321,11 @@ fn auth_of(table: &Table) -> Result<AuthMode, String> {
             );
         }
     };
-    match (required_text(table, "auth")?.as_str(), command) {
+    let auth = required_text(table, "auth")?;
+    if mongodb && auth != "command" {
+        return Err("`auth` must be \"command\" when `engine` is \"mongodb\"".to_string());
+    }
+    match (auth.as_str(), command) {
         ("pgpass", None) => Ok(AuthMode::Pgpass),
         ("azure", None) => Ok(AuthMode::Azure),
         ("command", Some(argv)) => Ok(AuthMode::Command(argv)),
@@ -287,9 +377,15 @@ auth = "pgpass"
     #[test]
     fn une_connexion_minimale_recoit_les_valeurs_par_defaut() {
         let definition = only_definition(VALID).unwrap();
-        assert_eq!(definition.port, 5432);
-        assert_eq!(definition.database, "postgres");
-        assert_eq!(definition.sslmode, SslMode::Prefer);
+        assert_eq!(
+            definition.settings,
+            EngineSettings::Postgresql {
+                host: "db.example".to_string(),
+                port: 5432,
+                database: "postgres".to_string(),
+                sslmode: SslMode::Prefer
+            }
+        );
         assert_eq!(definition.auth, AuthMode::Pgpass);
         assert_eq!(definition.ssh_alias, None);
         assert_eq!(definition.connection_type, ConnectionType::Prod);
@@ -313,9 +409,15 @@ ssh_alias = "bastion"
 "#,
         )
         .unwrap();
-        assert_eq!(definition.port, 6432);
-        assert_eq!(definition.database, "billing");
-        assert_eq!(definition.sslmode, SslMode::VerifyFull);
+        assert_eq!(
+            definition.settings,
+            EngineSettings::Postgresql {
+                host: "db.example".to_string(),
+                port: 6432,
+                database: "billing".to_string(),
+                sslmode: SslMode::VerifyFull
+            }
+        );
         assert_eq!(
             definition.auth,
             AuthMode::Command(vec!["op".into(), "read".into(), "op://vault/db".into()])
@@ -341,6 +443,142 @@ ssh_alias = "bastion"
             assert!(reason.contains("must not hold secrets"), "{key}: {reason}");
             assert!(reason.contains(key), "{key}: {reason}");
             assert!(!reason.contains("ab-1234"), "{key}: {reason}");
+        }
+    }
+
+    const MONGO: &str = r#"
+[[connection]]
+name = "atlas"
+engine = "mongodb"
+host = "pl-0.atlas.scarif.test"
+user = "alice"
+type = "dev"
+auth = "command"
+password_command = ["/bin/echo", "x"]
+"#;
+
+    fn mongo_with(extra: &str) -> String {
+        format!("{MONGO}{extra}\n")
+    }
+
+    #[test]
+    fn une_connexion_mongodb_minimale_est_en_srv_avec_tls_sans_port() {
+        let definition = only_definition(MONGO).unwrap();
+        assert_eq!(
+            definition.settings,
+            EngineSettings::Mongodb(MongoSettings {
+                database: None,
+                replica_set: None,
+                transport: MongoTransport::Srv {
+                    host: "pl-0.atlas.scarif.test".to_string()
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn une_connexion_mongodb_sans_srv_recoit_le_port_27017_et_tls_par_defaut() {
+        let definition = only_definition(&mongo_with("srv = false")).unwrap();
+        let EngineSettings::Mongodb(settings) = definition.settings else {
+            panic!("expected mongodb settings");
+        };
+        assert_eq!(
+            settings.transport,
+            MongoTransport::Seed {
+                host: "pl-0.atlas.scarif.test".to_string(),
+                port: 27017,
+                tls: true
+            }
+        );
+    }
+
+    #[test]
+    fn une_connexion_mongodb_complete_est_lue_champ_par_champ() {
+        let definition = only_definition(&mongo_with(
+            "port = 1024\nsrv = false\ntls = false\nreplica_set = \"rs0\"\ndatabase = \"shop\"\nssh_alias = \"bastion\"",
+        ))
+        .unwrap();
+        assert_eq!(
+            definition.settings,
+            EngineSettings::Mongodb(MongoSettings {
+                database: Some("shop".to_string()),
+                replica_set: Some("rs0".to_string()),
+                transport: MongoTransport::Seed {
+                    host: "pl-0.atlas.scarif.test".to_string(),
+                    port: 1024,
+                    tls: false
+                },
+            })
+        );
+        assert_eq!(definition.ssh_alias.as_deref(), Some("bastion"));
+    }
+
+    #[test]
+    fn un_port_avec_srv_vrai_explicite_ou_par_defaut_est_refuse_en_nommant_port() {
+        for extra in ["port = 1024", "port = 27017\nsrv = true"] {
+            let reason = only_definition(&mongo_with(extra)).unwrap_err();
+            assert!(reason.contains("`port`"), "{extra}: {reason}");
+            assert!(reason.contains("`srv = false`"), "{extra}: {reason}");
+        }
+    }
+
+    #[test]
+    fn le_moteur_postgresql_explicite_equivaut_au_moteur_par_defaut() {
+        let explicit =
+            only_definition(&VALID.replace("name =", "engine = \"postgresql\"\nname =")).unwrap();
+        assert_eq!(explicit, only_definition(VALID).unwrap());
+    }
+
+    #[test]
+    fn un_moteur_inconnu_ou_mal_type_nomme_engine() {
+        for extra in ["engine = \"mysql\"", "engine = 3"] {
+            let reason = only_definition(&entry_with(extra)).unwrap_err();
+            assert!(reason.contains("`engine`"), "{extra}: {reason}");
+        }
+    }
+
+    #[test]
+    fn une_entree_mongodb_refuse_sslmode_et_les_modes_d_authentification_autres_que_command() {
+        let reason = only_definition(&mongo_with("sslmode = \"require\"")).unwrap_err();
+        assert!(reason.contains("`sslmode`"), "{reason}");
+        for auth in ["pgpass", "azure", "kerberos"] {
+            let contents = MONGO
+                .replace("auth = \"command\"", &format!("auth = \"{auth}\""))
+                .replace("password_command = [\"/bin/echo\", \"x\"]\n", "");
+            let reason = only_definition(&contents).unwrap_err();
+            assert!(reason.contains("`auth`"), "{auth}: {reason}");
+        }
+    }
+
+    #[test]
+    fn une_entree_postgresql_refuse_srv_tls_et_replica_set() {
+        for extra in ["srv = true", "tls = true", "replica_set = \"rs0\""] {
+            let key = extra.split(' ').next().unwrap();
+            let reason = only_definition(&entry_with(extra)).unwrap_err();
+            assert!(reason.contains(&format!("`{key}`")), "{extra}: {reason}");
+        }
+    }
+
+    #[test]
+    fn tls_faux_avec_srv_vrai_est_refuse_et_accepte_sans_srv() {
+        let reason = only_definition(&mongo_with("tls = false")).unwrap_err();
+        assert!(reason.contains("`tls`"), "{reason}");
+        let reason = only_definition(&mongo_with("tls = false\nsrv = true")).unwrap_err();
+        assert!(reason.contains("`tls`"), "{reason}");
+        assert!(only_definition(&mongo_with("tls = false\nsrv = false")).is_ok());
+    }
+
+    #[test]
+    fn les_valeurs_mal_typees_des_cles_mongodb_nomment_le_champ_fautif() {
+        for (extra, field) in [
+            ("srv = \"yes\"", "srv"),
+            ("tls = 1", "tls"),
+            ("replica_set = \"\"", "replica_set"),
+            ("replica_set = 3", "replica_set"),
+            ("database = \"\"", "database"),
+        ] {
+            let reason = only_definition(&mongo_with(extra)).unwrap_err();
+            assert!(reason.contains(&format!("`{field}`")), "{extra}: {reason}");
         }
     }
 

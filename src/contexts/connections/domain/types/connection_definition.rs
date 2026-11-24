@@ -34,13 +34,34 @@ pub enum AuthMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MongoTransport {
+    Srv { host: String },
+    Seed { host: String, port: u16, tls: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MongoSettings {
+    pub database: Option<String>,
+    pub replica_set: Option<String>,
+    pub transport: MongoTransport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineSettings {
+    Postgresql {
+        host: String,
+        port: u16,
+        database: String,
+        sslmode: SslMode,
+    },
+    Mongodb(MongoSettings),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionDefinition {
     pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub database: String,
     pub user: String,
-    pub sslmode: SslMode,
+    pub settings: EngineSettings,
     pub connection_type: ConnectionType,
     pub auth: AuthMode,
     pub ssh_alias: Option<String>,

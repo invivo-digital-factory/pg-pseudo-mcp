@@ -18,10 +18,13 @@ pub use cell::Cell;
 pub use column_policy_entries::ColumnPolicyEntries;
 pub use column_policy_file::ColumnPolicyFile;
 pub use connect_options::{ConnectOptions, Hop, Tunnel, TunnelAuth};
-pub use connection_definition::{AuthMode, ConnectionDefinition, ConnectionType};
+pub use connection_definition::{
+    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoSettings, MongoTransport,
+};
 pub use connection_entry::{ConnectionEntry, ConnectionStatus, Discovery};
 pub use connection_profile::{
-    ConnectParams, HostKeyPolicy, OpenSshKeys, SshAgent, SshAuth, SshHop, SslMode, TunnelParams,
+    ConnectParams, HostKeyPolicy, MongoConnectParams, OpenSshKeys, SshAgent, SshAuth, SshHop,
+    SslMode, TunnelParams,
 };
 pub use connection_source::ConnectionSource;
 pub use database_listing::DatabaseListing;

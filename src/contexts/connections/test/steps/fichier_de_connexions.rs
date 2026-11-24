@@ -115,6 +115,13 @@ async fn connection_has_source(world: &mut ConnectionsWorld, name: String, sourc
     assert_eq!(found[0]["source"], source);
 }
 
+#[then(regex = r#"^la connexion "([^"]+)" est listée avec le moteur "([^"]+)"$"#)]
+async fn connection_has_engine(world: &mut ConnectionsWorld, name: String, engine: String) {
+    let found = entries(world, &name);
+    assert!(!found.is_empty(), "{name} is not listed");
+    assert_eq!(found[0]["engine"], engine);
+}
+
 #[then(regex = r#"^la connexion "([^"]+)" n'est listée qu'une seule fois$"#)]
 async fn connection_listed_once(world: &mut ConnectionsWorld, name: String) {
     assert_eq!(entries(world, &name).len(), 1);
@@ -182,6 +189,23 @@ async fn agent_runs_read_on(world: &mut ConnectionsWorld, name: String) {
         context
             .run_read_only_statement
             .execute(&name, None, "SELECT 1", limits)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+    );
+}
+
+#[when(regex = r#"^l'agent lit le catalogue de la connexion "([^"]+)"$"#)]
+async fn agent_reads_catalog_of(world: &mut ConnectionsWorld, name: String) {
+    let context = world.context();
+    let limits = ExecutionLimits {
+        max_rows: 10,
+        timeout_ms: 10_000,
+    };
+    world.outcome = Some(
+        context
+            .read_catalog
+            .execute_cached(&name, None, "SELECT 1", limits)
             .await
             .map(|_| ())
             .map_err(|error| error.to_string()),

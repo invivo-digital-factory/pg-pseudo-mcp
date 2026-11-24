@@ -3,7 +3,8 @@ use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
     AuthMode, ConnectParams, ConnectionDefinition, ConnectionEntry, ConnectionSource,
-    ConnectionStatus, PasswordSource, TunnelParams,
+    ConnectionStatus, EngineSettings, MongoConnectParams, MongoSettings, PasswordSource, SslMode,
+    TunnelParams,
 };
 use crate::contexts::connections::infrastructure::data_sources::openssh::OpenSshResolver;
 use crate::contexts::connections::infrastructure::data_sources::password_resolution::{
@@ -12,6 +13,14 @@ use crate::contexts::connections::infrastructure::data_sources::password_resolut
 use crate::contexts::connections::infrastructure::data_sources::pgpass;
 
 const AZURE_HOST_REASON: &str = "auth = \"azure\" needs an Azure PostgreSQL host (ending in .postgres.database.azure.com): the Azure token is only sent to Azure PostgreSQL hosts";
+
+struct Evaluation {
+    connection_type: String,
+    database: Option<String>,
+    status: ConnectionStatus,
+    params: Option<ConnectParams>,
+    mongo: Option<MongoConnectParams>,
+}
 
 pub struct FileEvaluator<'a> {
     sign_in: SignIn<'a>,
@@ -33,30 +42,17 @@ impl<'a> FileEvaluator<'a> {
     }
 
     pub fn entry(&self, raw: &RawEntry) -> ConnectionEntry {
-        let (status, params, database, connection_type) = match &raw.definition {
-            Err(reason) => (
-                ConnectionStatus::Unavailable {
+        let evaluation = match &raw.definition {
+            Err(reason) => Evaluation {
+                connection_type: "unknown".to_string(),
+                database: None,
+                status: ConnectionStatus::Unavailable {
                     reason: reason.clone(),
                 },
-                None,
-                None,
-                "unknown".to_string(),
-            ),
-            Ok(definition) => {
-                let database = self
-                    .database
-                    .map_or_else(|| definition.database.clone(), str::to_string);
-                let connection_type = definition.connection_type.as_str().to_string();
-                match self.params(definition, &database) {
-                    Ok(params) => (
-                        ConnectionStatus::Available,
-                        Some(params),
-                        Some(database),
-                        connection_type,
-                    ),
-                    Err(status) => (status, None, Some(database), connection_type),
-                }
-            }
+                params: None,
+                mongo: None,
+            },
+            Ok(definition) => self.evaluation(definition),
         };
         ConnectionEntry {
             id: raw.name.clone(),
@@ -65,34 +61,100 @@ impl<'a> FileEvaluator<'a> {
             source: ConnectionSource::File,
             folder: None,
             project: "file".to_string(),
-            engine: "postgresql".to_string(),
-            connection_type,
+            engine: raw.engine.to_string(),
+            connection_type: evaluation.connection_type,
+            database: evaluation.database,
+            status: evaluation.status,
+            params: evaluation.params,
+            mongo: evaluation.mongo,
+        }
+    }
+
+    fn evaluation(&self, definition: &ConnectionDefinition) -> Evaluation {
+        let (database, outcome) = match &definition.settings {
+            EngineSettings::Postgresql {
+                host,
+                port,
+                database: declared,
+                sslmode,
+            } => {
+                let database = self
+                    .database
+                    .map_or_else(|| declared.clone(), str::to_string);
+                let target = pgpass::Target {
+                    host,
+                    port: *port,
+                    database: &database,
+                    user: &definition.user,
+                };
+                let outcome = self
+                    .params(definition, &target, *sslmode)
+                    .map(|params| (Some(params), None));
+                (Some(database), outcome)
+            }
+            EngineSettings::Mongodb(settings) => {
+                let database = self
+                    .database
+                    .map(str::to_string)
+                    .or_else(|| settings.database.clone());
+                let outcome = self
+                    .mongo_params(definition, settings, database.clone())
+                    .map(|mongo| (None, Some(mongo)));
+                (database, outcome)
+            }
+        };
+        let (status, params, mongo) = match outcome {
+            Ok((params, mongo)) => (ConnectionStatus::Available, params, mongo),
+            Err(status) => (status, None, None),
+        };
+        Evaluation {
+            connection_type: definition.connection_type.as_str().to_string(),
             database,
             status,
             params,
+            mongo,
         }
+    }
+
+    fn mongo_params(
+        &self,
+        definition: &ConnectionDefinition,
+        settings: &MongoSettings,
+        database: Option<String>,
+    ) -> Result<MongoConnectParams, ConnectionStatus> {
+        let AuthMode::Command(argv) = &definition.auth else {
+            unreachable!("the schema accepts only auth = \"command\" for mongodb")
+        };
+        let ssh_hops = definition
+            .ssh_alias
+            .as_deref()
+            .map(|alias| self.resolver.resolve(alias))
+            .transpose()?;
+        Ok(MongoConnectParams {
+            transport: settings.transport.clone(),
+            replica_set: settings.replica_set.clone(),
+            database,
+            user: definition.user.clone(),
+            password_command: argv.clone(),
+            ssh_hops,
+        })
     }
 
     fn params(
         &self,
         definition: &ConnectionDefinition,
-        database: &str,
+        target: &pgpass::Target,
+        sslmode: SslMode,
     ) -> Result<ConnectParams, ConnectionStatus> {
-        let target = pgpass::Target {
-            host: &definition.host,
-            port: definition.port,
-            database,
-            user: &definition.user,
-        };
         let password = match &definition.auth {
-            AuthMode::Pgpass => pgpass_or_azure_token(&target, false, &self.sign_in)?,
+            AuthMode::Pgpass => pgpass_or_azure_token(target, false, &self.sign_in)?,
             AuthMode::Azure => {
-                if !is_azure_postgres_host(&definition.host) {
+                if !is_azure_postgres_host(target.host) {
                     return Err(ConnectionStatus::Unavailable {
                         reason: AZURE_HOST_REASON.to_string(),
                     });
                 }
-                pgpass_or_azure_token(&target, true, &self.sign_in)?
+                pgpass_or_azure_token(target, true, &self.sign_in)?
             }
             AuthMode::Command(argv) => PasswordSource::Command(argv.clone()),
         };
@@ -102,16 +164,16 @@ impl<'a> FileEvaluator<'a> {
             .map(|alias| {
                 self.resolver.resolve(alias).map(|hops| TunnelParams {
                     hops,
-                    remote_host: definition.host.clone(),
-                    remote_port: definition.port,
+                    remote_host: target.host.to_string(),
+                    remote_port: target.port,
                 })
             })
             .transpose()?;
-        let sslmode = password.effective_sslmode(definition.sslmode);
+        let sslmode = password.effective_sslmode(sslmode);
         Ok(ConnectParams {
-            host: definition.host.clone(),
-            port: definition.port,
-            database: database.to_string(),
+            host: target.host.to_string(),
+            port: target.port,
+            database: target.database.to_string(),
             user: definition.user.clone(),
             password,
             sslmode,

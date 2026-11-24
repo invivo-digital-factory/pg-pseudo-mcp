@@ -56,6 +56,7 @@ mod unit {
             database: None,
             status,
             params: None,
+            mongo: None,
         }
     }
 

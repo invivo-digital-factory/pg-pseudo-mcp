@@ -368,6 +368,7 @@ mod integration {
                     database: Some(params.database.clone()),
                     status: ConnectionStatus::Available,
                     params: Some(params),
+                    mongo: None,
                 }],
                 hint: None,
             }
