@@ -1,6 +1,6 @@
 [package]
-name = "pg-pseudo-mcp"
-version = "0.2.0"
+name = "scarif-database-mcp"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 

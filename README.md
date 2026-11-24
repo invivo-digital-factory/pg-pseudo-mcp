@@ -1,4 +1,4 @@
-# pg-pseudo-mcp
+# scarif-database-mcp
 
 A local MCP server that lets an AI coding agent investigate your PostgreSQL databases on its own, without any real personal value reaching the model provider through the server.
 
@@ -17,14 +17,14 @@ server: Marie Dupont's orders, every personal value pseudonymized, translated_li
 Each `v*` tag publishes a release with a single binary per platform (macOS arm64 and x86_64, Linux x86_64 and arm64) and a `SHA256SUMS` file:
 
 ```bash
-version=0.1.0
+version=0.3.0
 target=aarch64-apple-darwin
-curl -fsSLO "https://github.com/invivo-digital-factory/pg-pseudo-mcp/releases/download/v$version/pg-pseudo-mcp-$target.tar.gz"
-curl -fsSLO "https://github.com/invivo-digital-factory/pg-pseudo-mcp/releases/download/v$version/SHA256SUMS"
-grep "pg-pseudo-mcp-$target.tar.gz" SHA256SUMS | shasum -a 256 -c
-tar -xzf "pg-pseudo-mcp-$target.tar.gz"
+curl -fsSLO "https://github.com/invivo-digital-factory/scarif-database-mcp/releases/download/v$version/scarif-database-mcp-$target.tar.gz"
+curl -fsSLO "https://github.com/invivo-digital-factory/scarif-database-mcp/releases/download/v$version/SHA256SUMS"
+grep "scarif-database-mcp-$target.tar.gz" SHA256SUMS | shasum -a 256 -c
+tar -xzf "scarif-database-mcp-$target.tar.gz"
 mkdir -p ~/.local/bin
-install -m 755 "pg-pseudo-mcp-$target/pg-pseudo-mcp" ~/.local/bin/
+install -m 755 "scarif-database-mcp-$target/scarif-database-mcp" ~/.local/bin/
 ```
 
 To build from source instead, with a Rust toolchain (1.88 or later):
@@ -36,24 +36,24 @@ cargo install --path .
 Register it with Claude Code:
 
 ```bash
-claude mcp add pg-pseudo -- pg-pseudo-mcp
+claude mcp add scarif -- scarif-database-mcp
 ```
 
-Describe your connections in [the connection file](#connections), or generate it from DBeaver with `pg-pseudo-mcp connections import-dbeaver`. Without a file, the server reads your DBeaver workspace, found automatically (`~/Library/DBeaverData` on macOS, `~/.local/share/DBeaverData` on Linux, `%APPDATA%\DBeaverData` on Windows).
+Describe your connections in [the connection file](#connections), or generate it from DBeaver with `scarif-database-mcp connections import-dbeaver`. Without a file, the server reads your DBeaver workspace, found automatically (`~/Library/DBeaverData` on macOS, `~/.local/share/DBeaverData` on Linux, `%APPDATA%\DBeaverData` on Windows).
 
 | Environment variable | Purpose |
 |---|---|
-| `PG_PSEUDO_CONNECTIONS_FILE` | Absolute path of the connection file, instead of `~/.config/pg-pseudo/connections.toml` |
-| `PG_PSEUDO_COLUMNS_FILE` | Absolute path of the shared [column policy](#column-policy); the local one is `~/.config/pg-pseudo/columns.toml` |
-| `PG_PSEUDO_SSH_CONFIG` | Absolute path of an SSH config passed to `ssh -G` with `-F`, instead of `~/.ssh/config` |
-| `PG_PSEUDO_SSH_KNOWN_HOSTS` | Absolute path of a `known_hosts` file used for every SSH hop instead of the files `ssh -G` lists |
-| `PG_PSEUDO_DBEAVER_HOME` | DBeaver data root, when it is not in the default place |
-| `PG_PSEUDO_DATA_DIR` | Where the pseudonym secret and mapping live (default: the OS data directory, e.g. `~/Library/Application Support/pg-pseudo-mcp`) |
+| `SCARIF_CONNECTIONS_FILE` | Absolute path of the connection file, instead of `~/.config/scarif/connections.toml` |
+| `SCARIF_COLUMNS_FILE` | Absolute path of the shared [column policy](#column-policy); the local one is `~/.config/scarif/columns.toml` |
+| `SCARIF_SSH_CONFIG` | Absolute path of an SSH config passed to `ssh -G` with `-F`, instead of `~/.ssh/config` |
+| `SCARIF_SSH_KNOWN_HOSTS` | Absolute path of a `known_hosts` file used for every SSH hop instead of the files `ssh -G` lists |
+| `SCARIF_DBEAVER_HOME` | DBeaver data root, when it is not in the default place |
+| `SCARIF_DATA_DIR` | Where the pseudonym secret and mapping live (default: the OS data directory, e.g. `~/Library/Application Support/scarif-database-mcp`) |
 | `RUST_LOG` | Log level; logs go to stderr and never contain values, SQL or credentials |
 
 ## Connections
 
-pg-pseudo-mcp reads its connections from its own file, `~/.config/pg-pseudo/connections.toml` (or `$XDG_CONFIG_HOME/pg-pseudo/connections.toml`, or the absolute path in `PG_PSEUDO_CONNECTIONS_FILE`). The file holds **no secret**, so a team can keep it in a shared repository. DBeaver stays readable as a fallback source.
+scarif-database-mcp reads its connections from its own file, `~/.config/scarif/connections.toml` (or `$XDG_CONFIG_HOME/scarif/connections.toml`, or the absolute path in `SCARIF_CONNECTIONS_FILE`). The file holds **no secret**, so a team can keep it in a shared repository. DBeaver stays readable as a fallback source.
 
 ```toml
 read_dbeaver = true
@@ -97,7 +97,7 @@ ssh_alias = "corp-jump-ledger"
 | `ssh_alias` | A `Host` alias of `~/.ssh/config` |
 | `read_dbeaver` | Top-level; `false` turns the DBeaver source off entirely (default `true`) |
 
-Edits to the file are picked up at the next tool call. A key that holds a secret (`password`, `token`, `passphrase`, any key containing `password` except `password_command`), an unknown key or an invalid value makes that entry unavailable, with a reason that names the field; two entries with the same name are both unavailable. A file that exists but cannot be parsed or read, or that has an invalid `read_dbeaver` value or an unknown or secret-shaped top-level key, is reported in the `list_connections` hint (with its line and column for a syntax error, never its content), and the DBeaver connections stay listed but unavailable, with a reason naming the connection file, until it is fixed: a broken file cannot silently re-expose connections it was meant to shadow or turn off. With a readable `read_dbeaver = false`, DBeaver stays off. A missing default file is silent; a missing file named by `PG_PSEUDO_CONNECTIONS_FILE` is reported with its path.
+Edits to the file are picked up at the next tool call. A key that holds a secret (`password`, `token`, `passphrase`, any key containing `password` except `password_command`), an unknown key or an invalid value makes that entry unavailable, with a reason that names the field; two entries with the same name are both unavailable. A file that exists but cannot be parsed or read, or that has an invalid `read_dbeaver` value or an unknown or secret-shaped top-level key, is reported in the `list_connections` hint (with its line and column for a syntax error, never its content), and the DBeaver connections stay listed but unavailable, with a reason naming the connection file, until it is fixed: a broken file cannot silently re-expose connections it was meant to shadow or turn off. With a readable `read_dbeaver = false`, DBeaver stays off. A missing default file is silent; a missing file named by `SCARIF_CONNECTIONS_FILE` is reported with its path.
 
 ### Authentication modes
 
@@ -112,13 +112,13 @@ No password, token or command output appears in a tool response, a reason or a l
 `ssh_alias` names a `Host` of `~/.ssh/config`. The server runs `ssh -G <alias>` and takes the host name, port, user, identity files, identity agent and `ProxyJump` chain from OpenSSH's own resolution, so `Include`, `Match`, wildcards and defaults behave as they do for `ssh`. The tunnel itself runs in the server, so every hop's host key is verified in the same way.
 
 - **Jump hosts.** `ProxyJump` chains of one or more hops work, including `user@host:port` and `ssh://` forms; a first hop with its own `ProxyJump` is followed, up to eight levels.
-- **Host keys are always verified**, on every hop, against the `known_hosts` files that `ssh -G` lists (`UserKnownHostsFile` and `GlobalKnownHostsFile`, `HostKeyAlias` honored) or against `PG_PSEUDO_SSH_KNOWN_HOSTS` when set. `StrictHostKeyChecking no` in `~/.ssh/config` is ignored on purpose, so it cannot turn verification off for the agent. An unknown, changed or revoked key refuses the connection with the hop's position and alias and the key's fingerprint. Host certificates and `@cert-authority` lines are not supported.
+- **Host keys are always verified**, on every hop, against the `known_hosts` files that `ssh -G` lists (`UserKnownHostsFile` and `GlobalKnownHostsFile`, `HostKeyAlias` honored) or against `SCARIF_SSH_KNOWN_HOSTS` when set. `StrictHostKeyChecking no` in `~/.ssh/config` is ignored on purpose, so it cannot turn verification off for the agent. An unknown, changed or revoked key refuses the connection with the hop's position and alias and the key's fingerprint. Host certificates and `@cert-authority` lines are not supported.
 - **Authentication never prompts.** Keys come from the SSH agent (`IdentityAgent` honored; `IdentitiesOnly` filters the agent's keys by your `IdentityFile` entries) or from unencrypted identity files. An encrypted key without an agent fails at connect time and tells you to load it with `ssh-add`. Password authentication to a bastion is not supported for file connections.
 - **Unsupported directives.** If the resolved alias sets `ProxyCommand`, `ProxyUseFdpass`, `KnownHostsCommand`, `CertificateFile`, `PKCS11Provider`, `CanonicalizeHostname`, `BindAddress` or `BindInterface`, the connection is listed as unsupported and names the directive; it is never connected with the directive silently dropped. An `IdentityFile` with a token other than `%d %h %p %r %u %%` is unsupported too.
-- **The alias must be defined.** `ssh -G` resolves any name with OpenSSH defaults (port 22, your login, default identity files), so a typo or a missing `Host` block would look available and then time out at query time. The server therefore also reads the `Host` lines of `~/.ssh/config` (or of `PG_PSEUDO_SSH_CONFIG`), following `Include` up to 16 levels, and requires the connection's own `ssh_alias` to match a `Host` pattern other than a bare `*`; wildcards (`*`, `?`) and negations (`!pattern`) are evaluated as OpenSSH does. Only that alias is checked: a `ProxyJump` hop may be a literal host name or address with no `Host` block. Otherwise the connection is listed unavailable with the reason `SSH alias <alias> is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)`, which names only your own alias, and `ssh` is not run. `Match` blocks are not evaluated: they neither define an alias nor cause a refusal on their own. System-wide `/etc/ssh` files are not read. `ssh -G` still gives the resolved values.
+- **The alias must be defined.** `ssh -G` resolves any name with OpenSSH defaults (port 22, your login, default identity files), so a typo or a missing `Host` block would look available and then time out at query time. The server therefore also reads the `Host` lines of `~/.ssh/config` (or of `SCARIF_SSH_CONFIG`), following `Include` up to 16 levels, and requires the connection's own `ssh_alias` to match a `Host` pattern other than a bare `*`; wildcards (`*`, `?`) and negations (`!pattern`) are evaluated as OpenSSH does. Only that alias is checked: a `ProxyJump` hop may be a literal host name or address with no `Host` block. Otherwise the connection is listed unavailable with the reason `SSH alias <alias> is not defined in the OpenSSH config; add a Host block for it (connections import-dbeaver prints one)`, which names only your own alias, and `ssh` is not run. `Match` blocks are not evaluated: they neither define an alias nor cause a refusal on their own. System-wide `/etc/ssh` files are not read. `ssh -G` still gives the resolved values.
 - **No `ssh` on `PATH`.** Connections with an `ssh_alias` are unavailable with a reason saying so; the others are unaffected.
 
-`PG_PSEUDO_SSH_CONFIG` (absolute path) makes the server pass `-F <path>` to every `ssh -G`, which is how the tests stay independent of your own `~/.ssh/config`.
+`SCARIF_SSH_CONFIG` (absolute path) makes the server pass `-F <path>` to every `ssh -G`, which is how the tests stay independent of your own `~/.ssh/config`.
 
 ### Precedence and DBeaver
 
@@ -127,7 +127,7 @@ The server lists the connections of the file and, unless `read_dbeaver = false`,
 ### Moving off DBeaver
 
 ```bash
-pg-pseudo-mcp connections import-dbeaver [--force]
+scarif-database-mcp connections import-dbeaver [--force]
 ```
 
 writes the file once from DBeaver's PostgreSQL connections, without any password, token or passphrase. It refuses to overwrite an existing file unless `--force` is given. It carries name, host, port, database, user, `sslmode` and type (a type other than dev, test or prod is imported as `prod`, the most cautious one), maps native authentication to `pgpass` and pgpass authentication on an Azure host to `azure`, applies the same name suffixes as `list_connections` for duplicate names, and keeps the host and port a DBeaver tunnel points at. For each SSH tunnel it reuses an alias of your `~/.ssh/config` that already resolves to the same host, port and user, and otherwise prints a suggested `Host` block (host, port, user, identity file); it never edits `~/.ssh/config`. It ends with the skipped connections and their reason (other engines, jump servers, unsupported authentication) and, per connection, what is left to do: a pgpass entry or a `password_command`, the `Host` block, the `known_hosts` entries. Once the file exists it takes precedence over DBeaver, so add the suggested `Host` blocks before using the servers (a connection whose alias has no `Host` block is unavailable), or keep the file aside until then; the report says so at its top. Then check each connection shows `source: file` and `available` in `list_connections`, and set `read_dbeaver = false` when you no longer need DBeaver.
@@ -180,8 +180,8 @@ The heuristics make mistakes in both directions: the dictionary maps the bare to
 
 Two optional TOML files are read, in this order, on every call (no restart needed); the later one wins on the same key:
 
-1. **Shared**: the path in `PG_PSEUDO_COLUMNS_FILE` (absolute), typically a file the team maintains together.
-2. **Local**: `$XDG_CONFIG_HOME/pg-pseudo/columns.toml`, or `~/.config/pg-pseudo/columns.toml`, resolved like the connection file.
+1. **Shared**: the path in `SCARIF_COLUMNS_FILE` (absolute), typically a file the team maintains together.
+2. **Local**: `$XDG_CONFIG_HOME/scarif/columns.toml`, or `~/.config/scarif/columns.toml`, resolved like the connection file.
 
 ```toml
 clear = ["*.product_name", "public.payment.carrier_name", "orders.reference"]
@@ -205,7 +205,7 @@ Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLA
 
 ## Threat model and known limits
 
-pg-pseudo-mcp protects against **accidental disclosure by a cooperative agent**. It is not a security boundary against an agent that tries to recover real values on purpose:
+scarif-database-mcp protects against **accidental disclosure by a cooperative agent**. It is not a security boundary against an agent that tries to recover real values on purpose:
 
 - **Character-level probing.** SQL predicates run on real values, so `WHERE email LIKE 'a%'`, `ascii(substr(email, 1, 1))` or counts can rebuild a value one character at a time. Text read from the database can also carry instructions aimed at the agent (prompt injection).
 - **Same-account file access.** The agent runs as your user. With its own shell or file tools it can read DBeaver's credentials (DBeaver's encryption key is public), the pseudonym secret and the mapping, or connect with `psql`. Deny those paths, see below.
@@ -219,11 +219,11 @@ pg-pseudo-mcp protects against **accidental disclosure by a cooperative agent**.
 - **Every database of the server.** The `database` argument reaches any database the connection's role may connect to, not only the connection's own. This is deliberate; restrict the role's `CONNECT` privileges on the server if some databases must stay out of reach.
 - **The connection file is trusted configuration.** Like `ProxyCommand` in `~/.ssh/config`, it can run a program (`password_command`) and decide where credentials go (`host`, `ssh_alias`, and the Azure token for an `azure` entry). It holds no secret, but a file kept in a shared repository gives its committers command execution on your machine: review its changes like code. The agent must not be able to edit it, see the deny rules below.
 - **Unsupported connections.** In DBeaver connections, SSH jump servers, proxies, authentication models other than native and pgpass, and credentials protected by a DBeaver master password or secure storage are listed as unsupported or unavailable; jump servers are supported for file connections. Servers with certificates from a private CA are not supported yet.
-- **SSH tunnels.** Connections of the connection file use the SSH tunnels described [above](#ssh-tunnels). Connections that go through DBeaver's SSH tunnel are usable with public key, password or agent authentication. The SSH user and the password or key passphrase are read from DBeaver's saved credentials; a key without a saved passphrase is accepted and fails at connect time if it is encrypted. A key file that does not exist marks the connection unavailable. For them, the SSH host key is checked against `~/.ssh/known_hosts` (or `PG_PSEUDO_SSH_KNOWN_HOSTS`), plain or hashed, with the `[host]:port` form for ports other than 22; an unknown, changed or `@revoked` key refuses the connection with the fingerprint to check, as does a key whose type differs from the one already recorded for the host. `@cert-authority` lines and host certificates are not supported. Add a bastion once with `ssh -p <port> <user>@<host>` or, after checking the fingerprint with its administrator, `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`. Verification is skipped only when "bypass host verification" is checked in DBeaver; `list_connections` then shows `"ssh_host_key_check": "bypassed"` for that connection and each connect logs a warning. SSH jump servers are not supported for DBeaver connections. With pgpass authentication, the database password comes from `PGPASSFILE` or `~/.pgpass` (`%APPDATA%\postgresql\pgpass.conf` on Windows), matched on the database host as written in DBeaver, not the tunnel host. As with libpq, a pgpass file readable by group or others is ignored and the connection is unavailable until it is `chmod 600`.
+- **SSH tunnels.** Connections of the connection file use the SSH tunnels described [above](#ssh-tunnels). Connections that go through DBeaver's SSH tunnel are usable with public key, password or agent authentication. The SSH user and the password or key passphrase are read from DBeaver's saved credentials; a key without a saved passphrase is accepted and fails at connect time if it is encrypted. A key file that does not exist marks the connection unavailable. For them, the SSH host key is checked against `~/.ssh/known_hosts` (or `SCARIF_SSH_KNOWN_HOSTS`), plain or hashed, with the `[host]:port` form for ports other than 22; an unknown, changed or `@revoked` key refuses the connection with the fingerprint to check, as does a key whose type differs from the one already recorded for the host. `@cert-authority` lines and host certificates are not supported. Add a bastion once with `ssh -p <port> <user>@<host>` or, after checking the fingerprint with its administrator, `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`. Verification is skipped only when "bypass host verification" is checked in DBeaver; `list_connections` then shows `"ssh_host_key_check": "bypassed"` for that connection and each connect logs a warning. SSH jump servers are not supported for DBeaver connections. With pgpass authentication, the database password comes from `PGPASSFILE` or `~/.pgpass` (`%APPDATA%\postgresql\pgpass.conf` on Windows), matched on the database host as written in DBeaver, not the tunnel host. As with libpq, a pgpass file readable by group or others is ignored and the connection is unavailable until it is `chmod 600`.
 
 ### Claude Code deny rules
 
-Add these to your Claude Code settings (`~/.claude/settings.json`) so the agent's own tools do not read the secret, the mapping or your DBeaver credentials, edit the connection file, or bypass the server with a database client. Adjust the paths to your OS, and add your `PG_PSEUDO_DATA_DIR` and `PG_PSEUDO_CONNECTIONS_FILE` paths if you set them. The DBeaver read denies stay recommended as long as the DBeaver source is on. The same rules are in [docs/claude-code-deny-rules.json](docs/claude-code-deny-rules.json).
+Add these to your Claude Code settings (`~/.claude/settings.json`) so the agent's own tools do not read the secret, the mapping or your DBeaver credentials, edit the connection file, or bypass the server with a database client. Adjust the paths to your OS, and add your `SCARIF_DATA_DIR` and `SCARIF_CONNECTIONS_FILE` paths if you set them. The DBeaver read denies stay recommended as long as the DBeaver source is on. The same rules are in [docs/claude-code-deny-rules.json](docs/claude-code-deny-rules.json).
 
 These rules prevent accidental access; they are not a security boundary, since a shell can reach the same files in other ways. For real isolation, run the agent in a sandbox that cannot read those paths (for example the Claude Code sandbox) or under a separate OS user.
 
@@ -231,10 +231,13 @@ These rules prevent accidental access; they are not a security boundary, since a
 {
   "permissions": {
     "deny": [
+      "Read(~/Library/Application Support/scarif-database-mcp/**)",
+      "Read(~/.local/share/scarif-database-mcp/**)",
       "Read(~/Library/Application Support/pg-pseudo-mcp/**)",
       "Read(~/.local/share/pg-pseudo-mcp/**)",
       "Read(~/Library/DBeaverData/**)",
       "Read(~/.local/share/DBeaverData/**)",
+      "Edit(~/.config/scarif/**)",
       "Edit(~/.config/pg-pseudo/**)",
       "Bash(psql:*)",
       "Bash(pg_dump:*)",
@@ -247,10 +250,36 @@ These rules prevent accidental access; they are not a security boundary, since a
 ### Resetting pseudonyms
 
 ```bash
-pg-pseudo-mcp mapping purge
+scarif-database-mcp mapping purge
 ```
 
-Deletes the secret and the mapping after confirmation. Pseudonyms the agent saw before become unknown and are reported as `unresolved_pseudonym`.
+Deletes the secret and the mapping after confirmation, in the data directory actually in use (see [Renamed from pg-pseudo-mcp](#renamed-from-pg-pseudo-mcp)). Pseudonyms the agent saw before become unknown and are reported as `unresolved_pseudonym`.
+
+## Renamed from pg-pseudo-mcp
+
+This project was called `pg-pseudo-mcp` up to 0.2.0. From 0.3.0 the crate, the binary and the release archives are named `scarif-database-mcp`, and the MCP server announces itself as `scarif`. The old names still work for this version, with a warning, and will be removed later.
+
+| | Before (0.2.x) | From 0.3.0 |
+|---|---|---|
+| Binary and archives | `pg-pseudo-mcp`, `pg-pseudo-mcp-<target>.tar.gz` | `scarif-database-mcp`, `scarif-database-mcp-<target>.tar.gz` |
+| MCP server name | `pg-pseudo-mcp` | `scarif` |
+| Environment variables | `PG_PSEUDO_CONNECTIONS_FILE`, `PG_PSEUDO_COLUMNS_FILE`, `PG_PSEUDO_SSH_CONFIG`, `PG_PSEUDO_SSH_KNOWN_HOSTS`, `PG_PSEUDO_DBEAVER_HOME`, `PG_PSEUDO_DATA_DIR` | the same names with the `SCARIF_` prefix |
+| Config directory | `~/.config/pg-pseudo/` | `~/.config/scarif/` (or `$XDG_CONFIG_HOME/scarif/`) |
+| Data directory | `~/Library/Application Support/pg-pseudo-mcp` (macOS), `~/.local/share/pg-pseudo-mcp` (Linux) | `.../scarif-database-mcp` in the same parent |
+
+Fallbacks, none of which copies or moves anything:
+
+- **Variables**: an old `PG_PSEUDO_*` variable is used only when its `SCARIF_*` counterpart is unset, and the server writes one deprecation warning per old variable to stderr (never its value).
+- **Config directory**: `connections.toml` and `columns.toml` are each read from `~/.config/scarif/`; when a file is absent there but present in `~/.config/pg-pseudo/`, the old one is read and a `config_location_deprecated` warning appears on stderr and in `server_info`. `connections import-dbeaver` always writes to the new directory.
+- **Data directory**: it holds the pseudonym secret, so losing it changes every pseudonym. When the new directory does not exist and the old one does, the old one keeps being used, reported by a `data_directory_deprecated` warning on stderr and in `server_info`. `mapping purge` acts on the directory in use. Once the new directory exists, it wins.
+
+To finish the migration by hand, with the server stopped (macOS shown; on Linux use `~/.local/share`):
+
+```bash
+mv ~/Library/Application\ Support/pg-pseudo-mcp ~/Library/Application\ Support/scarif-database-mcp
+```
+
+Then move `~/.config/pg-pseudo` to `~/.config/scarif`, rename the variables in your MCP registration (`claude mcp add scarif -- scarif-database-mcp`), and update your deny rules (the old and new paths are both in [docs/claude-code-deny-rules.json](docs/claude-code-deny-rules.json)).
 
 ## Development
 
@@ -259,7 +288,7 @@ docker compose up -d --wait
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-PG_PSEUDO_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test -- --include-ignored
+SCARIF_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test -- --include-ignored
 ```
 
 The two-hop SSH tests need a bastion that may open a channel to itself (`PermitOpen` in `tests/ssh/sshd_config`). After pulling a change to `tests/ssh`, rebuild the bastion once with `docker compose up -d --build ssh`.
@@ -274,11 +303,11 @@ The code lives in three contexts under `src/contexts/`, wired together in `src/c
 - `anonymization`: pseudonymizes values, translates a pseudonym back locally, purges the mapping.
 - `querying`: guards statements as read-only and answers the query, schema and explain tools.
 
-Each context documents what it does with Cucumber features written in French, in `src/contexts/<context>/test/features/`, with their steps in `src/contexts/<context>/test/steps/`. Scenarios tagged `@integration` need the docker compose database and SSH bastion; without `PG_PSEUDO_TEST_DATABASE_URL` the runner skips them and says so.
+Each context documents what it does with Cucumber features written in French, in `src/contexts/<context>/test/features/`, with their steps in `src/contexts/<context>/test/steps/`. Scenarios tagged `@integration` need the docker compose database and SSH bastion; without `SCARIF_TEST_DATABASE_URL` the runner skips them and says so.
 
 ```bash
 cargo test --test bdd
-PG_PSEUDO_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test --test bdd
+SCARIF_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test --test bdd
 ```
 
 ## Third-party data

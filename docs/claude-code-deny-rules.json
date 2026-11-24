@@ -1,10 +1,13 @@
 {
   "permissions": {
     "deny": [
+      "Read(~/Library/Application Support/scarif-database-mcp/**)",
+      "Read(~/.local/share/scarif-database-mcp/**)",
       "Read(~/Library/Application Support/pg-pseudo-mcp/**)",
       "Read(~/.local/share/pg-pseudo-mcp/**)",
       "Read(~/Library/DBeaverData/**)",
       "Read(~/.local/share/DBeaverData/**)",
+      "Edit(~/.config/scarif/**)",
       "Edit(~/.config/pg-pseudo/**)",
       "Bash(psql:*)",
       "Bash(pg_dump:*)",

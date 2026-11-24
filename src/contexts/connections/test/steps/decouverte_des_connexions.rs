@@ -1,5 +1,5 @@
 use cucumber::{given, then, when};
-use pg_pseudo_mcp::contexts::connections::presentation;
+use scarif_database_mcp::contexts::connections::presentation;
 use serde_json::Value;
 
 use crate::bdd_support::{offline_target, text_of, write_workspace};

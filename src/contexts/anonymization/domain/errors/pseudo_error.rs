@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PseudoError {
-    #[error("no data directory could be determined for pg-pseudo-mcp; set PG_PSEUDO_DATA_DIR")]
+    #[error("no data directory could be determined for scarif-database-mcp; set SCARIF_DATA_DIR")]
     NoDataDir,
     #[error("cannot {action} {}: {source}", path.display())]
     Io {
@@ -12,18 +12,18 @@ pub enum PseudoError {
         source: std::io::Error,
     },
     #[error(
-        "the pseudonym store {} exists but its secret {} is missing, so stored pseudonyms can no longer be translated back; run `pg-pseudo-mcp mapping purge` to start a new mapping",
+        "the pseudonym store {} exists but its secret {} is missing, so stored pseudonyms can no longer be translated back; run `scarif-database-mcp mapping purge` to start a new mapping",
         store.display(),
         secret.display()
     )]
     MissingSecret { store: PathBuf, secret: PathBuf },
     #[error(
-        "the pseudonym secret {} is corrupt; run `pg-pseudo-mcp mapping purge` to start a new mapping",
+        "the pseudonym secret {} is corrupt; run `scarif-database-mcp mapping purge` to start a new mapping",
         path.display()
     )]
     CorruptSecret { path: PathBuf },
     #[error(
-        "the pseudonym store {} was created with another secret; run `pg-pseudo-mcp mapping purge` to start a new mapping",
+        "the pseudonym store {} was created with another secret; run `scarif-database-mcp mapping purge` to start a new mapping",
         store.display()
     )]
     SecretMismatch { store: PathBuf },

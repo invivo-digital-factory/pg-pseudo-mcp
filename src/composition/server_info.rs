@@ -19,7 +19,7 @@ pub struct ServerInfo {
     pub warnings: Vec<InfoWarning>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InfoWarning {
     pub code: &'static str,
     pub message: String,
@@ -33,10 +33,15 @@ pub struct Limits {
 }
 
 pub const COLUMN_POLICY_IGNORED: &str = "column_policy_ignored";
+pub const CONFIG_LOCATION_DEPRECATED: &str = "config_location_deprecated";
+pub const DATA_DIRECTORY_DEPRECATED: &str = "data_directory_deprecated";
 
-pub fn server_info(column_policy_warnings: Vec<String>) -> ServerInfo {
+pub fn server_info(
+    column_policy_warnings: Vec<String>,
+    deprecations: Vec<InfoWarning>,
+) -> ServerInfo {
     ServerInfo {
-        name: env!("CARGO_PKG_NAME"),
+        name: super::server::SERVER_NAME,
         version: env!("CARGO_PKG_VERSION"),
         engines: &["postgresql"],
         defaults: Limits {
@@ -61,6 +66,7 @@ pub fn server_info(column_policy_warnings: Vec<String>) -> ServerInfo {
                 code: COLUMN_POLICY_IGNORED,
                 message,
             })
+            .chain(deprecations)
             .collect(),
     }
 }
@@ -113,7 +119,7 @@ mod unit {
 
     #[test]
     fn les_infos_serveur_exposent_les_memes_limites_que_le_module_limits() {
-        let info = server_info(Vec::new());
+        let info = server_info(Vec::new(), Vec::new());
         assert_eq!(info.defaults.max_rows, limits::DEFAULT_MAX_ROWS);
         assert_eq!(info.maxima.max_rows, limits::MAX_ROWS_CEILING);
         assert_eq!(info.maxima.max_bytes, limits::MAX_BYTES_CEILING);

@@ -8,7 +8,7 @@ pub fn tool_error(error: QueryingError) -> ToolError {
             "pseudonym_store_unavailable",
             reason,
         )
-        .with_hint("ask the developer to run pg-pseudo-mcp outside the agent to repair the pseudonym store"),
+        .with_hint("ask the developer to run scarif-database-mcp outside the agent to repair the pseudonym store"),
         QueryingError::Refused(refusal) => {
             let error = ToolError::new(
                 ErrorCategory::RefusedReadOnly,

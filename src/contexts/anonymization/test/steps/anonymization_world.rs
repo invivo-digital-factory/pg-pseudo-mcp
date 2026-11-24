@@ -1,6 +1,6 @@
 use cucumber::World;
-use pg_pseudo_mcp::common::AppConfig;
-use pg_pseudo_mcp::contexts::anonymization::injector::{
+use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::contexts::anonymization::injector::{
     AnonymizationInjector, AnonymizationUseCases, mapping_purge_handler,
 };
 

@@ -20,7 +20,7 @@ use crate::contexts::connections::infrastructure::data_sources::postgres::{
     Session, connect, connect_within,
 };
 
-const SSH_PORT_VAR: &str = "PG_PSEUDO_TEST_SSH_PORT";
+const SSH_PORT_VAR: &str = "SCARIF_TEST_SSH_PORT";
 const SSH_HOST: &str = "localhost";
 const SSH_USER: &str = "tunnel";
 const SSH_PASSWORD: &str = "tunnel";

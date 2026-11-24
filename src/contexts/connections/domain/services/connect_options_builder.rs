@@ -101,7 +101,7 @@ mod unit {
 
     #[test]
     fn un_tunnel_ssh_dbeaver_devient_un_tunnel_pg_avec_le_known_hosts_configure() {
-        let configured = PathBuf::from("/etc/pg-pseudo/known_hosts");
+        let configured = PathBuf::from("/etc/scarif/known_hosts");
         let options = connect_options(
             &tunneled(
                 SshAuth::PublicKey {
@@ -148,7 +148,7 @@ mod unit {
 
     #[test]
     fn un_saut_sans_verification_ne_porte_aucun_fichier_known_hosts() {
-        let configured = PathBuf::from("/etc/pg-pseudo/known_hosts");
+        let configured = PathBuf::from("/etc/scarif/known_hosts");
         let options = connect_options(
             &tunneled(
                 SshAuth::Password(Secret::new("ssh-pass")),

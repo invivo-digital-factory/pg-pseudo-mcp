@@ -15,14 +15,14 @@ impl McpProcess {
         let isolation = tempfile::tempdir().expect("isolation dir");
         let ssh_config = isolation.path().join("ssh_config");
         std::fs::write(&ssh_config, "").expect("empty ssh config");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_pg-pseudo-mcp"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_scarif-database-mcp"))
             .env(
-                "PG_PSEUDO_CONNECTIONS_FILE",
+                "SCARIF_CONNECTIONS_FILE",
                 isolation.path().join("absent-connections.toml"),
             )
-            .env("PG_PSEUDO_SSH_CONFIG", &ssh_config)
+            .env("SCARIF_SSH_CONFIG", &ssh_config)
             .env("RUST_LOG", "debug")
-            .env("PG_PSEUDO_DBEAVER_HOME", env!("CARGO_MANIFEST_DIR"))
+            .env("SCARIF_DBEAVER_HOME", env!("CARGO_MANIFEST_DIR"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -75,6 +75,7 @@ impl McpProcess {
                 .unwrap_or_default()
                 .contains("pseudonym")
         );
+        assert_eq!(response["result"]["serverInfo"]["name"], json!("scarif"));
         self.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
     }
 }
@@ -145,6 +146,7 @@ mod e2e {
             .as_str()
             .expect("text content");
         let info: Value = serde_json::from_str(text).expect("json body");
+        assert_eq!(info["name"], json!("scarif"));
         assert_eq!(info["defaults"]["max_rows"], json!(50));
         assert_eq!(info["maxima"]["max_rows"], json!(500));
         assert_eq!(info["maxima"]["max_bytes"], json!(65536));

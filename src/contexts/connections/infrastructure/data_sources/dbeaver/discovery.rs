@@ -30,8 +30,7 @@ pub fn discover_in(
         return Discovery {
             connections: Vec::new(),
             hint: Some(
-                "DBeaver data directory could not be located; set PG_PSEUDO_DBEAVER_HOME"
-                    .to_string(),
+                "DBeaver data directory could not be located; set SCARIF_DBEAVER_HOME".to_string(),
             ),
         };
     };
@@ -39,7 +38,7 @@ pub fn discover_in(
         return Discovery {
             connections: Vec::new(),
             hint: Some(format!(
-                "no DBeaver workspace found at {}; set PG_PSEUDO_DBEAVER_HOME to the DBeaverData directory",
+                "no DBeaver workspace found at {}; set SCARIF_DBEAVER_HOME to the DBeaverData directory",
                 root.display()
             )),
         };

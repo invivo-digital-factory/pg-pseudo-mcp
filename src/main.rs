@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
-use pg_pseudo_mcp::composition::connections_import::import_dbeaver;
-use pg_pseudo_mcp::composition::mapping_purge::mapping_purge;
-use pg_pseudo_mcp::composition::server::serve;
+use scarif_database_mcp::composition::connections_import::import_dbeaver;
+use scarif_database_mcp::composition::mapping_purge::mapping_purge;
+use scarif_database_mcp::composition::server::serve;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -31,7 +31,7 @@ async fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: pg-pseudo-mcp [serve | mapping purge [--yes] | connections import-dbeaver [--force] | --version]"
+                "usage: scarif-database-mcp [serve | mapping purge [--yes] | connections import-dbeaver [--force] | --version]"
             );
             ExitCode::from(2)
         }

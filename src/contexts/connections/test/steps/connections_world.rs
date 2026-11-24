@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use cucumber::World;
-use pg_pseudo_mcp::common::AppConfig;
-use pg_pseudo_mcp::contexts::connections::injector::ConnectionsContext;
+use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::contexts::connections::injector::ConnectionsContext;
 use serde_json::Value;
 
 #[derive(World)]

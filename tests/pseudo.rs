@@ -2,9 +2,9 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use pg_pseudo_mcp::contexts::anonymization::domain::services::pseudonymizer::Pseudonymizer;
-use pg_pseudo_mcp::contexts::anonymization::domain::types::{GeneratorConfig, Kind};
-use pg_pseudo_mcp::contexts::anonymization::infrastructure::data_sources::data_directory::open_pseudonymizer;
+use scarif_database_mcp::contexts::anonymization::domain::services::pseudonymizer::Pseudonymizer;
+use scarif_database_mcp::contexts::anonymization::domain::types::{GeneratorConfig, Kind};
+use scarif_database_mcp::contexts::anonymization::infrastructure::data_sources::data_directory::open_pseudonymizer;
 
 fn open(dir: &Path) -> Pseudonymizer {
     open_pseudonymizer(dir, GeneratorConfig::default()).expect("open pseudonymizer")
@@ -17,13 +17,13 @@ mod e2e {
     fn la_commande_de_purge_du_mapping_demande_une_confirmation() {
         let dir = tempfile::tempdir().unwrap();
         open(dir.path()).pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr");
-        let binary = env!("CARGO_BIN_EXE_pg-pseudo-mcp");
+        let binary = env!("CARGO_BIN_EXE_scarif-database-mcp");
 
         let mut refused = Command::new(binary)
             .args(["mapping", "purge"])
-            .env("PG_PSEUDO_DATA_DIR", dir.path())
+            .env("SCARIF_DATA_DIR", dir.path())
             .env(
-                "PG_PSEUDO_CONNECTIONS_FILE",
+                "SCARIF_CONNECTIONS_FILE",
                 dir.path().join("absent-connections.toml"),
             )
             .stdin(Stdio::piped())
@@ -38,9 +38,9 @@ mod e2e {
 
         let mut confirmed = Command::new(binary)
             .args(["mapping", "purge"])
-            .env("PG_PSEUDO_DATA_DIR", dir.path())
+            .env("SCARIF_DATA_DIR", dir.path())
             .env(
-                "PG_PSEUDO_CONNECTIONS_FILE",
+                "SCARIF_CONNECTIONS_FILE",
                 dir.path().join("absent-connections.toml"),
             )
             .stdin(Stdio::piped())
@@ -59,7 +59,7 @@ mod e2e {
         open(dir.path());
         let forced = Command::new(binary)
             .args(["mapping", "purge", "--yes"])
-            .env("PG_PSEUDO_DATA_DIR", dir.path())
+            .env("SCARIF_DATA_DIR", dir.path())
             .stdin(Stdio::null())
             .output()
             .unwrap();

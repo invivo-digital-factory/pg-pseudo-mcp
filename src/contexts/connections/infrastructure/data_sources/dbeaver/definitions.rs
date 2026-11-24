@@ -38,12 +38,11 @@ impl DbeaverDefinitions for DbeaverWorkspaceDefinitions {
             .clone()
             .or_else(default_dbeaver_home)
             .ok_or_else(|| {
-                "DBeaver data directory could not be located; set PG_PSEUDO_DBEAVER_HOME"
-                    .to_string()
+                "DBeaver data directory could not be located; set SCARIF_DBEAVER_HOME".to_string()
             })?;
         if !root.join("workspace6").is_dir() {
             return Err(format!(
-                "no DBeaver workspace found at {}; set PG_PSEUDO_DBEAVER_HOME to the DBeaverData directory",
+                "no DBeaver workspace found at {}; set SCARIF_DBEAVER_HOME to the DBeaverData directory",
                 root.display()
             ));
         }
