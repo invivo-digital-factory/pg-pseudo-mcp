@@ -22,6 +22,7 @@ pub struct DataDirectory {
     pub path: PathBuf,
     pub preferred: PathBuf,
     pub legacy: bool,
+    pub conflict: bool,
 }
 
 pub fn data_dir(config: &AppConfig) -> Result<PathBuf, PseudoError> {
@@ -34,28 +35,31 @@ pub fn resolve_data_dir(config: &AppConfig) -> Result<DataDirectory, PseudoError
             path: dir.clone(),
             preferred: dir.clone(),
             legacy: false,
+            conflict: false,
         });
     }
-    let named = |name: &str| {
-        directories::ProjectDirs::from("", "", name).map(|dirs| dirs.data_dir().to_path_buf())
-    };
-    let preferred = named(DIRECTORY_NAME).ok_or(PseudoError::NoDataDir)?;
-    let legacy = named(LEGACY_DIRECTORY_NAME).ok_or(PseudoError::NoDataDir)?;
-    Ok(keep_existing_legacy(preferred, legacy))
+    let root = config.data_home.as_ref().ok_or(PseudoError::NoDataDir)?;
+    Ok(keep_existing_legacy(
+        root.join(DIRECTORY_NAME),
+        root.join(LEGACY_DIRECTORY_NAME),
+    ))
 }
 
 pub fn keep_existing_legacy(preferred: PathBuf, legacy: PathBuf) -> DataDirectory {
-    if !preferred.exists() && legacy.exists() {
+    let preferred_exists = preferred.exists();
+    if legacy.exists() && (!preferred_exists || legacy.join(SECRET_FILE).exists()) {
         return DataDirectory {
             path: legacy,
             preferred,
             legacy: true,
+            conflict: preferred_exists,
         };
     }
     DataDirectory {
         path: preferred.clone(),
         preferred,
         legacy: false,
+        conflict: false,
     }
 }
 
@@ -139,6 +143,85 @@ mod unit {
             known
         );
         assert!(!preferred.exists());
+    }
+
+    fn known_pseudonym(dir: &Path) -> String {
+        open_pseudonymizer(dir, GeneratorConfig::default())
+            .unwrap()
+            .pseudonymize(Kind::Email, "alice@example.org")
+            .text
+    }
+
+    #[test]
+    fn un_nouveau_dossier_cree_par_erreur_avec_son_propre_secret_ne_remplace_pas_l_ancien() {
+        let root = tempfile::tempdir().unwrap();
+        let preferred = root.path().join("scarif-database-mcp");
+        let legacy = root.path().join("pg-pseudo-mcp");
+        let known = known_pseudonym(&legacy);
+        let accidental = known_pseudonym(&preferred);
+        assert_ne!(accidental, known);
+        let resolved = keep_existing_legacy(preferred.clone(), legacy.clone());
+        assert_eq!(resolved.path, legacy);
+        assert!(resolved.legacy && resolved.conflict);
+        assert_eq!(known_pseudonym(&resolved.path), known);
+    }
+
+    #[test]
+    fn un_nouveau_dossier_vide_ne_remplace_pas_l_ancien_qui_porte_le_secret() {
+        let root = tempfile::tempdir().unwrap();
+        let preferred = root.path().join("scarif-database-mcp");
+        let legacy = root.path().join("pg-pseudo-mcp");
+        let known = known_pseudonym(&legacy);
+        std::fs::create_dir(&preferred).unwrap();
+        let resolved = keep_existing_legacy(preferred.clone(), legacy.clone());
+        assert_eq!(resolved.path, legacy);
+        assert!(resolved.legacy && resolved.conflict);
+        assert_eq!(known_pseudonym(&resolved.path), known);
+        assert!(!preferred.join(SECRET_FILE).exists());
+    }
+
+    #[test]
+    fn le_nouveau_dossier_seul_est_utilise() {
+        let root = tempfile::tempdir().unwrap();
+        let preferred = root.path().join("scarif-database-mcp");
+        let known = known_pseudonym(&preferred);
+        let resolved = keep_existing_legacy(preferred.clone(), root.path().join("pg-pseudo-mcp"));
+        assert_eq!(resolved.path, preferred);
+        assert!(!resolved.legacy && !resolved.conflict);
+        assert_eq!(known_pseudonym(&resolved.path), known);
+    }
+
+    #[test]
+    fn un_dossier_explicite_l_emporte_meme_quand_les_deux_dossiers_portent_un_secret() {
+        let root = tempfile::tempdir().unwrap();
+        known_pseudonym(&root.path().join("scarif-database-mcp"));
+        known_pseudonym(&root.path().join("pg-pseudo-mcp"));
+        let explicit = root.path().join("explicit");
+        let config = AppConfig {
+            data_dir: Some(explicit.clone()),
+            data_home: Some(root.path().to_path_buf()),
+            ..AppConfig::default()
+        };
+        let resolved = resolve_data_dir(&config).unwrap();
+        assert_eq!(resolved.path, explicit);
+        assert!(!resolved.legacy);
+    }
+
+    #[test]
+    fn sans_dossier_explicite_ni_racine_de_donnees_aucun_dossier_n_est_resolu() {
+        assert!(matches!(
+            resolve_data_dir(&AppConfig::default()),
+            Err(PseudoError::NoDataDir)
+        ));
+    }
+
+    #[test]
+    fn la_racine_des_donnees_mene_au_meme_dossier_que_la_resolution_par_projet() {
+        let base = directories::BaseDirs::new().unwrap();
+        for name in [DIRECTORY_NAME, LEGACY_DIRECTORY_NAME] {
+            let project = directories::ProjectDirs::from("", "", name).unwrap();
+            assert_eq!(base.data_dir().join(name), project.data_dir());
+        }
     }
 
     #[test]

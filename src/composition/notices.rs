@@ -1,6 +1,6 @@
 use crate::common::AppConfig;
 use crate::composition::server_info::{
-    CONFIG_LOCATION_DEPRECATED, DATA_DIRECTORY_DEPRECATED, InfoWarning,
+    CONFIG_LOCATION_DEPRECATED, DATA_DIRECTORY_CONFLICT, DATA_DIRECTORY_DEPRECATED, InfoWarning,
 };
 use crate::contexts::anonymization::infrastructure::data_sources::data_directory::resolve_data_dir;
 use crate::contexts::connections::infrastructure::data_sources::connection_file::{
@@ -38,9 +38,25 @@ pub fn deprecation_notices(config: &AppConfig) -> Vec<InfoWarning> {
             });
         }
     }
-    if let Ok(directory) = resolve_data_dir(config)
-        && directory.legacy
-    {
+    notices.extend(data_directory_notices(config));
+    notices
+}
+
+pub fn data_directory_notices(config: &AppConfig) -> Vec<InfoWarning> {
+    let mut notices = Vec::new();
+    let Ok(directory) = resolve_data_dir(config) else {
+        return notices;
+    };
+    if directory.conflict {
+        notices.push(InfoWarning {
+            code: DATA_DIRECTORY_CONFLICT,
+            message: format!(
+                "two pseudonym data directories exist: {in_use} is in use because its secret decides the pseudonyms already seen, and {ignored} is ignored; to keep the known pseudonyms, stop the server, remove \"{ignored}\" then run: mv \"{in_use}\" \"{ignored}\"; to accept new pseudonyms instead, remove \"{in_use}\" (nothing is deleted, moved or merged automatically)",
+                in_use = directory.path.display(),
+                ignored = directory.preferred.display(),
+            ),
+        });
+    } else if directory.legacy {
         notices.push(InfoWarning {
             code: DATA_DIRECTORY_DEPRECATED,
             message: format!(

@@ -114,6 +114,7 @@ impl Harness {
             columns_file: None,
             xdg_config_home: None,
             home_dir: None,
+            data_home: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {
@@ -159,6 +160,7 @@ impl Harness {
             columns_file,
             xdg_config_home,
             home_dir: None,
+            data_home: None,
         };
         let pseudonymizer = AnonymizationInjector::new(data.path()).use_cases();
         Self {

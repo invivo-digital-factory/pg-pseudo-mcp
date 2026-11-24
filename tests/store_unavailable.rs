@@ -21,6 +21,7 @@ fn contexts_without_secret() -> (Contexts, tempfile::TempDir, tempfile::TempDir)
         columns_file: None,
         xdg_config_home: None,
         home_dir: None,
+        data_home: None,
     };
     (Contexts::new(&config), dbeaver, data)
 }

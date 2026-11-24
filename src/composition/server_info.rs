@@ -35,6 +35,7 @@ pub struct Limits {
 pub const COLUMN_POLICY_IGNORED: &str = "column_policy_ignored";
 pub const CONFIG_LOCATION_DEPRECATED: &str = "config_location_deprecated";
 pub const DATA_DIRECTORY_DEPRECATED: &str = "data_directory_deprecated";
+pub const DATA_DIRECTORY_CONFLICT: &str = "data_directory_conflict";
 
 pub fn server_info(
     column_policy_warnings: Vec<String>,

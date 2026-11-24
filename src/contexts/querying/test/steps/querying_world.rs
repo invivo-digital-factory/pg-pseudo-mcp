@@ -90,6 +90,7 @@ impl QueryingWorld {
             columns_file,
             xdg_config_home,
             home_dir: None,
+            data_home: None,
         };
         let anonymization = AnonymizationInjector::new(self._data.path()).use_cases();
         self.contexts = Some(Arc::new(Contexts::with_anonymization(

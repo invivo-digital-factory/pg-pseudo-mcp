@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub columns_file: Option<PathBuf>,
     pub xdg_config_home: Option<OsString>,
     pub home_dir: Option<PathBuf>,
+    pub data_home: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -19,10 +20,13 @@ impl AppConfig {
         for deprecation in deprecations {
             eprintln!("{deprecation}");
         }
-        config.with_user_config_dirs(
-            std::env::var_os("XDG_CONFIG_HOME"),
-            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
-        )
+        let base_dirs = directories::BaseDirs::new();
+        config
+            .with_user_config_dirs(
+                std::env::var_os("XDG_CONFIG_HOME"),
+                base_dirs.as_ref().map(|dirs| dirs.home_dir().to_path_buf()),
+            )
+            .with_data_home(base_dirs.map(|dirs| dirs.data_dir().to_path_buf()))
     }
 
     pub fn from_lookup(get: impl Fn(&str) -> Option<OsString>) -> (Self, Vec<String>) {
@@ -59,6 +63,11 @@ impl AppConfig {
         self
     }
 
+    pub fn with_data_home(mut self, data_home: Option<PathBuf>) -> Self {
+        self.data_home = data_home;
+        self
+    }
+
     pub(crate) fn from_vars(
         dbeaver_home: Option<OsString>,
         data_dir: Option<OsString>,
@@ -78,6 +87,7 @@ impl AppConfig {
             columns_file: absolute(columns_file),
             xdg_config_home: None,
             home_dir: None,
+            data_home: None,
         }
     }
 }
