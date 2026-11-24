@@ -12,7 +12,6 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 use super::decode::decode_row;
 use super::provenance::SourceCache;
 use super::tls::verified_connector;
-use super::tunnel::{SshLink, TunnelStream};
 use crate::contexts::connections::domain::constants::{
     CONNECT_DEADLINE, LOCK_TIMEOUT_MS, MAX_STATEMENT_TIMEOUT_MS,
 };
@@ -20,6 +19,7 @@ use crate::contexts::connections::domain::errors::SessionError;
 use crate::contexts::connections::domain::types::{
     ColumnMeta, ConnectOptions, DbMessage, QueryOutput, SslMode,
 };
+use crate::contexts::connections::infrastructure::data_sources::ssh::{SshLink, TunnelStream};
 use crate::contexts::connections::infrastructure::mappers::{
     db_message_from_db_error, describe_postgres_error, session_error_from_handshake,
     session_error_from_postgres,

@@ -77,25 +77,22 @@ impl SshLink {
     }
 
     pub(crate) async fn forward(&self) -> Result<TunnelStream, SessionError> {
+        self.forward_to(&self.remote_host, self.remote_port).await
+    }
+
+    pub(crate) async fn forward_to(
+        &self,
+        remote_host: &str,
+        remote_port: u16,
+    ) -> Result<TunnelStream, SessionError> {
         let last = self.handles.last().ok_or_else(|| {
             SessionError::Connect("the SSH tunnel has no hop to forward through".to_string())
         })?;
         let channel = last
-            .channel_open_direct_tcpip(
-                self.remote_host.as_str(),
-                u32::from(self.remote_port),
-                ORIGINATOR_ADDRESS,
-                0,
-            )
+            .channel_open_direct_tcpip(remote_host, u32::from(remote_port), ORIGINATOR_ADDRESS, 0)
             .await
             .map_err(|error| {
-                forward_refusal(
-                    error,
-                    &self.host,
-                    self.port,
-                    &self.remote_host,
-                    self.remote_port,
-                )
+                forward_refusal(error, &self.host, self.port, remote_host, remote_port)
             })?;
         Ok(channel.into_stream())
     }

@@ -4,4 +4,5 @@ mod dbeaver;
 mod decode;
 mod fichier;
 mod mongodb_replica;
+mod socks_front;
 mod tunnel;
