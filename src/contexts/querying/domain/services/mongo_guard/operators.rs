@@ -5,7 +5,7 @@ use super::Walker;
 use super::extended_json::is_extended_json;
 use crate::contexts::querying::domain::constants::mongo_policy::{
     EXPRESSION_OPERATORS, EXTENDED_JSON_REFUSED, FIELD_QUERY_OPERATORS, GEOMETRY_OPERATORS,
-    TEXT_OPERATORS, TOP_LEVEL_QUERY_OPERATORS,
+    META_KEYWORDS, TEXT_OPERATORS, TOP_LEVEL_QUERY_OPERATORS,
 };
 use crate::contexts::querying::domain::errors::Refusal;
 
@@ -319,6 +319,10 @@ impl Walker {
     ) -> Result<(), Refusal> {
         match operator {
             "$literal" => self.literal(argument, Some(LiteralRole::Other)),
+            "$meta" => match argument.as_str() {
+                Some(keyword) if META_KEYWORDS.contains(&keyword) => Ok(()),
+                _ => Err(self.invalid(&format!("$meta takes one of {}", META_KEYWORDS.join(", ")))),
+            },
             "$eq" | "$ne" if self.in_expr => self.expression_equality(argument),
             "$in" if self.in_expr => self.expression_membership(argument),
             "$regexMatch" | "$regexFind" | "$regexFindAll" => match argument {

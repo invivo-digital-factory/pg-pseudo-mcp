@@ -106,7 +106,7 @@ impl InspectedMongo {
                     Some(requested) if requested > 0 => requested,
                     _ => cap,
                 };
-                MongoCommand::Find(GuardedFind {
+                MongoCommand::Find(Box::new(GuardedFind {
                     filter: self
                         .root
                         .remove("filter")
@@ -117,7 +117,7 @@ impl InspectedMongo {
                     limit,
                     hint: self.root.remove("hint"),
                     collation: self.root.remove("collation"),
-                })
+                }))
             }
             None => {
                 let mut pipeline = match self.root.remove("pipeline") {

@@ -568,9 +568,15 @@ mod unit {
                 "$jsonSchema",
             ),
             (
+                "$meta avec un mot-clé hors liste",
+                json!([{"$sort": {"score": {"$meta": "sortKey"}}}]),
+                "mongo_invalid_argument",
                 "$meta",
-                json!([{"$sort": {"score": {"$meta": "textScore"}}}]),
-                "mongo_operator_not_allowed",
+            ),
+            (
+                "$meta avec une expression",
+                json!([{"$project": {"s": {"$meta": {"$function": {}}}}}]),
+                "mongo_invalid_argument",
                 "$meta",
             ),
             (
@@ -784,12 +790,12 @@ mod unit {
                 "mongo_operator_not_allowed",
             ),
             (
-                "sort $meta",
+                "sort $meta hors liste",
                 FindRequest {
-                    sort: Some(json!({"s": {"$meta": "textScore"}})),
+                    sort: Some(json!({"s": {"$meta": "searchHighlights"}})),
                     ..find(json!({}))
                 },
-                "mongo_operator_not_allowed",
+                "mongo_invalid_argument",
             ),
             (
                 "sort texte",
@@ -1153,6 +1159,72 @@ mod unit {
     }
 
     #[test]
+    fn le_score_de_recherche_textuelle_se_lit_et_se_trie_avec_meta() {
+        for keyword in ["textScore", "indexKey", "searchScore"] {
+            let request = FindRequest {
+                projection: Some(json!({"score": {"$meta": keyword}})),
+                sort: Some(json!({"score": {"$meta": keyword}})),
+                ..find(json!({"$text": {"$search": "pomme"}}))
+            };
+            let guarded = prepare_find(&request, &FakeStore::known())
+                .unwrap_or_else(|error| panic!("{keyword}: {error:?}"));
+            let MongoCommand::Find(command) = &guarded.command else {
+                panic!("a find command");
+            };
+            assert_eq!(command.sort, request.sort, "{keyword}");
+        }
+        let pipeline = json!([
+            {"$match": {"$text": {"$search": "pomme"}}},
+            {"$addFields": {"score": {"$meta": "textScore"}}},
+            {"$sort": {"score": {"$meta": "textScore"}, "_id": 1}}
+        ]);
+        assert!(prepare_aggregate(&aggregate(pipeline), &FakeStore::known()).is_ok());
+    }
+
+    #[test]
+    fn l_ordre_des_cles_d_un_tri_compose_est_conserve_jusqu_a_la_commande() {
+        let request = FindRequest {
+            sort: Some(serde_json::from_str(r#"{"b": 1, "a": -1}"#).unwrap()),
+            hint: Some(serde_json::from_str(r#"{"z": 1, "y": 1}"#).unwrap()),
+            ..find(json!({}))
+        };
+        let guarded = prepare_find(&request, &FakeStore::known()).expect("accepted");
+        let MongoCommand::Find(command) = &guarded.command else {
+            panic!("a find command");
+        };
+        let keys = |value: &Option<Value>| -> Vec<String> {
+            value
+                .as_ref()
+                .and_then(Value::as_object)
+                .map(|map| map.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(keys(&command.sort), ["b", "a"]);
+        assert_eq!(keys(&command.hint), ["z", "y"]);
+        let stage: Value = serde_json::from_str(
+            r#"{"$group": {"_id": {"y": "$y", "m": "$m"}, "n": {"$sum": 1}}}"#,
+        )
+        .unwrap();
+        let guarded = prepare_aggregate(
+            &aggregate(Value::Array(vec![
+                stage,
+                json!({"$sort": {"n": -1, "_id": 1}}),
+            ])),
+            &FakeStore::known(),
+        )
+        .expect("accepted");
+        let pipeline = pipeline_of(&guarded);
+        let group_id: Vec<&String> = pipeline[0]["$group"]["_id"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(group_id, ["y", "m"]);
+        let sort: Vec<&String> = pipeline[1]["$sort"].as_object().unwrap().keys().collect();
+        assert_eq!(sort, ["n", "_id"]);
+    }
+
+    #[test]
     fn le_let_de_l_agregation_est_verifie_comme_une_expression() {
         let request = AggregateRequest {
             let_vars: Some(json!({"seuil": {"$add": [1, 2]}})),
@@ -1212,7 +1284,15 @@ mod unit {
             "$code",
             "$codeWithScope",
             "$jsonSchema",
-            "$meta",
+            "$unsetField",
+            "$redact",
+            "$bitAnd",
+            "$sin",
+            "$bsonSize",
+            "$tsSecond",
+            "$sampleRate",
+            "$toHashedIndexKey",
+            "$bitsAllSet",
         ];
         let stage_and_operator_lists = [
             STAGES,
@@ -1240,7 +1320,7 @@ mod unit {
             33
         );
         assert_eq!(GEOMETRY_OPERATORS.len(), 7);
-        assert_eq!(EXPRESSION_OPERATORS.len(), 143);
+        assert_eq!(EXPRESSION_OPERATORS.len(), 144);
         let mut unique = EXPRESSION_OPERATORS.to_vec();
         unique.sort_unstable();
         unique.dedup();

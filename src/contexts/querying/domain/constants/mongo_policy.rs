@@ -201,6 +201,7 @@ pub const EXPRESSION_OPERATORS: &[&str] = &[
     "$let",
     "$literal",
     "$rand",
+    "$meta",
     "$sum",
     "$avg",
     "$min",
@@ -228,6 +229,8 @@ pub const EXPRESSION_OPERATORS: &[&str] = &[
     "$locf",
     "$linearFill",
 ];
+
+pub const META_KEYWORDS: &[&str] = &["textScore", "indexKey", "searchScore"];
 
 pub const EXTENDED_JSON_TYPES: &[&str] = &[
     "$oid",

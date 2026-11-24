@@ -16,7 +16,7 @@ pub struct GuardedMongo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MongoCommand {
-    Find(GuardedFind),
+    Find(Box<GuardedFind>),
     Aggregate(GuardedAggregate),
 }
 
