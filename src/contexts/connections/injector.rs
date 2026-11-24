@@ -13,6 +13,7 @@ use crate::contexts::connections::infrastructure::data_sources::openssh::{
     LocalEnvironment, OpenSshAliasDirectory, OpenSshResolver, SshCommand,
 };
 use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
+use crate::contexts::connections::infrastructure::data_sources::pgpass;
 use crate::contexts::connections::infrastructure::repositories::{
     CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog,
     FileConnectionCatalog, LayeredConnectionCatalog, PostgresSessionPool, TomlColumnPolicyFiles,
@@ -59,18 +60,23 @@ pub fn import_dbeaver_use_case(config: &AppConfig) -> ImportDbeaverConnections {
 
 impl ConnectionsContext {
     pub fn new(config: &AppConfig) -> Self {
-        Self::with_azure_cli(config, AzureCli::from_path())
+        Self::with_azure_cli(config, AzureCli::from_path(), pgpass::default_path())
     }
 
     #[cfg(test)]
     pub(crate) fn with_azure_command(
         config: &AppConfig,
         command: Option<std::path::PathBuf>,
+        pgpass_file: Option<std::path::PathBuf>,
     ) -> Self {
-        Self::with_azure_cli(config, AzureCli::new(command))
+        Self::with_azure_cli(config, AzureCli::new(command), pgpass_file)
     }
 
-    fn with_azure_cli(config: &AppConfig, cli: AzureCli) -> Self {
+    fn with_azure_cli(
+        config: &AppConfig,
+        cli: AzureCli,
+        pgpass_file: Option<std::path::PathBuf>,
+    ) -> Self {
         let tokens: Arc<dyn AzureSignInTokenProvider> = Arc::new(CachedAzureSignInTokens::new(
             Arc::new(cli),
             Arc::new(SystemClock),
@@ -84,8 +90,13 @@ impl ConnectionsContext {
         ));
         let resolver = Arc::new(OpenSshResolver::new(dump, environment, aliases));
         let catalog = Arc::new(LayeredConnectionCatalog::new(
-            FileConnectionCatalog::new(config.connections_file.clone(), tokens.clone(), resolver),
-            DbeaverConnectionCatalog::new(config.dbeaver_home.clone(), tokens.clone()),
+            FileConnectionCatalog::new(
+                config.connections_file.clone(),
+                tokens.clone(),
+                pgpass_file.clone(),
+                resolver,
+            ),
+            DbeaverConnectionCatalog::new(config.dbeaver_home.clone(), tokens.clone(), pgpass_file),
         ));
         let commands: Arc<dyn CommandPasswordProvider> = Arc::new(CachedCommandPasswords::new(
             Arc::new(ProcessPasswordCommand::new()),

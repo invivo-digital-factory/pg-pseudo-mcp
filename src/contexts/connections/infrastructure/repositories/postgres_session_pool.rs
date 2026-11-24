@@ -340,6 +340,7 @@ mod integration {
             Arc::new(DbeaverConnectionCatalog::new(
                 Some(root.to_path_buf()),
                 Arc::new(NoTokens),
+                None,
             )),
             None,
             Arc::new(NoTokens),

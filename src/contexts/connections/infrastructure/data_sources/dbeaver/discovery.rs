@@ -14,13 +14,18 @@ pub fn default_dbeaver_home() -> Option<PathBuf> {
     }
 }
 
-pub fn discover(dbeaver_home: Option<&Path>, tokens: &dyn AzureSignInTokenProvider) -> Discovery {
-    discover_in(dbeaver_home, tokens, None)
+pub fn discover(
+    dbeaver_home: Option<&Path>,
+    tokens: &dyn AzureSignInTokenProvider,
+    pgpass_file: Option<&Path>,
+) -> Discovery {
+    discover_in(dbeaver_home, tokens, pgpass_file, None)
 }
 
 pub fn discover_in(
     dbeaver_home: Option<&Path>,
     tokens: &dyn AzureSignInTokenProvider,
+    pgpass_file: Option<&Path>,
     database: Option<&str>,
 ) -> Discovery {
     let Some(root) = dbeaver_home
@@ -43,7 +48,7 @@ pub fn discover_in(
             )),
         };
     }
-    let mut connections = workspace::load(&root, tokens, database);
+    let mut connections = workspace::load(&root, tokens, pgpass_file, database);
     disambiguate(&mut connections);
     connections.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     let hint = connections

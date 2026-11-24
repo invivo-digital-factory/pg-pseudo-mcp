@@ -31,10 +31,12 @@ pub(super) const UNREADABLE_REASON: &str = "data-sources file is not valid JSON 
 pub fn load(
     root: &Path,
     tokens: &dyn AzureSignInTokenProvider,
+    pgpass_file: Option<&Path>,
     database: Option<&str>,
 ) -> Vec<ConnectionEntry> {
     let lookup = Lookup {
         sign_in: SignIn::new(tokens),
+        pgpass_file,
         database,
     };
     let mut entries = Vec::new();
@@ -84,6 +86,7 @@ pub(super) fn data_source_files(dir: &Path) -> Vec<(String, PathBuf)> {
 
 struct Lookup<'a> {
     sign_in: SignIn<'a>,
+    pgpass_file: Option<&'a Path>,
     database: Option<&'a str>,
 }
 
@@ -338,8 +341,12 @@ fn evaluate(
             database: &database,
             user: &user,
         };
-        let password =
-            pgpass_or_azure_token(&target, is_azure_postgres_host(&host), &lookup.sign_in)?;
+        let password = pgpass_or_azure_token(
+            &target,
+            is_azure_postgres_host(&host),
+            lookup.pgpass_file,
+            &lookup.sign_in,
+        )?;
         (user, password)
     } else {
         let password = text(configuration, "password")

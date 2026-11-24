@@ -19,6 +19,7 @@ pub struct FileLoad {
 pub struct FileConnectionCatalog {
     configured: Option<PathBuf>,
     tokens: Arc<dyn AzureSignInTokenProvider>,
+    pgpass_file: Option<PathBuf>,
     resolver: Arc<OpenSshResolver>,
 }
 
@@ -26,11 +27,13 @@ impl FileConnectionCatalog {
     pub fn new(
         configured: Option<PathBuf>,
         tokens: Arc<dyn AzureSignInTokenProvider>,
+        pgpass_file: Option<PathBuf>,
         resolver: Arc<OpenSshResolver>,
     ) -> Self {
         Self {
             configured,
             tokens,
+            pgpass_file,
             resolver,
         }
     }
@@ -88,7 +91,12 @@ impl FileConnectionCatalog {
                 return load;
             }
         };
-        let evaluator = FileEvaluator::new(self.tokens.as_ref(), &self.resolver, database);
+        let evaluator = FileEvaluator::new(
+            self.tokens.as_ref(),
+            self.pgpass_file.as_deref(),
+            &self.resolver,
+            database,
+        );
         load.discovery.connections = parsed
             .entries
             .iter()

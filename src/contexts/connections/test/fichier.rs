@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use super::dbeaver::PGPASS_ENV;
 use crate::common::AppConfig;
 use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::services::resolve_connection;
@@ -39,7 +38,6 @@ impl Setup {
         let pgpass = dir.path().join("pgpass");
         fs::write(&pgpass, pgpass_line).unwrap();
         fs::set_permissions(&pgpass, fs::Permissions::from_mode(0o600)).unwrap();
-        unsafe { std::env::set_var("PGPASSFILE", &pgpass) };
         Self { dir }
     }
 
@@ -75,7 +73,12 @@ impl Setup {
             LocalEnvironment::default(),
             aliases,
         ));
-        FileConnectionCatalog::new(Some(self.file()), tokens, resolver)
+        FileConnectionCatalog::new(
+            Some(self.file()),
+            tokens,
+            Some(self.dir.path().join("pgpass")),
+            resolver,
+        )
     }
 
     fn discover(&self) -> Discovery {
@@ -109,7 +112,6 @@ fn reason_of(entry: &ConnectionEntry) -> String {
 
 #[test]
 fn une_connexion_azure_sans_az_connecte_ni_entree_pgpass_demande_az_login() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new(LOGGED_OUT_AZ, "# empty\n");
     setup.write(&azure_entry(AZURE_HOST));
     let shop = entry(&setup.discover(), "shop");
@@ -120,7 +122,6 @@ fn une_connexion_azure_sans_az_connecte_ni_entree_pgpass_demande_az_login() {
 #[test]
 fn une_connexion_azure_declaree_sur_un_hote_hors_azure_ne_lance_jamais_az_et_n_envoie_aucun_jeton()
 {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let marker = TempDir::new().unwrap();
     let body = format!("touch {}/az-ran\n{WORKING_AZ}", marker.path().display());
     let setup = Setup::new(&body, "# empty\n");
@@ -209,7 +210,6 @@ fn resoudre_une_connexion_mongodb_est_refuse_avec_un_motif_fixe_de_moteur_non_pr
 
 #[test]
 fn une_connexion_azure_sur_un_hote_azure_ou_prive_prend_le_jeton_et_impose_tls() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new(WORKING_AZ, "# empty\n");
     for host in [AZURE_HOST, "shop.privatelink.postgres.database.azure.com"] {
         setup.write(&azure_entry(host));
@@ -222,7 +222,6 @@ fn une_connexion_azure_sur_un_hote_azure_ou_prive_prend_le_jeton_et_impose_tls()
 
 #[test]
 fn en_mode_pgpass_le_mot_de_passe_est_apparie_sur_l_hote_ecrit_dans_le_fichier() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new(
         "exit 1",
         "db.internal.example:5432:app:reader:file-secret\n",
@@ -241,7 +240,6 @@ fn en_mode_pgpass_le_mot_de_passe_est_apparie_sur_l_hote_ecrit_dans_le_fichier()
 
 #[test]
 fn sans_ssh_dans_le_path_seules_les_connexions_a_alias_sont_indisponibles() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     setup.write(
         "[[connection]]\nname = \"tunneled\"\nhost = \"db\"\nuser = \"u\"\ntype = \"dev\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]\nssh_alias = \"bastion\"\n\n[[connection]]\nname = \"direct\"\nhost = \"db\"\nuser = \"u\"\ntype = \"dev\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]\n",
@@ -256,7 +254,6 @@ fn sans_ssh_dans_le_path_seules_les_connexions_a_alias_sont_indisponibles() {
 
 #[test]
 fn les_modifications_du_fichier_sont_prises_au_prochain_appel_sans_redemarrage() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     let command_entry = |name: &str| {
         format!(
@@ -283,7 +280,6 @@ fn les_modifications_du_fichier_sont_prises_au_prochain_appel_sans_redemarrage()
 
 #[test]
 fn un_fichier_nomme_par_la_variable_et_absent_est_signale_avec_son_chemin() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     let load = setup.catalog_with(None).load(None);
     let hint = load.discovery.hint.expect("hint");
@@ -295,7 +291,6 @@ fn un_fichier_nomme_par_la_variable_et_absent_est_signale_avec_son_chemin() {
 
 #[test]
 fn un_fichier_illisible_comme_toml_est_signale_avec_sa_ligne_et_bloque_dbeaver() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     setup.write("[[connection]]\nname = \"a\" \"b\"\n");
     let load = setup.catalog_with(None).load(None);
@@ -388,7 +383,6 @@ fn tunneled_discovery(setup: &Setup, ssh_config: &str, alias: &str) -> Discovery
 
 #[test]
 fn un_alias_absent_de_la_configuration_ssh_est_indisponible_et_aucun_processus_ne_se_lance() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     let discovery = tunneled_discovery(&setup, "Host other\n  HostName x\n", "ghost");
     let tunneled = entry(&discovery, "tunneled");
@@ -402,7 +396,6 @@ fn un_alias_absent_de_la_configuration_ssh_est_indisponible_et_aucun_processus_n
 
 #[test]
 fn un_alias_defini_par_un_bloc_exact_un_motif_ou_un_include_est_disponible() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     let included = setup.dir.path().join("included.conf");
     fs::write(&included, "Host from-include\n").unwrap();
@@ -422,7 +415,6 @@ fn un_alias_defini_par_un_bloc_exact_un_motif_ou_un_include_est_disponible() {
 
 #[test]
 fn un_bloc_host_etoile_et_un_motif_nie_ne_definissent_pas_l_alias() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     for (config, alias) in [
         ("Host *\n  User x\n", "ghost"),
@@ -439,7 +431,6 @@ fn un_bloc_host_etoile_et_un_motif_nie_ne_definissent_pas_l_alias() {
 
 #[test]
 fn un_saut_proxyjump_litteral_n_exige_pas_de_bloc_host_mais_l_alias_de_l_entree_oui() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = Setup::new("exit 1", "# empty\n");
     let present = tunneled_discovery(&setup, "Host app\n", "app");
     assert_eq!(

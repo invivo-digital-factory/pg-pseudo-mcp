@@ -67,24 +67,22 @@ fn by_name(discovery: &Discovery, name: &str) -> ConnectionEntry {
 }
 
 fn shop(setup: &Setup) -> ConnectionEntry {
-    let discovery = discover_with(Some(setup.home.path()), tokens(setup).as_ref());
+    let discovery = discover_with(
+        Some(setup.home.path()),
+        tokens(setup).as_ref(),
+        Some(&setup.pgpass),
+    );
     by_name(&discovery, "Shop")
-}
-
-fn use_pgpass(setup: &Setup) {
-    unsafe { std::env::set_var("PGPASSFILE", &setup.pgpass) };
 }
 
 #[test]
 fn un_serveur_azure_en_pgpass_prend_le_jeton_du_cli_meme_si_pgpass_a_une_entree() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         AZURE_HOST,
         pgpass_model(),
         Some(MATCHING_PGPASS),
         WORKING_AZ,
     );
-    use_pgpass(&setup);
     let entry = shop(&setup);
     assert_eq!(entry.status, ConnectionStatus::Available, "{entry:?}");
     let params = entry.params.unwrap();
@@ -94,23 +92,19 @@ fn un_serveur_azure_en_pgpass_prend_le_jeton_du_cli_meme_si_pgpass_a_une_entree(
 
 #[test]
 fn un_serveur_azure_en_pgpass_sans_entree_pgpass_utilise_le_jeton_du_cli() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(AZURE_HOST, pgpass_model(), None, WORKING_AZ);
-    use_pgpass(&setup);
     let params = shop(&setup).params.expect("available");
     assert_eq!(params.password.expose(), "entra-token-1");
 }
 
 #[test]
 fn un_az_en_echec_retombe_sur_l_entree_pgpass_quand_elle_correspond() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         AZURE_HOST,
         pgpass_model(),
         Some(MATCHING_PGPASS),
         LOGGED_OUT_AZ,
     );
-    use_pgpass(&setup);
     let entry = shop(&setup);
     assert_eq!(entry.status, ConnectionStatus::Available, "{entry:?}");
     let params = entry.params.unwrap();
@@ -120,15 +114,16 @@ fn un_az_en_echec_retombe_sur_l_entree_pgpass_quand_elle_correspond() {
 
 #[test]
 fn list_connections_demande_az_login_quand_az_echoue_et_que_pgpass_ne_correspond_pas() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let home_dir = std::env::var("HOME").unwrap();
     let failing = format!(
         "echo \"ERROR: cannot read {home_dir}/.azure/msal_token_cache; run az login\" >&2\necho 'second-line-canary' >&2\nexit 1"
     );
     let setup = setup(AZURE_HOST, pgpass_model(), None, &failing);
-    use_pgpass(&setup);
-    let catalog =
-        DbeaverConnectionCatalog::new(Some(setup.home.path().to_path_buf()), tokens(&setup));
+    let catalog = DbeaverConnectionCatalog::new(
+        Some(setup.home.path().to_path_buf()),
+        tokens(&setup),
+        Some(setup.pgpass.clone()),
+    );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
@@ -153,10 +148,8 @@ fn list_connections_demande_az_login_quand_az_echoue_et_que_pgpass_ne_correspond
 
 #[test]
 fn un_az_absent_donne_une_raison_qui_demande_de_l_installer_puis_de_se_connecter() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(AZURE_HOST, pgpass_model(), None, WORKING_AZ);
-    use_pgpass(&setup);
-    let discovery = discover_with(Some(setup.home.path()), &NoTokens);
+    let discovery = discover_with(Some(setup.home.path()), &NoTokens, Some(&setup.pgpass));
     let entry = by_name(&discovery, "Shop");
     assert!(reason(&entry.status).contains("not found on PATH"));
     assert!(reason(&entry.status).contains("az login"));
@@ -164,14 +157,12 @@ fn un_az_absent_donne_une_raison_qui_demande_de_l_installer_puis_de_se_connecter
 
 #[test]
 fn un_hote_hors_azure_en_pgpass_n_appelle_jamais_az() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         "db.internal.example",
         pgpass_model(),
         Some("db.internal.example:5433:shop:dev@corp.example:plain-secret\n"),
         "touch \"$0.called\"\nexit 1",
     );
-    use_pgpass(&setup);
     let params = shop(&setup).params.expect("available");
     assert_eq!(params.password.expose(), "plain-secret");
     assert!(!params.password.is_azure_token());
@@ -180,7 +171,6 @@ fn un_hote_hors_azure_en_pgpass_n_appelle_jamais_az() {
 
 #[test]
 fn un_serveur_azure_en_authentification_native_n_appelle_jamais_az() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         AZURE_HOST,
         json!({ "configuration": { "password": "native-secret" } }),
@@ -195,14 +185,12 @@ fn un_serveur_azure_en_authentification_native_n_appelle_jamais_az() {
 
 #[test]
 fn un_seul_appel_a_az_sert_toutes_les_connexions_azure_d_une_decouverte() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         AZURE_HOST,
         pgpass_model(),
         None,
         "echo x >> \"$0.count\"\nexit 1",
     );
-    use_pgpass(&setup);
     write_project(
         setup.home.path(),
         "General",
@@ -213,7 +201,11 @@ fn un_seul_appel_a_az_sert_toutes_les_connexions_azure_d_une_decouverte() {
         })),
         None,
     );
-    let discovery = discover_with(Some(setup.home.path()), tokens(&setup).as_ref());
+    let discovery = discover_with(
+        Some(setup.home.path()),
+        tokens(&setup).as_ref(),
+        Some(&setup.pgpass),
+    );
     assert_eq!(discovery.connections.len(), 2);
     let count = fs::read_to_string(setup.bin.path().join("az.count")).unwrap();
     assert_eq!(count.lines().count(), 1);
@@ -223,7 +215,6 @@ fn azure_pgpass_sslmode(extra: Value) -> SslMode {
     let mut model = pgpass_model();
     merge(&mut model, extra);
     let setup = setup(AZURE_HOST, model, None, WORKING_AZ);
-    use_pgpass(&setup);
     let params = shop(&setup).params.expect("available");
     assert!(params.password.is_azure_token());
     params.sslmode
@@ -231,13 +222,11 @@ fn azure_pgpass_sslmode(extra: Value) -> SslMode {
 
 #[test]
 fn un_jeton_azure_sans_sslmode_impose_tls() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     assert_eq!(azure_pgpass_sslmode(json!({})), SslMode::Require);
 }
 
 #[test]
 fn un_jeton_azure_avec_sslmode_disable_allow_ou_prefer_impose_tls() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     for mode in ["disable", "allow", "prefer"] {
         let extra = json!({ "configuration": { "provider-properties": { "sslmode": mode } } });
         assert_eq!(azure_pgpass_sslmode(extra), SslMode::Require, "{mode}");
@@ -246,34 +235,29 @@ fn un_jeton_azure_avec_sslmode_disable_allow_ou_prefer_impose_tls() {
 
 #[test]
 fn un_jeton_azure_garde_une_verification_plus_stricte_que_require() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let extra = json!({ "configuration": { "provider-properties": { "sslmode": "verify-full" } } });
     assert_eq!(azure_pgpass_sslmode(extra), SslMode::VerifyFull);
 }
 
 #[test]
 fn un_mot_de_passe_pgpass_hors_azure_garde_prefer() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         "db.internal.example",
         pgpass_model(),
         Some("db.internal.example:5433:shop:dev@corp.example:plain-secret\n"),
         WORKING_AZ,
     );
-    use_pgpass(&setup);
     assert_eq!(shop(&setup).params.unwrap().sslmode, SslMode::Prefer);
 }
 
 #[test]
 fn deux_decouvertes_rapprochees_apres_un_echec_de_az_n_appellent_az_qu_une_fois() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(
         AZURE_HOST,
         pgpass_model(),
         None,
         "echo x >> \"$0.count\"\nexit 1",
     );
-    use_pgpass(&setup);
     write_project(
         setup.home.path(),
         "General",
@@ -287,8 +271,16 @@ fn deux_decouvertes_rapprochees_apres_un_echec_de_az_n_appellent_az_qu_une_fois(
         None,
     );
     let tokens = tokens(&setup);
-    let first = discover_with(Some(setup.home.path()), tokens.as_ref());
-    let second = discover_with(Some(setup.home.path()), tokens.as_ref());
+    let first = discover_with(
+        Some(setup.home.path()),
+        tokens.as_ref(),
+        Some(&setup.pgpass),
+    );
+    let second = discover_with(
+        Some(setup.home.path()),
+        tokens.as_ref(),
+        Some(&setup.pgpass),
+    );
     assert_eq!(by_name(&first, "Plain").status, ConnectionStatus::Available);
     assert_eq!(
         by_name(&second, "Plain").status,
@@ -317,9 +309,7 @@ fn mixed_workspace(setup: &Setup) {
 
 #[test]
 fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
-    use_pgpass(&setup);
     mixed_workspace(&setup);
     let ssh_config = setup.home.path().join("ssh_config");
     fs::write(&ssh_config, "").unwrap();
@@ -336,6 +326,7 @@ fn list_connections_ne_bloque_pas_le_runtime_pendant_que_az_repond() {
             data_home: None,
         },
         Some(setup.bin.path().join("az")),
+        Some(setup.pgpass.clone()),
     );
     let use_case = &context.list_connections;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -367,15 +358,14 @@ fn une_requete_sur_une_connexion_hors_azure_ne_bloque_pas_le_runtime_pendant_que
         CachedCommandPasswords, PostgresSessionPool,
     };
 
-    let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let setup = setup(AZURE_HOST, pgpass_model(), None, SLOW_AZ);
-    use_pgpass(&setup);
     mixed_workspace(&setup);
     let tokens = tokens(&setup);
     let pool = PostgresSessionPool::new(
         Arc::new(DbeaverConnectionCatalog::new(
             Some(setup.home.path().to_path_buf()),
             tokens.clone(),
+            Some(setup.pgpass.clone()),
         )),
         None,
         tokens,
