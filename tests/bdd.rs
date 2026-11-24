@@ -19,6 +19,8 @@ mod fichier_de_connexions;
 mod import_dbeaver;
 #[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
 mod lecture_seule;
+#[path = "../src/contexts/querying/test/steps/lecture_seule_mongodb.rs"]
+mod lecture_seule_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_champs_mongodb.rs"]
 mod politique_de_champs_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_colonnes.rs"]
@@ -31,6 +33,8 @@ mod pseudonymisation_des_documents;
 mod rebond_ssh;
 #[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme.rs"]
 mod suivi_par_pseudonyme;
+#[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme_mongodb.rs"]
+mod suivi_par_pseudonyme_mongodb;
 #[path = "../src/contexts/connections/test/steps/tunnel_ssh.rs"]
 mod tunnel_ssh;
 

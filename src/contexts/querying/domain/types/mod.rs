@@ -1,3 +1,4 @@
+pub mod aggregate_request;
 pub mod anonymized_rows;
 pub mod catalog_column;
 pub mod cell;
@@ -18,7 +19,9 @@ pub mod execution_limits;
 pub mod explain;
 pub mod field_policy_hint;
 pub mod field_source;
+pub mod find_request;
 pub mod guarded;
+pub mod guarded_mongo;
 pub mod lineage;
 pub mod list_databases;
 pub mod list_tables;
@@ -38,6 +41,7 @@ pub mod translations;
 pub mod truncation;
 pub mod warning;
 
+pub use aggregate_request::AggregateRequest;
 pub use anonymized_rows::AnonymizedRows;
 pub use catalog_column::CatalogColumn;
 pub use cell::Cell;
@@ -60,7 +64,11 @@ pub use execution_limits::ExecutionLimits;
 pub use explain::{ExplainRequest, ExplainResponse};
 pub use field_policy_hint::FieldPolicyHint;
 pub use field_source::FieldSource;
+pub use find_request::FindRequest;
 pub use guarded::Guarded;
+pub use guarded_mongo::{
+    GuardedAggregate, GuardedFind, GuardedMongo, MongoCommand, MongoExecution, MongoReadPreference,
+};
 pub use lineage::Lineage;
 pub use list_databases::{DatabaseListing, ListDatabasesRequest};
 pub use list_tables::{ListResponse, ListTablesRequest, TableEntry};
