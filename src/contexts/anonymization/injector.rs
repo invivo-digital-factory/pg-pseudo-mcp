@@ -9,6 +9,7 @@ use crate::contexts::anonymization::infrastructure::data_sources::data_directory
 };
 use crate::contexts::anonymization::infrastructure::repositories::file_mapping_purger::FileMappingPurger;
 use crate::contexts::anonymization::presentation::mapping_purge::MappingPurgeHandler;
+use crate::contexts::anonymization::use_cases::anonymize_documents::AnonymizeDocuments;
 use crate::contexts::anonymization::use_cases::anonymize_free_text::AnonymizeFreeText;
 use crate::contexts::anonymization::use_cases::anonymize_message::AnonymizeMessage;
 use crate::contexts::anonymization::use_cases::anonymize_plan::AnonymizePlan;
@@ -21,6 +22,7 @@ use crate::contexts::anonymization::use_cases::translate_pseudonym::TranslatePse
 #[derive(Clone)]
 pub struct AnonymizationUseCases {
     pub anonymize_result_set: AnonymizeResultSet,
+    pub anonymize_documents: AnonymizeDocuments,
     pub anonymize_free_text: AnonymizeFreeText,
     pub anonymize_message: AnonymizeMessage,
     pub anonymize_plan: AnonymizePlan,
@@ -67,6 +69,7 @@ impl AnonymizationInjector {
 fn use_cases_over(pseudonymizer: Arc<Pseudonymizer>) -> AnonymizationUseCases {
     AnonymizationUseCases {
         anonymize_result_set: AnonymizeResultSet::new(Arc::clone(&pseudonymizer)),
+        anonymize_documents: AnonymizeDocuments::new(Arc::clone(&pseudonymizer)),
         anonymize_free_text: AnonymizeFreeText::new(Arc::clone(&pseudonymizer)),
         anonymize_message: AnonymizeMessage::new(Arc::clone(&pseudonymizer)),
         anonymize_plan: AnonymizePlan::new(Arc::clone(&pseudonymizer)),

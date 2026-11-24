@@ -1,5 +1,8 @@
 use cucumber::World;
 use scarif_database_mcp::common::AppConfig;
+use scarif_database_mcp::contexts::anonymization::domain::types::{
+    AnonymizedDocuments, FieldClearance, FieldPath, Node,
+};
 use scarif_database_mcp::contexts::anonymization::injector::{
     AnonymizationInjector, AnonymizationUseCases, mapping_purge_handler,
 };
@@ -10,6 +13,10 @@ pub struct AnonymizationWorld {
     pub data_dir: tempfile::TempDir,
     pub pseudonyms: Vec<String>,
     pub translation: Option<Option<String>>,
+    pub document: Option<Node>,
+    pub clearances: Vec<(FieldPath, FieldClearance)>,
+    pub anonymized: Option<AnonymizedDocuments>,
+    pub row_pseudonym: Option<String>,
 }
 
 impl std::fmt::Debug for AnonymizationWorld {
@@ -18,6 +25,8 @@ impl std::fmt::Debug for AnonymizationWorld {
             .debug_struct("AnonymizationWorld")
             .field("pseudonyms", &self.pseudonyms)
             .field("translation", &self.translation)
+            .field("document", &self.document)
+            .field("row_pseudonym", &self.row_pseudonym)
             .finish_non_exhaustive()
     }
 }
@@ -28,6 +37,10 @@ impl AnonymizationWorld {
             data_dir: tempfile::tempdir().expect("data dir"),
             pseudonyms: Vec::new(),
             translation: None,
+            document: None,
+            clearances: Vec::new(),
+            anonymized: None,
+            row_pseudonym: None,
         }
     }
 

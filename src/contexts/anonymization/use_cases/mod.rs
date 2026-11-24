@@ -1,3 +1,4 @@
+pub mod anonymize_documents;
 pub mod anonymize_free_text;
 pub mod anonymize_message;
 pub mod anonymize_plan;

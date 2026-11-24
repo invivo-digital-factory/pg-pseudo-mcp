@@ -22,12 +22,13 @@ fn type_family(type_name: &str) -> TypeFamily {
         .unwrap_or(&lower);
     let base = element.split('(').next().unwrap_or(element).trim();
     match base {
-        "bool" | "boolean" | "uuid" | "interval" | "enum" | "anyenum" => TypeFamily::AlwaysClear,
+        "bool" | "boolean" | "uuid" | "interval" | "enum" | "anyenum" | "objectid" => {
+            TypeFamily::AlwaysClear
+        }
         "int2" | "int4" | "int8" | "smallint" | "integer" | "int" | "bigint" | "numeric"
         | "decimal" | "real" | "float4" | "float8" | "double precision" | "money" | "oid"
-        | "smallserial" | "serial" | "bigserial" | "serial2" | "serial4" | "serial8" => {
-            TypeFamily::Numeric
-        }
+        | "smallserial" | "serial" | "bigserial" | "serial2" | "serial4" | "serial8" | "long"
+        | "double" => TypeFamily::Numeric,
         "date" | "time" | "timetz" => TypeFamily::Temporal,
         _ if base.starts_with("timestamp") || base.starts_with("time ") => TypeFamily::Temporal,
         _ => TypeFamily::Other,
@@ -35,8 +36,15 @@ fn type_family(type_name: &str) -> TypeFamily {
 }
 
 pub fn classify_column(info: &ColumnInfo) -> ColumnClass {
-    let dictionary = info.column_name.and_then(dictionary_kind);
-    let (forced_kind, clear_by_type) = match type_family(info.type_name) {
+    classify_named(
+        info.column_name.and_then(dictionary_kind),
+        info.type_name,
+        info.derived,
+    )
+}
+
+pub fn classify_named(dictionary: Option<Kind>, type_name: &str, derived: bool) -> ColumnClass {
+    let (forced_kind, clear_by_type) = match type_family(type_name) {
         TypeFamily::AlwaysClear => (None, true),
         TypeFamily::Numeric => (dictionary, dictionary.is_none()),
         TypeFamily::Temporal if dictionary == Some(Kind::BirthDate) => (dictionary, false),
@@ -46,7 +54,7 @@ pub fn classify_column(info: &ColumnInfo) -> ColumnClass {
     ColumnClass {
         forced_kind,
         clear_by_type,
-        derived: info.derived,
+        derived,
         structural_only: false,
         forced_by_policy: false,
     }
@@ -151,6 +159,18 @@ mod unit {
         assert_eq!(type_family("bool"), TypeFamily::AlwaysClear);
         assert_eq!(type_family("text[]"), TypeFamily::Other);
         assert_eq!(type_family("jsonb"), TypeFamily::Other);
+    }
+
+    #[test]
+    fn les_types_bson_rejoignent_les_familles_existantes() {
+        assert_eq!(type_family("objectId"), TypeFamily::AlwaysClear);
+        assert_eq!(type_family("bool"), TypeFamily::AlwaysClear);
+        assert_eq!(type_family("int"), TypeFamily::Numeric);
+        assert_eq!(type_family("long"), TypeFamily::Numeric);
+        assert_eq!(type_family("double"), TypeFamily::Numeric);
+        assert_eq!(type_family("decimal"), TypeFamily::Numeric);
+        assert_eq!(type_family("date"), TypeFamily::Temporal);
+        assert_eq!(type_family("string"), TypeFamily::Other);
     }
 
     #[test]

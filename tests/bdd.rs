@@ -23,6 +23,8 @@ mod lecture_seule;
 mod politique_de_colonnes;
 #[path = "../src/contexts/anonymization/test/steps/pseudonymisation.rs"]
 mod pseudonymisation;
+#[path = "../src/contexts/anonymization/test/steps/pseudonymisation_des_documents.rs"]
+mod pseudonymisation_des_documents;
 #[path = "../src/contexts/connections/test/steps/rebond_ssh.rs"]
 mod rebond_ssh;
 #[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme.rs"]
