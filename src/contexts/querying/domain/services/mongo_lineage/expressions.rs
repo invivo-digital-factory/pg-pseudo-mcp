@@ -41,6 +41,19 @@ pub fn field_path(text: &str) -> Option<Vec<String>> {
         .then_some(segments)
 }
 
+pub fn is_extended_json(map: &Map<String, Value>) -> bool {
+    map.keys()
+        .any(|key| EXTENDED_JSON_TYPES.contains(&key.as_str()))
+}
+
+pub fn single_entry(map: &Map<String, Value>) -> Option<(&String, &Value)> {
+    let mut entries = map.iter();
+    match (entries.next(), entries.next()) {
+        (Some(entry), None) => Some(entry),
+        _ => None,
+    }
+}
+
 pub fn is_document_literal(map: &Map<String, Value>) -> bool {
     !map.is_empty() && !map.keys().any(|key| key.starts_with('$'))
 }
@@ -55,12 +68,7 @@ fn variable(name: &str) -> Shape {
 }
 
 fn object(map: &Map<String, Value>, document: &Shape) -> Shape {
-    if map.is_empty()
-        || (map.len() == 1
-            && map
-                .keys()
-                .all(|key| EXTENDED_JSON_TYPES.contains(&key.as_str())))
-    {
+    if map.is_empty() || (map.len() == 1 && is_extended_json(map)) {
         return Shape::constant();
     }
     if is_document_literal(map) {
@@ -73,10 +81,9 @@ fn object(map: &Map<String, Value>, document: &Shape) -> Shape {
         }
         return built;
     }
-    let mut entries = map.iter();
-    match (entries.next(), entries.next()) {
-        (Some((name, argument)), None) => operator(name, argument, document),
-        _ => Shape::unknown(),
+    match single_entry(map) {
+        Some((name, argument)) => operator(name, argument, document),
+        None => Shape::unknown(),
     }
 }
 

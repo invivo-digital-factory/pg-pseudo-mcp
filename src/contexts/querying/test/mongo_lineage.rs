@@ -470,6 +470,10 @@ fn bucket_outputs_are_judged_like_group_accumulators() {
 
     assert_eq!(
         clearance(&lineage.of("_id"), &ColumnPolicy::default()),
+        TAINTED
+    );
+    assert_eq!(
+        clearance(&lineage.of("_id"), &clear_on(&["birthYear"])),
         PROVEN_CLEAR
     );
     assert_eq!(lineage.of("names"), source("customers", "name"));
@@ -589,4 +593,150 @@ fn extended_json_and_literal_values_are_constants() {
 
     assert_eq!(lineage.of("since"), derived(&[], &[]));
     assert_eq!(lineage.of("at"), derived(&[], &["$dateToString"]));
+}
+
+#[test]
+fn a_built_document_is_judged_by_the_fields_it_holds() {
+    let lineage = aggregate(json!([{"$project": {
+        "x": {"a": "$email", "b": "$phone"},
+        "label": {"kind": "VIP"}
+    }}]));
+
+    assert_eq!(
+        clearance(&lineage.of("x"), &ColumnPolicy::default()),
+        TAINTED
+    );
+    assert_eq!(
+        clearance(&lineage.of("label"), &ColumnPolicy::default()),
+        PROVEN_CLEAR
+    );
+}
+
+#[test]
+fn a_compound_group_key_is_judged_by_the_fields_it_holds() {
+    let lineage =
+        aggregate(json!([{"$group": {"_id": {"city": "$contact.city", "mail": "$email"}}}]));
+
+    assert_eq!(
+        clearance(&lineage.of("_id"), &clear_on(&["contact.city"])),
+        TAINTED
+    );
+    assert_eq!(
+        clearance(&lineage.of("_id"), &clear_on(&["contact.city", "email"])),
+        PROVEN_CLEAR
+    );
+}
+
+#[test]
+fn a_source_document_with_an_overridden_field_is_no_longer_its_source() {
+    let overridden = aggregate(json!([{"$set": {"contact.alias": "$email"}}]));
+    let kept = aggregate(json!([{"$project": {"contact": 1}}]));
+
+    assert_eq!(
+        clearance(&overridden.of("contact"), &clear_on(&["contact"])),
+        TAINTED
+    );
+    assert_eq!(kept.of("contact"), source("customers", "contact"));
+}
+
+#[test]
+fn extended_json_projection_flags_give_unknown() {
+    for projection in [
+        json!({"email": {"$numberInt": "1"}}),
+        json!({"_id": 0, "email": {"$numberLong": "1"}}),
+        json!({"email": {"$numberDouble": "0"}}),
+        json!({"contact": {"email": {"$numberDecimal": "1"}}}),
+    ] {
+        let piped = aggregate(json!([{"$project": projection.clone()}]));
+        let found = find(Some(projection.clone()));
+
+        for lineage in [piped, found] {
+            assert_eq!(lineage.of("email"), FieldLineage::Unknown, "{projection}");
+            assert_eq!(lineage.of("name"), FieldLineage::Unknown, "{projection}");
+            assert_eq!(
+                lineage.of("contact.email"),
+                FieldLineage::Unknown,
+                "{projection}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stage_arguments_the_lineage_cannot_read_give_unknown() {
+    for (stage, path) in [
+        (
+            json!({"$lookup": {"pipeline": [{"$documents": [{"x": 1}]}], "as": "extra"}}),
+            "extra.x",
+        ),
+        (
+            json!({"$unwind": {"path": "$orders", "includeArrayIndex": "$position"}}),
+            "orders.total",
+        ),
+        (
+            json!({"$geoNear": {"near": [0, 0], "distanceField": "distance", "includeLocs": "where"}}),
+            "distance",
+        ),
+        (
+            json!({"$geoNear": {"near": [0, 0], "distanceField": "distance", "includeLocs": "where"}}),
+            "where",
+        ),
+        (json!({"$project": {"_id": 0, "items.$": 1}}), "items.total"),
+    ] {
+        let lineage = aggregate(json!([stage]));
+        let expected = if path == "items.total" {
+            source("customers", "items.total")
+        } else {
+            FieldLineage::Unknown
+        };
+
+        assert_eq!(lineage.of(path), expected, "{stage}");
+    }
+}
+
+#[test]
+fn a_personal_entry_below_an_input_counts_only_for_its_own_collection() {
+    let lineage = aggregate(json!([{"$project": {"copy": {"$ifNull": ["$contact", null]}}}]));
+    let mut elsewhere = clear_on(&["contact"]);
+    elsewhere.insert_field(
+        MongoFieldPattern {
+            database: Some("shop".into()),
+            collection: Some("users".into()),
+            path: "contact.email".into(),
+        },
+        PolicyDecision::Personal("email".into()),
+    );
+    let mut everywhere = clear_on(&["contact"]);
+    everywhere.insert_field(
+        MongoFieldPattern {
+            database: None,
+            collection: None,
+            path: "contact.email".into(),
+        },
+        PolicyDecision::Personal("email".into()),
+    );
+
+    assert_eq!(clearance(&lineage.of("copy"), &elsewhere), PROVEN_CLEAR);
+    assert_eq!(clearance(&lineage.of("copy"), &everywhere), TAINTED);
+}
+
+#[test]
+fn a_field_below_a_derived_value_is_judged_on_the_matching_input_field() {
+    let lineage = aggregate(json!([{"$project": {"copy": {"$ifNull": ["$contact", null]}}}]));
+
+    assert_eq!(
+        lineage.of("copy.email"),
+        derived(&["contact.email"], &["$ifNull"])
+    );
+    assert_eq!(
+        clearance(&lineage.of("copy.email"), &clear_on(&["contact"])),
+        TAINTED
+    );
+    assert_eq!(
+        clearance(
+            &lineage.of("copy.email"),
+            &clear_on(&["contact", "contact.email"])
+        ),
+        PROVEN_CLEAR
+    );
 }

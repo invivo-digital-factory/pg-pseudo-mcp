@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 
-use super::expressions::{derive, evaluate, field_path, is_document_literal};
+use super::expressions::{
+    derive, evaluate, field_path, is_document_literal, is_extended_json, single_entry,
+};
 use super::shape::Shape;
 use crate::contexts::querying::domain::constants::clear_lineage::PASS_THROUGH_ACCUMULATORS;
 use crate::contexts::querying::domain::constants::mongo_policy::WINDOW_ARGUMENT;
@@ -17,7 +19,7 @@ impl Pipeline<'_> {
     }
 
     fn stage(&self, document: Shape, stage: &Value) -> Shape {
-        let Some((name, argument)) = single_entry(stage) else {
+        let Some((name, argument)) = stage_entry(stage) else {
             return Shape::unknown();
         };
         match name.as_str() {
@@ -88,6 +90,9 @@ pub fn project(document: &Shape, argument: &Value) -> Shape {
     let Value::Object(spec) = argument else {
         return Shape::unknown();
     };
+    if holds_extended_json(spec) {
+        return Shape::unknown();
+    }
     if is_exclusion(spec) {
         let mut projected = document.clone();
         exclude(&mut projected, &[], spec);
@@ -135,6 +140,14 @@ fn exclude(projected: &mut Shape, prefix: &[String], spec: &Map<String, Value>) 
             _ => {}
         }
     }
+}
+
+fn holds_extended_json(spec: &Map<String, Value>) -> bool {
+    spec.values().any(|value| match value {
+        Value::Object(inner) if is_document_literal(inner) => holds_extended_json(inner),
+        Value::Object(inner) => is_extended_json(inner),
+        _ => false,
+    })
 }
 
 fn is_exclusion(spec: &Map<String, Value>) -> bool {
@@ -309,8 +322,14 @@ fn replace_root(document: &Shape, new_root: Option<&Value>) -> Shape {
 }
 
 fn bucket(document: &Shape, argument: &Value) -> Shape {
+    let Some(group_by) = argument.get("groupBy") else {
+        return Shape::unknown();
+    };
     let mut bucketed = Shape::built();
-    bucketed.set(&["_id".to_string()], Shape::constant());
+    bucketed.set(
+        &["_id".to_string()],
+        derive([evaluate(group_by, document)], None),
+    );
     with_bucket_outputs(bucketed, document, argument)
 }
 
@@ -379,13 +398,9 @@ fn forget(mut document: Shape, paths: impl Iterator<Item = Option<Vec<String>>>)
     document
 }
 
-fn single_entry(stage: &Value) -> Option<(&String, &Value)> {
-    let Value::Object(map) = stage else {
-        return None;
-    };
-    let mut entries = map.iter();
-    match (entries.next(), entries.next()) {
-        (Some(entry), None) => Some(entry),
+fn stage_entry(stage: &Value) -> Option<(&String, &Value)> {
+    match stage {
+        Value::Object(map) => single_entry(map),
         _ => None,
     }
 }

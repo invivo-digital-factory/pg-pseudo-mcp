@@ -83,15 +83,19 @@ impl Shape {
 
     pub fn lineage(&self) -> FieldLineage {
         match self {
-            Self::Value(lineage)
-            | Self::Document {
-                rest: Some(lineage),
-                ..
-            } => lineage.clone(),
-            Self::Document { rest: None, .. } => FieldLineage::Derived {
-                inputs: Vec::new(),
-                operators: Vec::new(),
+            Self::Value(lineage) => lineage.clone(),
+            Self::Document { fields, rest } if fields.is_empty() => match rest {
+                Some(lineage) => lineage.clone(),
+                None => FieldLineage::Derived {
+                    inputs: Vec::new(),
+                    operators: Vec::new(),
+                },
             },
+            Self::Document { .. } => {
+                let mut derivation = Derivation::default();
+                self.contribute(&mut derivation);
+                derivation.finish()
+            }
         }
     }
 
@@ -157,17 +161,23 @@ fn push_new<T: Clone + PartialEq>(items: &mut Vec<T>, item: &T) {
 
 fn below(lineage: &FieldLineage, path: &[String]) -> FieldLineage {
     match lineage {
-        FieldLineage::Source(source) => {
-            let tail = path.join(".");
-            FieldLineage::Source(FieldSource {
-                path: if source.path.is_empty() {
-                    tail
-                } else {
-                    format!("{}.{tail}", source.path)
-                },
-                ..source.clone()
-            })
-        }
-        other => other.clone(),
+        FieldLineage::Source(source) => FieldLineage::Source(extended(source, path)),
+        FieldLineage::Derived { inputs, operators } => FieldLineage::Derived {
+            inputs: inputs.iter().map(|input| extended(input, path)).collect(),
+            operators: operators.clone(),
+        },
+        FieldLineage::Unknown => FieldLineage::Unknown,
+    }
+}
+
+fn extended(source: &FieldSource, path: &[String]) -> FieldSource {
+    let tail = path.join(".");
+    FieldSource {
+        path: if source.path.is_empty() {
+            tail
+        } else {
+            format!("{}.{tail}", source.path)
+        },
+        ..source.clone()
     }
 }
