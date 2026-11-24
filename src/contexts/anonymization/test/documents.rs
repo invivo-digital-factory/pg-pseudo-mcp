@@ -555,30 +555,49 @@ mod integration {
     }
 
     #[test]
-    fn un_scalaire_sous_une_cle_personnelle_en_herite_sauf_si_sa_feuille_est_au_dictionnaire() {
+    fn le_type_d_une_cle_personnelle_traverse_les_tableaux_mais_pas_les_sous_objets() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
-        let document = object(vec![(
-            "telephone",
-            object(vec![
-                ("valeur", Node::Int(33641278395)),
-                ("id", text("ABC-12")),
-                ("prenom", text("Ylwenna")),
-            ]),
-        )]);
+        let document = object(vec![
+            ("adresse", object(vec![("numero", Node::Int(12))])),
+            (
+                "telephone",
+                Node::Array(vec![Node::Int(33641278395), Node::Int(33758149236)]),
+            ),
+            (
+                "contact",
+                object(vec![(
+                    "perso",
+                    object(vec![("courrier", text("ylwenna.kervadec@canary-mail.fr"))]),
+                )]),
+            ),
+        ]);
 
         let anonymized = anonymizer.documents(vec![document], &[]);
 
         let document = &anonymized.documents[0];
-        assert_ne!(field(document, "telephone.valeur"), &Node::Int(33641278395));
+        assert_eq!(field(document, "adresse.numero"), &Node::Int(12));
+        assert_eq!(flagged(&anonymized, "adresse.numero"), None);
+        let Node::Array(phones) = field(document, "telephone") else {
+            panic!("telephone stays an array");
+        };
+        assert!(!phones.contains(&Node::Int(33641278395)), "{phones:?}");
+        assert!(!phones.contains(&Node::Int(33758149236)), "{phones:?}");
         assert_eq!(
-            flagged(&anonymized, "telephone.valeur"),
+            flagged(&anonymized, "telephone"),
             flag("phone", Reason::Dictionary)
         );
-        assert_eq!(field(document, "telephone.id"), &text("ABC-12"));
         assert_eq!(
-            flagged(&anonymized, "telephone.prenom"),
-            flag("first_name", Reason::Dictionary)
+            field(document, "contact.perso.courrier"),
+            &text(
+                &pseudonymizer
+                    .pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr")
+                    .text
+            )
+        );
+        assert_eq!(
+            flagged(&anonymized, "contact.perso.courrier"),
+            flag("email", Reason::Detected)
         );
         assert_no_canary(&anonymized);
     }
