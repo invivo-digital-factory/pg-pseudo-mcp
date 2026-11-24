@@ -1,3 +1,4 @@
+mod authentication;
 mod channel_opener;
 mod credentials;
 mod front;

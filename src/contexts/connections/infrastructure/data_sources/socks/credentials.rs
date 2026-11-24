@@ -3,6 +3,7 @@ use std::io;
 
 use rand::TryRng;
 use rand::rngs::SysRng;
+use subtle::ConstantTimeEq;
 
 const SECRET_LEN: usize = 32;
 
@@ -26,6 +27,12 @@ impl ProxyCredentials {
 
     pub fn password(&self) -> &str {
         &self.password
+    }
+
+    pub(super) fn matches(&self, username: &[u8], password: &[u8]) -> bool {
+        let same_username = self.username.as_bytes().ct_eq(username);
+        let same_password = self.password.as_bytes().ct_eq(password);
+        (same_username & same_password).into()
     }
 }
 

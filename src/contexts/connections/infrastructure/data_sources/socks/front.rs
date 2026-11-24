@@ -8,12 +8,13 @@ use fast_socks5::consts::{
     SOCKS5_ADDR_TYPE_IPV4, SOCKS5_REPLY_CONNECTION_NOT_ALLOWED, SOCKS5_REPLY_GENERAL_FAILURE,
     SOCKS5_REPLY_SUCCEEDED, SOCKS5_VERSION,
 };
-use fast_socks5::server::{Config, DenyAuthentication, SimpleUserPassword, Socks5Socket};
+use fast_socks5::server::{Config, DenyAuthentication, Socks5Socket};
 use fast_socks5::util::target_addr::TargetAddr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
 
+use super::authentication::authenticate;
 use super::channel_opener::ChannelOpener;
 use super::credentials::ProxyCredentials;
 use super::target_policy::{AllowedTarget, TargetPolicy};
@@ -21,7 +22,7 @@ use super::target_policy::{AllowedTarget, TargetPolicy};
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
-type FrontConfig = Config<SimpleUserPassword>;
+type RequestConfig = Config<DenyAuthentication>;
 
 pub struct SocksFront {
     address: SocketAddr,
@@ -30,7 +31,8 @@ pub struct SocksFront {
 }
 
 struct Relay<C> {
-    config: Arc<FrontConfig>,
+    credentials: ProxyCredentials,
+    config: Arc<RequestConfig>,
     opener: Arc<C>,
     policy: TargetPolicy,
 }
@@ -41,7 +43,8 @@ impl SocksFront {
         let address = listener.local_addr()?;
         let credentials = ProxyCredentials::generate()?;
         let relay = Arc::new(Relay {
-            config: Arc::new(front_config(&credentials)),
+            credentials: credentials.clone(),
+            config: Arc::new(request_config()),
             opener,
             policy,
         });
@@ -68,13 +71,13 @@ impl Drop for SocksFront {
     }
 }
 
-fn front_config(credentials: &ProxyCredentials) -> FrontConfig {
-    let mut config = Config::<DenyAuthentication>::default();
-    config.set_execute_command(false).set_dns_resolve(false);
-    config.with_authentication(SimpleUserPassword {
-        username: credentials.username().to_string(),
-        password: credentials.password().to_string(),
-    })
+fn request_config() -> RequestConfig {
+    let mut config = RequestConfig::default();
+    config
+        .set_skip_auth(true)
+        .set_execute_command(false)
+        .set_dns_resolve(false);
+    config
 }
 
 async fn serve<C: ChannelOpener>(listener: TcpListener, relay: Arc<Relay<C>>) {
@@ -101,9 +104,12 @@ async fn relay_connection<C: ChannelOpener>(stream: TcpStream, relay: Arc<Relay<
 }
 
 async fn negotiate<C: ChannelOpener>(
-    stream: TcpStream,
+    mut stream: TcpStream,
     relay: &Relay<C>,
 ) -> Option<(TcpStream, C::Stream)> {
+    if !authenticate(&mut stream, &relay.credentials).await.ok()? {
+        return None;
+    }
     let socket = Socks5Socket::new(stream, relay.config.clone())
         .upgrade_to_socks5()
         .await
@@ -127,7 +133,7 @@ async fn negotiate<C: ChannelOpener>(
 }
 
 fn admitted(
-    socket: &Socks5Socket<TcpStream, SimpleUserPassword>,
+    socket: &Socks5Socket<TcpStream, DenyAuthentication>,
     policy: &TargetPolicy,
 ) -> Option<AllowedTarget> {
     if socket.cmd() != &Some(Socks5Command::TCPConnect) {
