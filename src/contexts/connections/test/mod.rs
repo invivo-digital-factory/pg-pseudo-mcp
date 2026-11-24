@@ -2,6 +2,7 @@ mod colonnes;
 pub(in crate::contexts::connections) mod database;
 mod dbeaver;
 mod decode;
+mod document_use_cases;
 mod fichier;
 mod mongodb;
 mod mongodb_replica;

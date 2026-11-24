@@ -12,3 +12,5 @@ pub const MONGODB_DEFAULT_PORT: u16 = 27017;
 pub const NOT_A_MONGODB_CONNECTION: &str = "this connection is not of engine mongodb";
 pub const MONGODB_DATABASE_REQUIRED: &str =
     "this connection declares no default database; name the database";
+pub const AGGREGATE_WRITE_STAGE_REFUSED: &str =
+    "the pipeline writes with $out or $merge; only reading stages are allowed";
