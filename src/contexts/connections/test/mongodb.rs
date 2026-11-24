@@ -1,18 +1,23 @@
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use ::mongodb::Client;
-use ::mongodb::bson::{Bson, doc};
+use ::mongodb::bson::{Bson, Document, doc};
+use ::mongodb::error::{ErrorKind, WriteFailure};
 use ::mongodb::options::{ReadPreference, SelectionCriteria};
 use regex::Regex;
 use serde_json::json;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::mongodb_replica::{MEMBER_HOST, require_gate};
 use super::tunnel::{
     KnownHosts, SSH_HOST, SSH_PASSWORD, SSH_USER, listing_container_key, ssh_port,
 };
+use crate::contexts::connections::domain::constants::AGGREGATE_WRITE_STAGE_REFUSED;
 use crate::contexts::connections::domain::errors::{
     ConnectionError, PasswordCommandError, SessionError,
 };
@@ -46,7 +51,8 @@ const WRITER: (&str, &str) = ("atlas-writer", "atlas-writer-test-pw");
 const ADMIN: (&str, &str) = ("atlas-admin", "atlas-admin-test-pw");
 const MEMBER_PORTS: [u16; 3] = [1024, 1025, 1026];
 const UNPERMITTED_PORT: u16 = 1027;
-const MAX_CHANNELS: usize = 10;
+const MAX_OPEN_CHANNELS: usize = 5;
+const UNAUTHORIZED: i32 = 13;
 const ELECTION_WAIT: Duration = Duration::from_secs(60);
 
 struct FixedCatalog(MongoConnectParams);
@@ -179,23 +185,89 @@ fn field<'a>(node: &'a DocumentNode, key: &str) -> &'a DocumentNode {
 struct RecordingLink {
     link: SshLink,
     opened: Mutex<Vec<(String, u16)>>,
+    open_now: Arc<AtomicUsize>,
+    peak: AtomicUsize,
 }
 
 impl RecordingLink {
+    fn over(link: SshLink) -> Self {
+        Self {
+            link,
+            opened: Mutex::new(Vec::new()),
+            open_now: Arc::new(AtomicUsize::new(0)),
+            peak: AtomicUsize::new(0),
+        }
+    }
+
     fn opened(&self) -> Vec<(String, u16)> {
         self.opened.lock().expect("opened lock").clone()
+    }
+
+    fn peak(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+}
+
+struct CountedStream {
+    inner: TunnelStream,
+    open_now: Arc<AtomicUsize>,
+}
+
+impl Drop for CountedStream {
+    fn drop(&mut self) {
+        self.open_now.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl AsyncRead for CountedStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(context, buffer)
+    }
+}
+
+impl AsyncWrite for CountedStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(context, buffer)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
     }
 }
 
 impl ChannelOpener for RecordingLink {
-    type Stream = TunnelStream;
+    type Stream = CountedStream;
 
-    async fn open_channel(&self, target: &AllowedTarget) -> Result<TunnelStream, SessionError> {
+    async fn open_channel(&self, target: &AllowedTarget) -> Result<CountedStream, SessionError> {
         self.opened
             .lock()
             .expect("opened lock")
             .push((target.host().to_string(), target.port()));
-        self.link.open_channel(target).await
+        let inner = self.link.open_channel(target).await?;
+        let now = self.open_now.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        Ok(CountedStream {
+            inner,
+            open_now: self.open_now.clone(),
+        })
     }
 }
 
@@ -295,10 +367,7 @@ mod integration {
         assert!(!first.more_documents);
 
         let known_hosts = listing_container_key();
-        let recording = Arc::new(RecordingLink {
-            link: bastion_link(&known_hosts.path).await,
-            opened: Mutex::new(Vec::new()),
-        });
+        let recording = Arc::new(RecordingLink::over(bastion_link(&known_hosts.path).await));
         let front = front_over(recording.clone()).await;
         let options = client_options(
             &params(READER, MEMBER_PORTS[0], &known_hosts.path),
@@ -345,13 +414,14 @@ mod integration {
             );
         }
         println!(
-            "SSH channels opened by one connection: {} ({opened:?}); new primary {new_primary}",
-            opened.len()
+            "SSH channels opened by one connection: {} in total, {} at most at once ({opened:?}); new primary {new_primary}",
+            opened.len(),
+            recording.peak()
         );
         assert!(
-            opened.len() < MAX_CHANNELS,
-            "{} channels: {opened:?}",
-            opened.len()
+            recording.peak() <= MAX_OPEN_CHANNELS,
+            "{} channels open at once: {opened:?}",
+            recording.peak()
         );
     }
 
@@ -607,6 +677,78 @@ mod integration {
             assert!(!shown.contains(value), "{value} in {shown}");
         }
         assert_eq!(harness.runner.runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the docker compose ssh and mongodb services"]
+    async fn le_lecteur_passe_par_le_bastion_et_toute_ecriture_est_refusee() {
+        let harness = reader();
+        let refused = RunAggregate::new(harness.pool.clone())
+            .execute(
+                CONNECTION,
+                &AggregateRequest {
+                    database: None,
+                    collection: "orders".into(),
+                    pipeline: vec![json!({"$out": "orders_copy"})],
+                    let_vars: None,
+                },
+                limits(10),
+            )
+            .await;
+        assert_eq!(
+            refused,
+            Err(ConnectionError::Unsupported {
+                reason: AGGREGATE_WRITE_STAGE_REFUSED.to_string(),
+            })
+        );
+        assert_eq!(harness.runner.runs.load(Ordering::SeqCst), 0);
+
+        let known_hosts = listing_container_key();
+        let front = front_over(Arc::new(bastion_link(&known_hosts.path).await)).await;
+        let options = client_options(
+            &params(READER, MEMBER_PORTS[0], &known_hosts.path),
+            &Secret::new(READER.1),
+            Some(ProxyEndpoint {
+                address: front.address(),
+                credentials: front.credentials(),
+            }),
+            SELECTION_TIMEOUT,
+        )
+        .await
+        .expect("reader options");
+        let reader = Client::with_options(options).expect("reader client");
+        let orders = reader.database("shop").collection::<Document>("orders");
+        assert!(orders_count(&reader).await > 0);
+        let written = orders
+            .insert_one(doc! {"_id": "scarif-write-probe", "status": "forged"})
+            .await
+            .expect_err("the reader may not write");
+        assert!(
+            matches!(
+                written.kind.as_ref(),
+                ErrorKind::Write(WriteFailure::WriteError(error)) if error.code == UNAUTHORIZED
+            ) || matches!(
+                written.kind.as_ref(),
+                ErrorKind::Command(error) if error.code == UNAUTHORIZED
+            ),
+            "{written:?}"
+        );
+        assert_eq!(
+            orders
+                .count_documents(doc! {"_id": "scarif-write-probe"})
+                .await
+                .expect("count after the refused write"),
+            0
+        );
+    }
+
+    async fn orders_count(reader: &Client) -> u64 {
+        reader
+            .database("shop")
+            .collection::<Document>("orders")
+            .count_documents(doc! {})
+            .await
+            .expect("count orders")
     }
 
     #[tokio::test]

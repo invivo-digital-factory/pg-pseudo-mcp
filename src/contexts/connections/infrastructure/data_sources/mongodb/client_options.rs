@@ -13,7 +13,8 @@ pub const SELECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const APP_NAME: &str = "scarif";
 const AUTH_SOURCE: &str = "admin";
-const MAX_POOL_SIZE: u32 = 2;
+const MAX_POOL_SIZE: u32 = 1;
+const MAX_IDLE_TIME: Duration = Duration::from_secs(30);
 
 pub struct ProxyEndpoint<'a> {
     pub address: SocketAddr,
@@ -59,6 +60,7 @@ pub async fn client_options(
         ReadPreference::SecondaryPreferred { options: None },
     ));
     options.max_pool_size = Some(MAX_POOL_SIZE);
+    options.max_idle_time = Some(MAX_IDLE_TIME);
     options.server_monitoring_mode = Some(ServerMonitoringMode::Poll);
     options.server_selection_timeout = Some(selection_timeout);
     options.connect_timeout = Some(CONNECT_TIMEOUT);
@@ -147,7 +149,8 @@ mod unit {
         let options = options_for(&seed("pl-0.atlas.scarif.test", false)).await;
         assert_eq!(options.app_name.as_deref(), Some("scarif"));
         assert_eq!(options.repl_set_name.as_deref(), Some("rs0"));
-        assert_eq!(options.max_pool_size, Some(2));
+        assert_eq!(options.max_pool_size, Some(1));
+        assert_eq!(options.max_idle_time, Some(Duration::from_secs(30)));
         assert_eq!(
             options.server_monitoring_mode,
             Some(ServerMonitoringMode::Poll)
