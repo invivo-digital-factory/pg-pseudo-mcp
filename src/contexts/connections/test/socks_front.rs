@@ -17,11 +17,16 @@ const NO_AUTH: u8 = 0x00;
 const PASSWORD_AUTH: u8 = 0x02;
 const NO_ACCEPTABLE_METHOD: u8 = 0xff;
 const CONNECT: u8 = 0x01;
+const BIND: u8 = 0x02;
+const UDP_ASSOCIATE: u8 = 0x03;
 const DOMAIN: u8 = 0x03;
 const IPV4: u8 = 0x01;
+const IPV6: u8 = 0x04;
 const SUCCEEDED: u8 = 0x00;
 const NOT_ALLOWED: u8 = 0x02;
 const GENERAL_FAILURE: u8 = 0x01;
+const COMMAND_NOT_SUPPORTED: u8 = 0x07;
+const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
@@ -101,14 +106,23 @@ async fn authenticated(front: &SocksFront, username: &str, password: &str) -> (T
 }
 
 async fn connect_request(front: &SocksFront, address: &[u8], port: u16) -> (TcpStream, u8) {
+    command_request(front, CONNECT, address, port).await
+}
+
+async fn command_request(
+    front: &SocksFront,
+    command: u8,
+    address: &[u8],
+    port: u16,
+) -> (TcpStream, u8) {
     let credentials = front.credentials();
     let (mut stream, status) =
         authenticated(front, credentials.username(), credentials.password()).await;
     assert_eq!(status, SUCCEEDED, "the session credentials are accepted");
-    let mut request = vec![SOCKS_VERSION, CONNECT, 0];
+    let mut request = vec![SOCKS_VERSION, command, 0];
     request.extend_from_slice(address);
     request.extend_from_slice(&port.to_be_bytes());
-    stream.write_all(&request).await.expect("send CONNECT");
+    stream.write_all(&request).await.expect("send the request");
     let reply = read_array::<10>(&mut stream).await;
     assert_eq!(reply[0], SOCKS_VERSION);
     (stream, reply[1])
@@ -293,4 +307,119 @@ async fn le_front_et_ses_relais_se_ferment_avec_la_session() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(refused, "the listener is closed");
+}
+
+#[tokio::test]
+async fn les_commandes_bind_et_udp_associate_sont_refusees_sans_ouvrir_de_canal() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    for command in [BIND, UDP_ASSOCIATE] {
+        let (mut stream, reply) = command_request(&front, command, &domain(MEMBER), 1024).await;
+        assert_eq!(reply, COMMAND_NOT_SUPPORTED, "command {command}");
+        assert!(
+            closed(&mut stream).await,
+            "command {command}: connection closed"
+        );
+    }
+    assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn une_adresse_ipv6_est_refusee_sans_ouvrir_de_canal() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut loopback = vec![IPV6];
+    loopback.extend_from_slice(&std::net::Ipv6Addr::LOCALHOST.octets());
+    let (mut stream, reply) = connect_request(&front, &loopback, 22).await;
+    assert_eq!(reply, NOT_ALLOWED);
+    assert!(closed(&mut stream).await);
+    assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn un_message_d_accueil_mal_forme_est_refuse_sans_ouvrir_de_canal() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut socks4 = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    socks4
+        .write_all(&[0x04, 1, PASSWORD_AUTH])
+        .await
+        .expect("send a SOCKS4 greeting");
+    assert!(
+        closed(&mut socks4).await,
+        "a SOCKS4 greeting gets no answer"
+    );
+    let mut no_method = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    no_method
+        .write_all(&[SOCKS_VERSION, 0])
+        .await
+        .expect("send an empty method list");
+    assert_eq!(
+        read_array::<2>(&mut no_method).await,
+        [SOCKS_VERSION, NO_ACCEPTABLE_METHOD]
+    );
+    assert!(closed(&mut no_method).await);
+    let credentials = front.credentials();
+    let mut wrong_version = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    wrong_version
+        .write_all(&[SOCKS_VERSION, 1, PASSWORD_AUTH])
+        .await
+        .expect("send methods");
+    assert_eq!(
+        read_array::<2>(&mut wrong_version).await,
+        [SOCKS_VERSION, PASSWORD_AUTH]
+    );
+    let mut request = vec![0x05, 64];
+    request.extend_from_slice(credentials.username().as_bytes());
+    request.push(64);
+    request.extend_from_slice(credentials.password().as_bytes());
+    wrong_version
+        .write_all(&request)
+        .await
+        .expect("send credentials under a wrong sub-negotiation version");
+    let [_, status] = read_array::<2>(&mut wrong_version).await;
+    assert_ne!(status, SUCCEEDED);
+    assert!(closed(&mut wrong_version).await);
+    assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn une_negociation_bloquee_est_coupee_apres_vingt_secondes() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let started = tokio::time::Instant::now();
+    let mut stream = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    stream
+        .write_all(&[SOCKS_VERSION, 1, PASSWORD_AUTH])
+        .await
+        .expect("send methods");
+    let mut method = [0u8; 2];
+    stream
+        .read_exact(&mut method)
+        .await
+        .expect("read the method choice");
+    assert_eq!(method, [SOCKS_VERSION, PASSWORD_AUTH]);
+    tokio::time::pause();
+    let mut buffer = [0u8; 1];
+    let before_deadline = tokio::time::timeout(
+        NEGOTIATION_TIMEOUT - Duration::from_secs(1),
+        stream.read(&mut buffer),
+    )
+    .await;
+    assert!(before_deadline.is_err(), "still open before the deadline");
+    let after_deadline = stream.read(&mut buffer).await;
+    assert!(
+        matches!(after_deadline, Ok(0) | Err(_)),
+        "closed at the deadline"
+    );
+    assert!(started.elapsed() >= NEGOTIATION_TIMEOUT);
+    assert!(opener.opened().is_empty());
 }

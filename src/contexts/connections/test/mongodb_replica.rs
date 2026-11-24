@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fast_socks5::client::{Config, Socks5Stream};
+use fast_socks5::{ReplyError, SocksError};
 use russh::client::{self, Handle};
 use russh::keys::PublicKeyOrCertificate;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -253,7 +254,13 @@ mod integration {
             Config::default(),
         )
         .await;
-        assert!(refused.is_err());
+        assert!(
+            matches!(
+                refused,
+                Err(SocksError::ReplyError(ReplyError::ConnectionNotAllowed))
+            ),
+            "the front answers connection not allowed"
+        );
         assert_eq!(link.opened.load(Ordering::SeqCst), 0);
     }
 }
