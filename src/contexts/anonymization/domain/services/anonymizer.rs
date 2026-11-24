@@ -242,7 +242,7 @@ impl<'a> Anonymizer<'a> {
             | Node::Null
             | Node::Bool(_)
             | Node::ObjectId(_)
-            | Node::Uuid(_)
+            | Node::Uuid { .. }
             | Node::Timestamp(_)
             | Node::MinKey
             | Node::MaxKey
@@ -270,6 +270,31 @@ impl<'a> Anonymizer<'a> {
         let mut tracker = Tracker::default();
         let scrubbed = self.scrub_injected(text, false, &mut tracker);
         self.replace_spans(&scrubbed, &detect_spans(&scrubbed), false, &mut tracker)
+    }
+
+    pub fn server_message(&self, text: &str) -> String {
+        let scrubbed = self.free_text(text);
+        SERVER_QUOTED
+            .replace_all(&scrubbed, |captures: &regex::Captures| {
+                let inner = captures
+                    .get(1)
+                    .or_else(|| captures.get(2))
+                    .map_or("", |m| m.as_str());
+                if inner.chars().count() <= 1 || inner.starts_with('$') || self.is_pseudonym(inner)
+                {
+                    captures[0].to_string()
+                } else {
+                    let quote = &captures[0][..1];
+                    let token = self.pseudonymizer.opaque_token("value", inner);
+                    format!("{quote}{token}{quote}")
+                }
+            })
+            .into_owned()
+    }
+
+    pub fn document_key(&self, key: &str) -> String {
+        let mut tracker = Tracker::default();
+        self.json_key(key, false, false, &mut tracker)
     }
 
     pub fn message(&self, message: &DatabaseMessage) -> DatabaseMessage {
@@ -678,6 +703,10 @@ const DERIVED_NUMBER_KINDS: [Kind; 5] = [
     Kind::Nir,
     Kind::CardNumber,
 ];
+
+static SERVER_QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"'([^']*)'|"([^"]*)""#).expect("server quoted fragment pattern")
+});
 
 static QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"(")([^"]*)(")|=\(([^)]*)\)"#).expect("quoted fragment pattern")
