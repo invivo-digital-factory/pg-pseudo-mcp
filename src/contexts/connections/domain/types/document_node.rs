@@ -1,3 +1,5 @@
+use super::uuid_subtype::UuidSubtype;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocumentNode {
     Null,
@@ -8,7 +10,7 @@ pub enum DocumentNode {
     Text(String),
     Date(String),
     ObjectId(String),
-    Uuid(String),
+    Uuid { subtype: UuidSubtype, value: String },
     Timestamp(String),
     MinKey,
     MaxKey,

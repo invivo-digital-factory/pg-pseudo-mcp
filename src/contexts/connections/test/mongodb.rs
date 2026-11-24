@@ -20,7 +20,7 @@ use crate::contexts::connections::domain::repositories::ConnectionCatalog;
 use crate::contexts::connections::domain::types::{
     AggregateRequest, CollectionKind, ConnectionEntry, ConnectionSource, ConnectionStatus,
     Discovery, DocumentNode, ExecutionLimits, FindRequest, Hop, HostKeyPolicy, MongoConnectParams,
-    MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth,
+    MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
 };
 use crate::contexts::connections::infrastructure::data_sources::mongodb::{
     MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
@@ -452,7 +452,10 @@ mod integration {
             ("payload", DocumentNode::Binary { subtype: 0, len: 6 }),
             (
                 "token",
-                DocumentNode::Uuid("0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d".into()),
+                DocumentNode::Uuid {
+                    subtype: UuidSubtype::Standard,
+                    value: "0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d".into(),
+                },
             ),
             (
                 "pattern",

@@ -1,7 +1,7 @@
 use mongodb::bson::spec::BinarySubtype;
 use mongodb::bson::{Binary, Bson, Document};
 
-use crate::contexts::connections::domain::types::DocumentNode;
+use crate::contexts::connections::domain::types::{DocumentNode, UuidSubtype};
 
 const UUID_LEN: usize = 16;
 const OBJECT_ID_LEN: usize = 12;
@@ -45,10 +45,16 @@ pub fn decode(value: Bson) -> DocumentNode {
 }
 
 fn decode_binary(binary: Binary) -> DocumentNode {
-    let uuid = matches!(binary.subtype, BinarySubtype::Uuid | BinarySubtype::UuidOld)
-        && binary.bytes.len() == UUID_LEN;
-    if uuid {
-        return DocumentNode::Uuid(uuid_text(&binary.bytes));
+    let subtype = match binary.subtype {
+        BinarySubtype::Uuid => Some(UuidSubtype::Standard),
+        BinarySubtype::UuidOld => Some(UuidSubtype::Legacy),
+        _ => None,
+    };
+    if let Some(subtype) = subtype.filter(|_| binary.bytes.len() == UUID_LEN) {
+        return DocumentNode::Uuid {
+            subtype,
+            value: uuid_text(&binary.bytes),
+        };
     }
     DocumentNode::Binary {
         subtype: u8::from(binary.subtype),
@@ -120,6 +126,8 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod unit {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use mongodb::bson::spec::BinarySubtype;
     use mongodb::bson::{
         Binary, DateTime, Decimal128, JavaScriptCodeWithScope, Regex, Timestamp, doc, oid::ObjectId,
@@ -177,7 +185,13 @@ mod unit {
             ("telephone", DocumentNode::Int(33_641_278_395)),
             ("quantity", DocumentNode::Int(2)),
             ("payload", DocumentNode::Binary { subtype: 0, len: 6 }),
-            ("token", DocumentNode::Uuid(TOKEN.into())),
+            (
+                "token",
+                DocumentNode::Uuid {
+                    subtype: UuidSubtype::Standard,
+                    value: TOKEN.into(),
+                },
+            ),
             (
                 "pattern",
                 DocumentNode::Opaque {
@@ -247,7 +261,10 @@ mod unit {
             ),
             (
                 binary(BinarySubtype::UuidOld, uuid_bytes(TOKEN)),
-                DocumentNode::Uuid(TOKEN.into()),
+                DocumentNode::Uuid {
+                    subtype: UuidSubtype::Legacy,
+                    value: TOKEN.into(),
+                },
             ),
             (
                 binary(BinarySubtype::Uuid, vec![1, 2, 3]),
@@ -317,7 +334,17 @@ mod unit {
             DocumentNode::Date(text) if text.contains('T') => json!({"$date": text}),
             DocumentNode::Date(text) => json!({"$date": {"$numberLong": text}}),
             DocumentNode::ObjectId(text) => json!({"$oid": text}),
-            DocumentNode::Uuid(text) => json!({"$uuid": text}),
+            DocumentNode::Uuid {
+                subtype: UuidSubtype::Standard,
+                value,
+            } => json!({"$uuid": value}),
+            DocumentNode::Uuid {
+                subtype: UuidSubtype::Legacy,
+                value,
+            } => json!({"$binary": {
+                "base64": BASE64_STANDARD.encode(uuid_bytes(value)),
+                "subType": "03",
+            }}),
             DocumentNode::Timestamp(text) => {
                 let (time, increment) = text.split_once(':').expect("t:i");
                 json!({"$timestamp": {
@@ -358,6 +385,7 @@ mod unit {
             "old": DateTime::from_millis(-616_852_799_877),
             "far": DateTime::from_millis(253_402_300_800_000),
             "token": binary(BinarySubtype::Uuid, uuid_bytes(TOKEN)),
+            "legacy_token": binary(BinarySubtype::UuidOld, uuid_bytes(TOKEN)),
             "seen": Timestamp { time: 1_767_225_600, increment: 1 },
             "low": Bson::MinKey,
             "high": Bson::MaxKey,

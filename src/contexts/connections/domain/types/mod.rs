@@ -19,6 +19,7 @@ mod password_source;
 mod query_output;
 mod sampled_field;
 mod secret;
+mod uuid_subtype;
 
 pub use cell::Cell;
 pub use column_policy_entries::ColumnPolicyEntries;
@@ -51,3 +52,4 @@ pub use password_source::PasswordSource;
 pub use query_output::{ColumnMeta, ColumnSource, QueryOutput};
 pub use sampled_field::SampledField;
 pub use secret::Secret;
+pub use uuid_subtype::UuidSubtype;
