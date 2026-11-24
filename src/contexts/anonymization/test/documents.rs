@@ -555,11 +555,65 @@ mod integration {
     }
 
     #[test]
-    fn le_type_d_une_cle_personnelle_traverse_les_tableaux_mais_pas_les_sous_objets() {
+    fn un_numero_sous_adresse_herite_du_type_adresse_mais_pas_un_identifiant() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "adresse",
+            object(vec![("numero", Node::Int(12)), ("id", text("ABC-12"))]),
+        )]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        let document = &anonymized.documents[0];
+        let number = field(document, "adresse.numero");
+        assert!(matches!(number, Node::Text(_)), "{number:?}");
+        assert_eq!(
+            flagged(&anonymized, "adresse.numero"),
+            flag("address", Reason::Dictionary)
+        );
+        assert_eq!(field(document, "adresse.id"), &text("ABC-12"));
+        assert_eq!(flagged(&anonymized, "adresse.id"), None);
+    }
+
+    #[test]
+    fn un_entier_sous_telephone_est_pseudonymise_meme_sous_une_cle_inconnue() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "telephone",
+            object(vec![
+                ("mobile", Node::Int(612345678)),
+                ("valeur", Node::Int(33641278395)),
+                ("prenom", text("Ylwenna")),
+            ]),
+        )]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        let document = &anonymized.documents[0];
+        assert_ne!(field(document, "telephone.mobile"), &Node::Int(612345678));
+        assert_eq!(
+            flagged(&anonymized, "telephone.mobile"),
+            flag("phone", Reason::Dictionary)
+        );
+        assert_ne!(field(document, "telephone.valeur"), &Node::Int(33641278395));
+        assert_eq!(
+            flagged(&anonymized, "telephone.valeur"),
+            flag("phone", Reason::Dictionary)
+        );
+        assert_eq!(
+            flagged(&anonymized, "telephone.prenom"),
+            flag("first_name", Reason::Dictionary)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn le_type_traverse_un_tableau_et_les_detecteurs_veillent_sous_des_cles_inconnues() {
         let (_dir, pseudonymizer) = pseudonymizer();
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let document = object(vec![
-            ("adresse", object(vec![("numero", Node::Int(12))])),
             (
                 "telephone",
                 Node::Array(vec![Node::Int(33641278395), Node::Int(33758149236)]),
@@ -576,8 +630,6 @@ mod integration {
         let anonymized = anonymizer.documents(vec![document], &[]);
 
         let document = &anonymized.documents[0];
-        assert_eq!(field(document, "adresse.numero"), &Node::Int(12));
-        assert_eq!(flagged(&anonymized, "adresse.numero"), None);
         let Node::Array(phones) = field(document, "telephone") else {
             panic!("telephone stays an array");
         };

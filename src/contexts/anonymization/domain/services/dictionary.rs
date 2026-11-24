@@ -136,9 +136,16 @@ fn covers(outer: &Hit, inner: &Hit) -> bool {
 }
 
 pub fn dictionary_kind(column_name: &str) -> Option<Kind> {
+    dictionary_entry(column_name).flatten()
+}
+
+pub fn dictionary_entry(column_name: &str) -> Option<Option<Kind>> {
     let tokens = tokenize(column_name);
     let found = hits(&tokens);
-    found
+    if found.is_empty() {
+        return None;
+    }
+    let kind = found
         .iter()
         .filter(|hit| hit.kind.is_some())
         .filter(|hit| {
@@ -147,7 +154,8 @@ pub fn dictionary_kind(column_name: &str) -> Option<Kind> {
                 .any(|other| other.kind.is_none() && covers(other, hit))
         })
         .min_by_key(|hit| (std::cmp::Reverse(hit.len), hit.start))
-        .and_then(|hit| hit.kind)
+        .and_then(|hit| hit.kind);
+    Some(kind)
 }
 
 #[cfg(test)]
@@ -177,6 +185,13 @@ mod unit {
         assert_eq!(dictionary_kind("nom_utilisateur"), None);
         assert_eq!(dictionary_kind("mac_address"), None);
         assert_eq!(dictionary_kind("client_id"), None);
+    }
+
+    #[test]
+    fn une_entree_ignoree_se_distingue_d_un_nom_absent_du_dictionnaire() {
+        assert_eq!(dictionary_entry("client_id"), Some(None));
+        assert_eq!(dictionary_entry("telephone"), Some(Some(Kind::Phone)));
+        assert_eq!(dictionary_entry("valeur"), None);
     }
 
     #[test]

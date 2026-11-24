@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::classify::classify_named;
-use super::dictionary::dictionary_kind;
+use super::dictionary::dictionary_entry;
 use super::tracker::Tracker;
 use crate::contexts::anonymization::domain::types::{
     ColumnClass, ColumnFlag, FieldClearance, FieldPath, Kind, Reason,
@@ -43,7 +43,7 @@ impl Place {
         let clearance = clearances.get(&source).or(inherited);
         let name_kind = match clearance {
             Some(FieldClearance::Clear) => None,
-            _ => dictionary_kind(key),
+            _ => dictionary_entry(key).unwrap_or(self.name_kind),
         };
         Self {
             source,
