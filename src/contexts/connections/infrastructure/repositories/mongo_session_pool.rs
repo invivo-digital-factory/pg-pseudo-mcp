@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::contexts::connections::domain::constants::{
-    CONNECT_DEADLINE, MONGODB_DATABASE_REQUIRED,
+    CONNECT_DEADLINE, MAX_STATEMENT_TIMEOUT_MS, MONGODB_DATABASE_REQUIRED,
 };
 use crate::contexts::connections::domain::errors::{ConnectionError, SessionError};
 use crate::contexts::connections::domain::repositories::{
@@ -33,6 +33,8 @@ use crate::contexts::connections::infrastructure::repositories::session_cache::{
 
 const SESSION_KEY: &str = "";
 const NO_OTHER_SESSIONS: usize = 0;
+const CLIENT_GRACE: Duration = Duration::from_secs(5);
+const METADATA_DEADLINE: Duration = Duration::from_secs(30);
 
 pub struct MongoSessionPool {
     catalog: Arc<dyn ConnectionCatalog>,
@@ -99,13 +101,24 @@ impl MongoSessionPool {
         read: R,
     ) -> Result<R::Output, ConnectionError> {
         let mut lease = self.lease(connection).await?;
-        let mut outcome = read.read(&mut lease.open).await;
+        let Ok(mut outcome) =
+            tokio::time::timeout(read.deadline(), read.read(&mut lease.open)).await
+        else {
+            self.release(connection, lease, false).await;
+            return Err(ConnectionError::Session(SessionError::Timeout));
+        };
         if matches!(&outcome, Err(failure) if is_authentication_failure(failure)) {
             if let Err(error) = self.renew(connection, &mut lease.open).await {
                 self.release(connection, lease, false).await;
                 return Err(error);
             }
-            outcome = read.read(&mut lease.open).await;
+            let Ok(renewed) =
+                tokio::time::timeout(read.deadline(), read.read(&mut lease.open)).await
+            else {
+                self.release(connection, lease, false).await;
+                return Err(ConnectionError::Session(SessionError::Timeout));
+            };
+            outcome = renewed;
         }
         let result = outcome.map_err(|failure| {
             connection_error_from_mongo(connection, failure, &lease.open.redaction)
@@ -284,8 +297,16 @@ fn target_policy(transport: &MongoTransport) -> Result<TargetPolicy, ConnectionE
     })
 }
 
+fn statement_deadline(limits: ExecutionLimits) -> Duration {
+    Duration::from_millis(limits.timeout_ms.clamp(1, MAX_STATEMENT_TIMEOUT_MS)) + CLIENT_GRACE
+}
+
 trait MongoRead: Sync {
     type Output: Send;
+
+    fn deadline(&self) -> Duration {
+        METADATA_DEADLINE
+    }
 
     fn read<'a>(
         &'a self,
@@ -300,6 +321,10 @@ struct FindRead<'r> {
 
 impl MongoRead for FindRead<'_> {
     type Output = DocumentOutput;
+
+    fn deadline(&self) -> Duration {
+        statement_deadline(self.limits)
+    }
 
     async fn read(&self, open: &mut OpenMongo) -> Result<DocumentOutput, MongoFailure> {
         let database = open.database(self.request.database.as_deref())?;
@@ -316,6 +341,10 @@ struct AggregateRead<'r> {
 
 impl MongoRead for AggregateRead<'_> {
     type Output = DocumentOutput;
+
+    fn deadline(&self) -> Duration {
+        statement_deadline(self.limits)
+    }
 
     async fn read(&self, open: &mut OpenMongo) -> Result<DocumentOutput, MongoFailure> {
         let database = open.database(self.request.database.as_deref())?;
@@ -449,5 +478,131 @@ impl DocumentSessionPool for MongoSessionPool {
             },
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    use super::*;
+    use crate::contexts::connections::domain::errors::PasswordCommandError;
+    use crate::contexts::connections::domain::types::{
+        ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery,
+    };
+
+    const CONNECTION: &str = "atlas";
+    const STALL_DEADLINE: Duration = Duration::from_millis(200);
+
+    struct FixedCatalog;
+
+    impl ConnectionCatalog for FixedCatalog {
+        fn discover_in(&self, _: Option<&str>) -> Discovery {
+            Discovery {
+                connections: vec![ConnectionEntry {
+                    id: CONNECTION.into(),
+                    name: CONNECTION.into(),
+                    declared_name: CONNECTION.into(),
+                    source: ConnectionSource::File,
+                    folder: None,
+                    project: "General".into(),
+                    engine: "mongodb".into(),
+                    connection_type: "test".into(),
+                    database: Some("shop".into()),
+                    status: ConnectionStatus::Available,
+                    params: None,
+                    mongo: Some(MongoConnectParams {
+                        transport: MongoTransport::Seed {
+                            host: "pl-0.atlas.scarif.test".into(),
+                            port: 1024,
+                            tls: false,
+                        },
+                        replica_set: Some("rs0".into()),
+                        database: Some("shop".into()),
+                        user: "atlas-reader".into(),
+                        password_command: vec!["/bin/echo".into(), "pw".into()],
+                        ssh_hops: None,
+                    }),
+                }],
+                hint: None,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct CountingPasswords {
+        runs: AtomicUsize,
+    }
+
+    impl CommandPasswordProvider for CountingPasswords {
+        fn password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            Ok(Secret::new("atlas-reader-test-pw"))
+        }
+
+        fn renewed_password(&self, _: &str, _: &[String]) -> Result<Secret, PasswordCommandError> {
+            self.password("", &[])
+        }
+    }
+
+    struct StalledRead;
+
+    impl MongoRead for StalledRead {
+        type Output = ();
+
+        fn deadline(&self) -> Duration {
+            STALL_DEADLINE
+        }
+
+        async fn read(&self, _: &mut OpenMongo) -> Result<(), MongoFailure> {
+            std::future::pending().await
+        }
+    }
+
+    struct QuickRead;
+
+    impl MongoRead for QuickRead {
+        type Output = ();
+
+        async fn read(&self, _: &mut OpenMongo) -> Result<(), MongoFailure> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn une_lecture_bloquee_rend_un_delai_depasse_et_libere_la_connexion() {
+        let passwords = Arc::new(CountingPasswords::default());
+        let pool = MongoSessionPool::new(Arc::new(FixedCatalog), None, passwords.clone());
+        let started = Instant::now();
+        let stalled =
+            tokio::time::timeout(Duration::from_secs(5), pool.run(CONNECTION, StalledRead))
+                .await
+                .expect("the pool gives up on a stalled read by itself");
+        assert_eq!(
+            stalled,
+            Err(ConnectionError::Session(SessionError::Timeout))
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        pool.run(CONNECTION, QuickRead)
+            .await
+            .expect("the next call is not blocked by the stalled one");
+        assert_eq!(passwords.runs.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn le_delai_d_une_requete_suit_sa_limite_avec_une_marge_et_jamais_zero() {
+        let limits = |timeout_ms| ExecutionLimits {
+            max_rows: 10,
+            timeout_ms,
+        };
+        assert_eq!(
+            statement_deadline(limits(2_000)),
+            Duration::from_millis(2_000) + CLIENT_GRACE
+        );
+        assert_eq!(
+            statement_deadline(limits(0)),
+            Duration::from_millis(1) + CLIENT_GRACE
+        );
     }
 }

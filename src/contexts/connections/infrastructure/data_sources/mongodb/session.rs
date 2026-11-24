@@ -10,6 +10,7 @@ use super::decode::decode_document;
 use super::extended_json::{bson_from_extended_json, document_from_extended_json};
 use super::failure::MongoFailure;
 use super::sample::{SAMPLE_MAX_TIME, sample_pipeline, sampled_fields};
+use crate::contexts::connections::domain::constants::MAX_STATEMENT_TIMEOUT_MS;
 use crate::contexts::connections::domain::services::is_listed_collection;
 use crate::contexts::connections::domain::types::{
     AggregateRequest, CollectionDescription, CollectionInfo, CollectionKind, DocumentOutput,
@@ -46,7 +47,7 @@ impl MongoSession {
             .find(document_from_extended_json(&request.filter, "filter")?)
             .limit(i64::try_from(limit).unwrap_or(i64::MAX))
             .batch_size(u32::try_from(fetched).unwrap_or(u32::MAX))
-            .max_time(Duration::from_millis(limits.timeout_ms))
+            .max_time(statement_time(limits))
             .allow_disk_use(false)
             .selection_criteria(secondary_preferred())
             .comment(Bson::String(COMMENT.to_string()));
@@ -88,7 +89,7 @@ impl MongoSession {
         let mut aggregate = collection
             .aggregate(pipeline)
             .batch_size(u32::try_from(fetched).unwrap_or(u32::MAX))
-            .max_time(Duration::from_millis(limits.timeout_ms))
+            .max_time(statement_time(limits))
             .allow_disk_use(false)
             .selection_criteria(secondary_preferred())
             .comment(Bson::String(COMMENT.to_string()));
@@ -219,6 +220,10 @@ fn fetched(limits: ExecutionLimits) -> u64 {
     u64::try_from(limits.max_rows)
         .unwrap_or(u64::MAX)
         .saturating_add(1)
+}
+
+fn statement_time(limits: ExecutionLimits) -> Duration {
+    Duration::from_millis(limits.timeout_ms.clamp(1, MAX_STATEMENT_TIMEOUT_MS))
 }
 
 fn secondary_preferred() -> SelectionCriteria {
