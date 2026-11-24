@@ -5,6 +5,7 @@ use scarif_database_mcp::common::AppConfig;
 use scarif_database_mcp::composition::contexts::Contexts;
 use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
 use scarif_database_mcp::contexts::connections::presentation::list_connections_with_warnings;
+use scarif_database_mcp::contexts::querying::domain::services::mongo_lineage::DocumentLineage;
 use scarif_database_mcp::contexts::querying::domain::types::{
     ColumnPolicy, FieldPolicyHint, GuardedMongo,
 };
@@ -55,6 +56,7 @@ pub struct QueryingWorld {
     pub hint: Option<FieldPolicyHint>,
     pub mongo_pseudonyms: Vec<(String, String)>,
     pub mongo: Option<MongoAnswer>,
+    pub lineage: Option<DocumentLineage>,
 }
 
 impl std::fmt::Debug for QueryingWorld {
@@ -81,6 +83,7 @@ impl QueryingWorld {
             hint: None,
             mongo_pseudonyms: Vec::new(),
             mongo: None,
+            lineage: None,
         }
     }
 

@@ -28,6 +28,10 @@ impl ColumnPolicy {
         self.fields.decide(source)
     }
 
+    pub fn has_personal_field_below(&self, source: &FieldSource) -> bool {
+        self.fields.has_personal_below(source)
+    }
+
     pub fn decide(&self, source: &ColumnSource) -> Option<&PolicyDecision> {
         self.entries
             .iter()
