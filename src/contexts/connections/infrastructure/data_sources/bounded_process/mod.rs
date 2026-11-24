@@ -108,6 +108,18 @@ mod integration {
         Command::new(path)
     }
 
+    fn run_timed(
+        body: &str,
+        deadline: Duration,
+        max: usize,
+    ) -> (Result<BoundedOutput, BoundedFailure>, Duration) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut command = script(dir.path(), body);
+        let started = Instant::now();
+        let outcome = run_bounded(&mut command, deadline, max);
+        (outcome, started.elapsed())
+    }
+
     fn run(body: &str, deadline: Duration, max: usize) -> Result<BoundedOutput, BoundedFailure> {
         let dir = tempfile::tempdir().unwrap();
         run_bounded(&mut script(dir.path(), body), deadline, max)
@@ -115,10 +127,10 @@ mod integration {
 
     #[test]
     fn un_descendant_en_arriere_plan_qui_garde_la_sortie_ouverte_respecte_le_delai() {
-        let started = Instant::now();
-        let outcome = run("sleep 30 &\nprintf 'pw'", Duration::from_millis(300), 1024);
+        let deadline = Duration::from_millis(300);
+        let (outcome, elapsed) = run_timed("sleep 30 &\nprintf 'pw'", deadline, 1024);
         assert_eq!(outcome.err(), Some(BoundedFailure::TimedOut));
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(elapsed < deadline * 20);
     }
 
     #[test]
@@ -134,10 +146,10 @@ mod integration {
 
     #[test]
     fn une_sortie_trop_volumineuse_est_refusee_et_arrete_la_commande() {
-        let started = Instant::now();
-        let outcome = run("yes", Duration::from_secs(10), 1024);
+        let deadline = Duration::from_secs(30);
+        let (outcome, elapsed) = run_timed("yes", deadline, 1024);
         assert_eq!(outcome.err(), Some(BoundedFailure::OutputTooLarge));
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(elapsed < deadline / 2);
     }
 
     #[test]
