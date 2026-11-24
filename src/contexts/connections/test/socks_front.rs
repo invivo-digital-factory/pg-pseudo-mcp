@@ -28,6 +28,7 @@ const GENERAL_FAILURE: u8 = 0x01;
 const COMMAND_NOT_SUPPORTED: u8 = 0x07;
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(5);
+const PENDING_NEGOTIATIONS: usize = 32;
 
 #[derive(Default)]
 struct CountingOpener {
@@ -425,5 +426,52 @@ async fn une_negociation_bloquee_est_coupee_apres_vingt_secondes() {
         "closed at the deadline"
     );
     assert!(started.elapsed() >= NEGOTIATION_TIMEOUT);
+    assert!(opener.opened().is_empty());
+}
+
+async fn greeted(front: &SocksFront) -> Option<TcpStream> {
+    let mut stream = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    stream
+        .write_all(&[SOCKS_VERSION, 1, PASSWORD_AUTH])
+        .await
+        .ok()?;
+    let mut method = [0u8; 2];
+    tokio::time::timeout(WAIT, stream.read_exact(&mut method))
+        .await
+        .ok()?
+        .ok()?;
+    (method == [SOCKS_VERSION, PASSWORD_AUTH]).then_some(stream)
+}
+
+#[tokio::test]
+async fn les_negociations_en_attente_sont_bornees_et_l_excedent_est_ferme_aussitot() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut pending = Vec::new();
+    for _ in 0..PENDING_NEGOTIATIONS {
+        pending.push(greeted(&front).await.expect("a pending negotiation"));
+    }
+    let mut excess = TcpStream::connect(front.address())
+        .await
+        .expect("reach the front");
+    assert!(
+        closed(&mut excess).await,
+        "a connection beyond the pending limit is closed at once"
+    );
+    drop(pending);
+    let mut served = None;
+    for _ in 0..50 {
+        served = greeted(&front).await;
+        if served.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        served.is_some(),
+        "the slots come back once the clients leave"
+    );
     assert!(opener.opened().is_empty());
 }

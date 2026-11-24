@@ -12,6 +12,7 @@ use fast_socks5::server::{Config, DenyAuthentication, Socks5Socket};
 use fast_socks5::util::target_addr::TargetAddr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinHandle, JoinSet};
 
 use super::authentication::authenticate;
@@ -21,6 +22,7 @@ use super::target_policy::{AllowedTarget, TargetPolicy};
 
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+const PENDING_NEGOTIATIONS: usize = 32;
 
 type RequestConfig = Config<DenyAuthentication>;
 
@@ -82,11 +84,14 @@ fn request_config() -> RequestConfig {
 
 async fn serve<C: ChannelOpener>(listener: TcpListener, relay: Arc<Relay<C>>) {
     let mut connections = JoinSet::new();
+    let pending = Arc::new(Semaphore::new(PENDING_NEGOTIATIONS));
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
-                    connections.spawn(relay_connection(stream, relay.clone()));
+                    if let Ok(slot) = pending.clone().try_acquire_owned() {
+                        connections.spawn(relay_connection(stream, relay.clone(), slot));
+                    }
                 }
                 Err(_) => tokio::time::sleep(ACCEPT_BACKOFF).await,
             },
@@ -95,9 +100,14 @@ async fn serve<C: ChannelOpener>(listener: TcpListener, relay: Arc<Relay<C>>) {
     }
 }
 
-async fn relay_connection<C: ChannelOpener>(stream: TcpStream, relay: Arc<Relay<C>>) {
+async fn relay_connection<C: ChannelOpener>(
+    stream: TcpStream,
+    relay: Arc<Relay<C>>,
+    slot: OwnedSemaphorePermit,
+) {
     let _ = stream.set_nodelay(true);
     let negotiated = tokio::time::timeout(NEGOTIATION_TIMEOUT, negotiate(stream, &relay)).await;
+    drop(slot);
     if let Ok(Some((mut client, mut channel))) = negotiated {
         let _ = tokio::io::copy_bidirectional(&mut client, &mut channel).await;
     }
