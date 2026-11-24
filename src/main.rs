@@ -1,17 +1,17 @@
 use std::process::ExitCode;
 
 use scarif_database_mcp::composition::connections_import::import_dbeaver;
-use scarif_database_mcp::composition::logging::log_filter;
+use scarif_database_mcp::composition::logging::log_layer;
 use scarif_database_mcp::composition::mapping_purge::mapping_purge;
 use scarif_database_mcp::composition::server::serve;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(log_filter(EnvFilter::from_default_env()))
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
+    tracing_subscriber::registry()
+        .with(log_layer(EnvFilter::from_default_env(), std::io::stderr))
         .init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -2,7 +2,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use scarif_database_mcp::composition::logging::log_filter;
+use scarif_database_mcp::composition::logging::log_layer;
 use scarif_database_mcp::contexts::connections::domain::errors::{ConnectionError, SessionError};
 use scarif_database_mcp::contexts::connections::domain::types::{
     ExecutionLimits, FindRequest, MongoConnectParams, MongoTransport, Secret,
@@ -18,10 +18,14 @@ use scarif_database_mcp::contexts::connections::infrastructure::mappers::{
 };
 use tokio::io::DuplexStream;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const MEMBER: &str = "pl-0.atlas.scarif.test";
 const MEMBER_PORT: u16 = 1024;
 const CONNECTION: &str = "atlas";
+const DB_USER: &str = "atlas-reader";
+const DB_PASSWORD: &str = "atlas-reader-test-pw";
 
 static CAPTURED: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
@@ -68,7 +72,7 @@ fn params() -> MongoConnectParams {
         },
         replica_set: Some("rs0".into()),
         database: Some("shop".into()),
-        user: "atlas-reader".into(),
+        user: DB_USER.into(),
         password_command: vec!["/bin/echo".into(), "pw".into()],
         ssh_hops: None,
     }
@@ -91,7 +95,7 @@ fn find() -> FindRequest {
 async fn refused_through(front: &SocksFront, sent: &ProxyCredentials) -> ConnectionError {
     let options = client_options(
         &params(),
-        &Secret::new("atlas-reader-test-pw"),
+        &Secret::new(DB_PASSWORD),
         Some(ProxyEndpoint {
             address: front.address(),
             credentials: sent,
@@ -125,10 +129,13 @@ fn exposures(secret: &str) -> [String; 2] {
 
 #[tokio::test]
 async fn un_refus_du_front_socks_rend_un_motif_fixe_sans_identifiants_ni_cible_meme_en_trace() {
-    tracing_subscriber::fmt()
-        .with_env_filter(log_filter(EnvFilter::new("trace,fast_socks5=trace")))
-        .with_writer(|| Capture)
-        .with_ansi(false)
+    tracing_subscriber::registry()
+        .with(log_layer(
+            EnvFilter::new(
+                "trace,fast_socks5=trace,fast_socks5::client=trace,fast_socks5::server=trace",
+            ),
+            || Capture,
+        ))
         .try_init()
         .expect("install the capturing subscriber and the log bridge");
     let policy = TargetPolicy::from_seed_host(MEMBER).expect("valid seed host");
@@ -155,6 +162,8 @@ async fn un_refus_du_front_socks_rend_un_motif_fixe_sans_identifiants_ni_cible_m
     let texts = [rejected.to_string(), channel_refused.to_string(), logs];
     let target = format!("{MEMBER}:{MEMBER_PORT}");
     let mut canaries = vec![MEMBER.to_string(), target];
+    canaries.extend(exposures(DB_USER));
+    canaries.extend(exposures(DB_PASSWORD));
     for credentials in [&foreign, front.credentials()] {
         for secret in [credentials.username(), credentials.password()] {
             canaries.extend(exposures(secret));
