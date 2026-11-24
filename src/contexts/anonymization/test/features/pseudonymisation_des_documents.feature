@@ -24,7 +24,7 @@ Fonctionnalité: Pseudonymisation des documents
     Et le chemin "firstName" est signalé "first_name" pour la raison "dictionary"
     Et le chemin "lastName" est signalé "last_name" pour la raison "dictionary"
     Et le chemin "contact.email" est signalé "email" pour la raison "dictionary"
-    Et le chemin "contact.phones" est signalé "phone" pour la raison "detected"
+    Et le chemin "contact.phones" est signalé "phone" pour la raison "dictionary"
     Et le champ "_id" reste en clair
     Et le champ "createdAt" reste en clair
     Et le champ "status" reste en clair

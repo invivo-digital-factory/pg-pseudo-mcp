@@ -1,3 +1,4 @@
+use super::canary_values::CANARY_VALUES;
 use crate::contexts::anonymization::domain::services::anonymizer::Anonymizer;
 use crate::contexts::anonymization::domain::services::pseudonymizer::Pseudonymizer;
 use crate::contexts::anonymization::domain::types::{
@@ -5,15 +6,6 @@ use crate::contexts::anonymization::domain::types::{
     GeneratorConfig, Kind, Node, Reason,
 };
 use crate::contexts::anonymization::infrastructure::data_sources::data_directory::open_pseudonymizer;
-
-const CANARIES: [&str; 6] = [
-    "Ylwenna",
-    "Kervadec",
-    "ylwenna.kervadec@canary-mail.fr",
-    "06 41 27 83 95",
-    "07 58 14 92 36",
-    "o.hazvekmor@canary-mail.fr",
-];
 
 fn pseudonymizer() -> (tempfile::TempDir, Pseudonymizer) {
     let dir = tempfile::tempdir().expect("data dir");
@@ -63,7 +55,7 @@ fn flagged(anonymized: &AnonymizedDocuments, path: &str) -> Option<ColumnFlag> {
 
 fn assert_no_canary(anonymized: &AnonymizedDocuments) {
     let response = format!("{:?} {:?}", anonymized.documents, anonymized.pseudonymized);
-    for canary in CANARIES {
+    for canary in CANARY_VALUES {
         for form in [
             canary.to_string(),
             canary.to_lowercase(),
@@ -129,7 +121,7 @@ mod integration {
         );
         assert_eq!(
             flagged(&anonymized, "contact.phones"),
-            flag("phone", Reason::Detected)
+            flag("phone", Reason::Dictionary)
         );
         assert_eq!(
             field(document, "contact.email"),
@@ -170,6 +162,7 @@ mod integration {
         );
         assert_eq!(field(&anonymized.documents[0], "etat"), &text("PAID"));
         assert_eq!(flagged(&anonymized, "etat"), None);
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -236,6 +229,7 @@ mod integration {
             &Node::Date(created.to_string())
         );
         assert_eq!(flagged(&anonymized, "createdAt"), None);
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -244,7 +238,7 @@ mod integration {
         let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
         let document = object(vec![
             ("telephone", Node::Int(33641278395)),
-            ("quantity", Node::Int(33641278395)),
+            ("quantity", Node::Int(33612345678)),
         ]);
 
         let anonymized = anonymizer.documents(vec![document], &[]);
@@ -258,9 +252,10 @@ mod integration {
         );
         assert_eq!(
             field(&anonymized.documents[0], "quantity"),
-            &Node::Int(33641278395)
+            &Node::Int(33612345678)
         );
         assert_eq!(flagged(&anonymized, "quantity"), None);
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -298,6 +293,7 @@ mod integration {
             field(&anonymized.documents[0], "customer.mail"),
             &Node::Text(from_row)
         );
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -330,6 +326,7 @@ mod integration {
             flag("siren", Reason::Policy)
         );
         assert_eq!(field(&anonymized.documents[0], "libre"), &text("lot-43"));
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -339,7 +336,7 @@ mod integration {
         let document = object(vec![
             ("nom", text("Garance Bleue")),
             ("libelle", text("Garance ylwenna.kervadec@canary-mail.fr")),
-            ("telephone", Node::Int(33641278395)),
+            ("telephone", Node::Int(33612345678)),
         ]);
         let clearances = [
             clearance("nom", FieldClearance::Clear),
@@ -361,7 +358,8 @@ mod integration {
             flagged(&anonymized, "libelle"),
             flag("email", Reason::Detected)
         );
-        assert_eq!(field(document, "telephone"), &Node::Int(33641278395));
+        assert_eq!(field(document, "telephone"), &Node::Int(33612345678));
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -399,6 +397,7 @@ mod integration {
         assert_eq!(anonymized.pseudonymized.len(), 4);
         assert_eq!(anonymized.omitted_paths, 0);
         assert_eq!(anonymized.documents.len(), 300);
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -431,6 +430,7 @@ mod integration {
             &Node::Array(neutral)
         );
         assert!(anonymized.pseudonymized.is_empty());
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -479,6 +479,7 @@ mod integration {
             flagged(&anonymized, "piece"),
             flag("person_name", Reason::Default)
         );
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -489,7 +490,7 @@ mod integration {
             ("telephoneFixe", Node::Double(33641278395.0)),
             ("siren", Node::Decimal("418273652".to_string())),
             ("prix", Node::Double(12.5)),
-            ("montant", Node::Decimal("33641278395.00".to_string())),
+            ("montant", Node::Decimal("33612345678.00".to_string())),
             ("telephoneSecours", Node::Double(12.5)),
         ]);
 
@@ -515,9 +516,10 @@ mod integration {
         assert_eq!(field(document, "prix"), &Node::Double(12.5));
         assert_eq!(
             field(document, "montant"),
-            &Node::Decimal("33641278395.00".to_string())
+            &Node::Decimal("33612345678.00".to_string())
         );
         assert_eq!(field(document, "telephoneSecours"), &Node::Double(12.5));
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -551,6 +553,12 @@ mod integration {
             panic!("items stays an array");
         };
         assert_eq!(field(&items[1], "sku"), &text("B-7"));
+        assert_ne!(field(&items[0], "nom"), &text("Kervadec"));
+        assert_ne!(field(&items[1], "nom"), &text("Hazvekmor"));
+        assert_eq!(
+            flagged(&anonymized, "items.nom"),
+            flag("last_name", Reason::Dictionary)
+        );
         assert_no_canary(&anonymized);
     }
 
@@ -574,6 +582,7 @@ mod integration {
         );
         assert_eq!(field(document, "adresse.id"), &text("ABC-12"));
         assert_eq!(flagged(&anonymized, "adresse.id"), None);
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -660,13 +669,208 @@ mod integration {
         let pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
         let injected = [("Kervadec".to_string(), pseudonym.clone())];
         let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
-        let document = object(vec![("note", text("rappeler Kervadec demain"))]);
+        let document = || object(vec![("note", text("rappeler Kervadec demain"))]);
 
-        let anonymized = anonymizer.documents(vec![document], &[]);
+        let anonymized = anonymizer.documents(vec![document()], &[]);
+        let without_pair = Anonymizer::new(&pseudonymizer, &[]).documents(vec![document()], &[]);
 
         assert_eq!(
             field(&anonymized.documents[0], "note"),
             &text(&format!("rappeler {pseudonym} demain"))
+        );
+        assert_ne!(
+            field(&without_pair.documents[0], "note"),
+            field(&anonymized.documents[0], "note")
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_valeur_injectee_est_remplacee_dans_une_cle_un_tableau_et_sous_un_chemin_en_clair() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let pseudonym = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
+        let injected = [("Kervadec".to_string(), pseudonym.clone())];
+        let anonymizer = Anonymizer::new(&pseudonymizer, &injected);
+        let document = object(vec![
+            ("Kervadec", Node::Int(1)),
+            ("notes", Node::Array(vec![text("voir Kervadec")])),
+            ("libelle", text("rappeler Kervadec")),
+        ]);
+        let clearances = [clearance("libelle", FieldClearance::Clear)];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_eq!(field(document, &pseudonym), &Node::Int(1));
+        assert_eq!(
+            field(document, "notes"),
+            &Node::Array(vec![text(&format!("voir {pseudonym}"))])
+        );
+        assert_eq!(
+            field(document, "libelle"),
+            &text(&format!("rappeler {pseudonym}"))
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn des_telephones_au_pluriel_en_int64_prennent_le_type_du_singulier() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "contact",
+            object(vec![(
+                "phones",
+                Node::Array(vec![Node::Int(33641278395), Node::Int(33758149236)]),
+            )]),
+        )]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        let Node::Array(phones) = field(&anonymized.documents[0], "contact.phones") else {
+            panic!("phones stays an array");
+        };
+        assert!(!phones.contains(&Node::Int(33641278395)), "{phones:?}");
+        assert!(!phones.contains(&Node::Int(33758149236)), "{phones:?}");
+        assert_eq!(
+            flagged(&anonymized, "contact.phones"),
+            flag("phone", Reason::Dictionary)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn des_prenoms_au_pluriel_en_minuscules_prennent_le_type_du_singulier() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![("prenoms", Node::Array(vec![text("ylwenna")]))]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        assert_ne!(
+            field(&anonymized.documents[0], "prenoms"),
+            &Node::Array(vec![text("ylwenna")])
+        );
+        assert_eq!(
+            flagged(&anonymized, "prenoms"),
+            flag("first_name", Reason::Dictionary)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_clearance_en_clair_sur_un_objet_ne_couvre_pas_ses_enfants_et_ses_cles_restent_scannees()
+    {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "contact",
+            object(vec![
+                ("nom", text("Kervadec")),
+                ("ylwenna.kervadec@canary-mail.fr", Node::Bool(true)),
+            ]),
+        )]);
+        let clearances = [clearance("contact", FieldClearance::Clear)];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_ne!(field(document, "contact.nom"), &text("Kervadec"));
+        assert_eq!(
+            flagged(&anonymized, "contact.nom"),
+            flag("last_name", Reason::Dictionary)
+        );
+        let email = pseudonymizer
+            .pseudonymize(Kind::Email, "ylwenna.kervadec@canary-mail.fr")
+            .text;
+        let Node::Object(entries) = field(document, "contact") else {
+            panic!("contact stays an object");
+        };
+        assert_eq!(entries[1], (email.clone(), Node::Bool(true)));
+        assert_eq!(
+            flagged(&anonymized, &format!("contact.{email}")),
+            flag("email", Reason::Detected)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_clearance_personnelle_couvre_tout_le_sous_arbre_sauf_un_enfant_declare_en_clair() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "dossier",
+            object(vec![
+                (
+                    "piece",
+                    object(vec![
+                        ("reference", text("lot-42")),
+                        ("tags", Node::Array(vec![text("lot-43"), text("lot-44")])),
+                    ]),
+                ),
+                ("libelle", text("Garance Bleue")),
+            ]),
+        )]);
+        let clearances = [
+            clearance("dossier", FieldClearance::Personal(Kind::LastName)),
+            clearance("dossier.libelle", FieldClearance::Clear),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_ne!(field(document, "dossier.piece.reference"), &text("lot-42"));
+        assert_eq!(
+            flagged(&anonymized, "dossier.piece.reference"),
+            flag("last_name", Reason::Policy)
+        );
+        let Node::Array(tags) = field(document, "dossier.piece.tags") else {
+            panic!("tags stays an array");
+        };
+        assert!(!tags.contains(&text("lot-43")), "{tags:?}");
+        assert!(!tags.contains(&text("lot-44")), "{tags:?}");
+        assert_eq!(
+            flagged(&anonymized, "dossier.piece.tags"),
+            flag("last_name", Reason::Policy)
+        );
+        assert_eq!(field(document, "dossier.libelle"), &text("Garance Bleue"));
+        assert_eq!(flagged(&anonymized, "dossier.libelle"), None);
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_clearance_sur_un_chemin_pointe_ou_a_travers_un_tableau_vise_ce_seul_champ() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![
+            ("contact", object(vec![("nom", text("Garance Bleue"))])),
+            (
+                "items",
+                Node::Array(vec![
+                    object(vec![("nom", text("Garance"))]),
+                    object(vec![("nom", text("Bleue"))]),
+                ]),
+            ),
+            ("client", object(vec![("nom", text("Kervadec"))])),
+        ]);
+        let clearances = [
+            clearance("contact.nom", FieldClearance::Clear),
+            clearance("items.nom", FieldClearance::Clear),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_eq!(field(document, "contact.nom"), &text("Garance Bleue"));
+        let Node::Array(items) = field(document, "items") else {
+            panic!("items stays an array");
+        };
+        assert_eq!(field(&items[0], "nom"), &text("Garance"));
+        assert_eq!(field(&items[1], "nom"), &text("Bleue"));
+        assert_ne!(field(document, "client.nom"), &text("Kervadec"));
+        assert_eq!(
+            anonymized.pseudonymized.keys().collect::<Vec<_>>(),
+            ["client.nom"]
         );
         assert_no_canary(&anonymized);
     }
@@ -716,6 +920,7 @@ mod integration {
                 opaque.clone()
             )])
         );
+        assert_no_canary(&anonymized);
     }
 
     #[test]
@@ -748,5 +953,6 @@ mod integration {
             &Node::Date("2026-03-02T09:15:00.000Z".to_string())
         );
         assert_eq!(flagged(&anonymized, "etiquette"), None);
+        assert_no_canary(&anonymized);
     }
 }

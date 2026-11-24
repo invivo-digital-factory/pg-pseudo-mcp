@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::classify::classify_named;
-use super::dictionary::dictionary_entry;
+use super::dictionary::{dictionary_entry, tokenize};
 use super::tracker::Tracker;
 use crate::contexts::anonymization::domain::types::{
     ColumnClass, ColumnFlag, FieldClearance, FieldPath, Kind, Reason,
 };
 
 const MAX_FLAGGED_PATHS: usize = 200;
+
+const MIN_SINGULAR_CHARS: usize = 2;
 
 pub struct FieldClearances(HashMap<String, FieldClearance>);
 
@@ -43,7 +45,7 @@ impl Place {
         let clearance = clearances.get(&source).or(inherited);
         let name_kind = match clearance {
             Some(FieldClearance::Clear) => None,
-            _ => dictionary_entry(key).unwrap_or(self.name_kind),
+            _ => key_entry(key).unwrap_or(self.name_kind),
         };
         Self {
             source,
@@ -95,6 +97,20 @@ impl Place {
                 }
             }
         }
+    }
+}
+
+fn key_entry(key: &str) -> Option<Option<Kind>> {
+    dictionary_entry(key).or_else(|| {
+        let singular: Vec<String> = tokenize(key).into_iter().map(singular).collect();
+        dictionary_entry(&singular.join("_"))
+    })
+}
+
+fn singular(token: String) -> String {
+    match token.strip_suffix('s') {
+        Some(stem) if stem.chars().count() >= MIN_SINGULAR_CHARS => stem.to_string(),
+        _ => token,
     }
 }
 
