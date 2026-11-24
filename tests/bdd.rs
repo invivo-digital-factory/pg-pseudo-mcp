@@ -23,6 +23,8 @@ mod import_dbeaver;
 mod lecture_seule;
 #[path = "../src/contexts/querying/test/steps/lecture_seule_mongodb.rs"]
 mod lecture_seule_mongodb;
+#[path = "../src/contexts/querying/test/steps/outils_mongodb.rs"]
+mod outils_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_champs_mongodb.rs"]
 mod politique_de_champs_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_colonnes.rs"]

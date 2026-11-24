@@ -14,7 +14,12 @@ use scarif_database_mcp::contexts::querying::presentation::{
 };
 use serde_json::Value;
 
-use crate::bdd_support::{CONNECTION, database_target, is_error, text_of, write_workspace};
+use crate::bdd_support::{
+    BASTION_HOST, BASTION_USER, CONNECTION, bastion_port, database_target, is_error,
+    known_hosts_pattern, public_key_fields, ssh_asset, text_of, write_workspace,
+};
+
+pub const MONGO_CONNECTION: &str = "atlas-test";
 
 pub struct Answer {
     pub refused: bool,
@@ -126,6 +131,56 @@ impl QueryingWorld {
         write_workspace(self._dbeaver.path(), &database_target(), true, None);
         let config = self.config();
         self.open_contexts(&config);
+    }
+
+    pub fn connect_to_test_mongodb(&mut self) {
+        let root = self._data.path();
+        let ssh_config = root.join("ssh_config_mongodb");
+        std::fs::write(
+            &ssh_config,
+            format!(
+                "Host bastion-test\n  HostName {BASTION_HOST}\n  Port {}\n  User {BASTION_USER}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n",
+                bastion_port(),
+                ssh_asset("tunnel_test_ed25519").display()
+            ),
+        )
+        .expect("ssh config");
+        let known_hosts = root.join("known_hosts");
+        std::fs::write(
+            &known_hosts,
+            format!(
+                "{} {}\n",
+                known_hosts_pattern(),
+                public_key_fields("ssh_host_ed25519_test.pub")
+            ),
+        )
+        .expect("known hosts");
+        let connections = root.join("connections.toml");
+        std::fs::write(
+            &connections,
+            format!(
+                "[[connection]]\nname = \"{MONGO_CONNECTION}\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\ndatabase = \"shop\"\nuser = \"atlas-reader\"\ntype = \"test\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"atlas-reader-test-pw\"]\nssh_alias = \"bastion-test\"\n"
+            ),
+        )
+        .expect("connection file");
+        let config = AppConfig {
+            ssh_known_hosts: Some(known_hosts),
+            ssh_config: Some(ssh_config),
+            connections_file: Some(connections),
+            ..self.config()
+        };
+        self.open_contexts(&config);
+    }
+
+    pub fn contexts(&self) -> &Contexts {
+        self.contexts.as_ref().expect("contexts opened")
+    }
+
+    pub fn record(&mut self, result: &rmcp::model::CallToolResult) {
+        self.answer = Some(Answer {
+            refused: is_error(result),
+            text: text_of(result),
+        });
     }
 
     pub fn load_column_policy(&mut self) {
