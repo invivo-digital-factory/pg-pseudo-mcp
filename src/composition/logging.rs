@@ -6,6 +6,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 const SILENCED_CRATES: [&str; 1] = ["fast_socks5"];
 const WARNINGS_ONLY_PREFIX: &str = "hickory_";
+const WARNINGS_ONLY_CRATES: [&str; 1] = ["rustls"];
 
 pub fn log_layer<S, W>(filter: EnvFilter, writer: W) -> impl Layer<S>
 where
@@ -23,5 +24,7 @@ fn silenced(metadata: &Metadata<'_>) -> bool {
     let target = metadata.target();
     let crate_name = target.split("::").next().unwrap_or(target);
     SILENCED_CRATES.contains(&crate_name)
-        || (crate_name.starts_with(WARNINGS_ONLY_PREFIX) && *metadata.level() > Level::WARN)
+        || ((crate_name.starts_with(WARNINGS_ONLY_PREFIX)
+            || WARNINGS_ONLY_CRATES.contains(&crate_name))
+            && *metadata.level() > Level::WARN)
 }
