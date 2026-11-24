@@ -23,6 +23,10 @@ impl DocumentLineage {
         let segments: Vec<String> = path.split('.').map(str::to_string).collect();
         self.root.at(&segments).lineage()
     }
+
+    pub fn of_segments(&self, segments: &[String]) -> FieldLineage {
+        self.root.at(segments).lineage()
+    }
 }
 
 pub fn document_lineage(guarded: &GuardedMongo, database: &str) -> DocumentLineage {
