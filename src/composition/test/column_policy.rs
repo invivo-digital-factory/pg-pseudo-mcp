@@ -7,8 +7,13 @@ use tempfile::TempDir;
 use crate::common::AppConfig;
 use crate::composition::contexts::Contexts;
 use crate::composition::server_info::server_info;
+use crate::contexts::anonymization::domain::types::{
+    FieldClearance, FieldPath, Kind, Node, Reason as Why,
+};
 use crate::contexts::anonymization::injector::AnonymizationInjector;
 use crate::contexts::connections::presentation::list_connections_with_warnings;
+use crate::contexts::querying::domain::services::column_policy::field_hint;
+use crate::contexts::querying::domain::types::{FieldSource, PolicyDecision, Reason};
 
 fn contexts(dir: &Path, shared: &str, local: Option<&str>) -> Contexts {
     let shared_path = dir.join("team-columns.toml");
@@ -151,5 +156,71 @@ mod unit {
         let dir = TempDir::new().unwrap();
         let contexts = contexts(dir.path(), "clear = []", Some("clear = []"));
         assert!(contexts.deprecation_warnings().is_empty());
+    }
+
+    fn reason_of(why: Why) -> Reason {
+        match why {
+            Why::Dictionary => Reason::Dictionary,
+            Why::Default => Reason::Default,
+            _ => Reason::Detected,
+        }
+    }
+
+    fn products_name_after(dir: &Path, shared: &str) -> (Node, Vec<String>, bool) {
+        let contexts = contexts(dir, shared, None);
+        let policy = contexts.querying.read_column_policy.execute().policy;
+        let field = FieldSource {
+            database: "shop".into(),
+            collection: "products".into(),
+            path: "name".into(),
+        };
+        let clearances: Vec<(FieldPath, FieldClearance)> = match policy.decide_field(&field) {
+            Some(PolicyDecision::Clear) => vec![(FieldPath::new("name"), FieldClearance::Clear)],
+            Some(PolicyDecision::Personal(kind)) => vec![(
+                FieldPath::new("name"),
+                FieldClearance::Personal(Kind::parse(kind).unwrap()),
+            )],
+            None => Vec::new(),
+        };
+        let document = Node::Object(vec![("name".into(), Node::Text("Garance Bleue".into()))]);
+        let anonymized = AnonymizationInjector::new(&dir.join("data"))
+            .use_cases()
+            .unwrap()
+            .anonymize_documents
+            .execute(vec![document], &clearances, &[]);
+        let hinted = anonymized.pseudonymized.get("name").and_then(|flag| {
+            field_hint(&policy, &field, reason_of(flag.why), &flag.kind)
+                .map(|hint| format!("{}:{}:{:?}", hint.collection, hint.field, hint.reason))
+        });
+        (
+            anonymized.documents[0].clone(),
+            hinted.into_iter().collect(),
+            anonymized.pseudonymized.contains_key("name"),
+        )
+    }
+
+    #[test]
+    fn ae12_un_champ_declare_en_clair_dans_le_fichier_revient_en_clair_sans_indice() {
+        let dir = TempDir::new().unwrap();
+        let (document, hints, flagged) =
+            products_name_after(dir.path(), "[mongodb.clear]\n\"*.products\" = [\"name\"]");
+        assert_eq!(
+            document,
+            Node::Object(vec![("name".into(), Node::Text("Garance Bleue".into()))])
+        );
+        assert!(hints.is_empty(), "{hints:?}");
+        assert!(!flagged);
+    }
+
+    #[test]
+    fn ae12_sans_entree_le_champ_est_pseudonymise_comme_nom_de_famille_avec_un_indice() {
+        let dir = TempDir::new().unwrap();
+        let (document, hints, flagged) = products_name_after(dir.path(), "");
+        assert_ne!(
+            document,
+            Node::Object(vec![("name".into(), Node::Text("Garance Bleue".into()))])
+        );
+        assert_eq!(hints, ["shop.products:name:Dictionary"]);
+        assert!(flagged);
     }
 }

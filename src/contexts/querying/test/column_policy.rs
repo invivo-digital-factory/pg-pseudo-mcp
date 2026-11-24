@@ -28,6 +28,7 @@ fn document(file: &str, clear: &[&str], personal: &[(&str, &str)]) -> ColumnPoli
                 .iter()
                 .map(|(pattern, kind)| (pattern.to_string(), kind.to_string()))
                 .collect(),
+            ..ColumnPolicyEntries::default()
         }),
     }
 }

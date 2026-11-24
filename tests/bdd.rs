@@ -19,6 +19,8 @@ mod fichier_de_connexions;
 mod import_dbeaver;
 #[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
 mod lecture_seule;
+#[path = "../src/contexts/querying/test/steps/politique_de_champs_mongodb.rs"]
+mod politique_de_champs_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_colonnes.rs"]
 mod politique_de_colonnes;
 #[path = "../src/contexts/anonymization/test/steps/pseudonymisation.rs"]
