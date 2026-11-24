@@ -28,6 +28,7 @@ services:
       retries: 30
   mongodb:
     build: tests/mongodb
+    init: true
     hostname: pl-0.atlas.scarif.test
     networks:
       default:

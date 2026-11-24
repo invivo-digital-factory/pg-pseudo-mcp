@@ -14,8 +14,9 @@ PIDS=()
 for port in $PORTS; do
   mkdir -p "/data/test/$port"
   mongod --replSet rs0 --bind_ip_all --port "$port" --dbpath "/data/test/$port" \
-    --keyFile "$KEYFILE" --quiet --logpath "/var/log/mongod-$port.log" &
+    --keyFile "$KEYFILE" --quiet --logpath "/var/log/mongod-$port.log" --wiredTigerCacheSizeGB 0.25 &
   PIDS+=($!)
+  tail -F "/var/log/mongod-$port.log" 2>/dev/null | sed -u "s/^/mongod-$port: /" &
 done
 
 wait_for() {
@@ -54,7 +55,8 @@ initialize() {
   touch /tmp/seed-done
 }
 
-initialize &
+MAIN=$$
+(initialize || { echo "replica set initialization failed" >&2; kill "$MAIN"; }) &
 INIT=$!
 wait -n "${PIDS[@]}"
 kill "$INIT" 2>/dev/null || true

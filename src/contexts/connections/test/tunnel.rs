@@ -21,16 +21,16 @@ use crate::contexts::connections::infrastructure::data_sources::postgres::{
 };
 
 const SSH_PORT_VAR: &str = "SCARIF_TEST_SSH_PORT";
-const SSH_HOST: &str = "localhost";
-const SSH_USER: &str = "tunnel";
-const SSH_PASSWORD: &str = "tunnel";
+pub(super) const SSH_HOST: &str = "localhost";
+pub(super) const SSH_USER: &str = "tunnel";
+pub(super) const SSH_PASSWORD: &str = "tunnel";
 const DROPPED_USER: &str = "dropped";
 const KEY_PASSPHRASE: &str = "pass";
 const REMOTE_HOST: &str = "postgres";
 const REMOTE_PORT: u16 = 5432;
 const TIMEOUT_MS: u64 = 10_000;
 
-fn ssh_port() -> u16 {
+pub(super) fn ssh_port() -> u16 {
     std::env::var(SSH_PORT_VAR)
         .ok()
         .and_then(|value| value.parse().ok())
