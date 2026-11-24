@@ -12,6 +12,7 @@ use ::mongodb::options::{ReadPreference, SelectionCriteria};
 use regex::Regex;
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::RwLock;
 
 use super::mongodb_replica::{MEMBER_HOST, require_gate};
 use super::tunnel::{
@@ -37,7 +38,9 @@ use crate::contexts::connections::infrastructure::data_sources::socks::{
     AllowedTarget, ChannelOpener, SocksFront, TargetPolicy,
 };
 use crate::contexts::connections::infrastructure::data_sources::ssh::{SshLink, TunnelStream};
-use crate::contexts::connections::infrastructure::mappers::AUTHENTICATION_REFUSED;
+use crate::contexts::connections::infrastructure::mappers::{
+    AUTHENTICATION_REFUSED, PROXY_CHANNEL_REFUSED,
+};
 use crate::contexts::connections::infrastructure::repositories::{
     CachedCommandPasswords, MongoSessionPool,
 };
@@ -53,6 +56,8 @@ const MEMBER_PORTS: [u16; 3] = [1024, 1025, 1026];
 const UNPERMITTED_PORT: u16 = 1027;
 const MAX_OPEN_CHANNELS: usize = 5;
 const UNAUTHORIZED: i32 = 13;
+
+static PRIMARY: RwLock<()> = RwLock::const_new(());
 const ELECTION_WAIT: Duration = Duration::from_secs(60);
 
 struct FixedCatalog(MongoConnectParams);
@@ -353,6 +358,7 @@ mod integration {
     #[ignore = "needs the docker compose ssh and mongodb services"]
     async fn un_find_par_le_bastion_decouvre_les_trois_membres_et_survit_a_une_bascule_du_primaire()
     {
+        let _election = PRIMARY.write().await;
         let harness = reader();
         let use_case = RunFind::new(harness.pool.clone());
         let first = use_case
@@ -480,8 +486,14 @@ mod integration {
             ),
             "{error:?}"
         );
+        assert_eq!(
+            error,
+            ConnectionError::ConnectFailed {
+                connection: CONNECTION.to_string(),
+                source: SessionError::Connect(PROXY_CHANNEL_REFUSED.to_string()),
+            }
+        );
         let text = error.to_string();
-        assert!(text.contains("[redacted]"), "{text}");
         for secret in [MEMBER_HOST, "scarif.test", READER.0, SSH_USER] {
             assert!(!text.contains(secret), "{secret} in {text}");
         }
@@ -492,6 +504,7 @@ mod integration {
     #[tokio::test]
     #[ignore = "needs the docker compose ssh and mongodb services"]
     async fn le_lecteur_ne_voit_que_ses_bases_autorisees_sans_les_bases_systeme() {
+        let _primary = PRIMARY.read().await;
         let harness = reader();
         let databases = ListDocumentDatabases::new(harness.pool.clone())
             .execute(CONNECTION)
@@ -583,6 +596,7 @@ mod integration {
     #[tokio::test]
     #[ignore = "needs the docker compose ssh and mongodb services"]
     async fn les_collections_et_vues_sont_listees_avec_leur_genre_et_leur_compte_estime() {
+        let _primary = PRIMARY.read().await;
         let harness = reader();
         let use_case = ReadCollections::new(harness.pool.clone());
         let collections = use_case
