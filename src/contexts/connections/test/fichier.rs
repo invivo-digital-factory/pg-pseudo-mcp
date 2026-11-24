@@ -7,8 +7,10 @@ use tempfile::TempDir;
 
 use super::dbeaver::PGPASS_ENV;
 use crate::common::AppConfig;
+use crate::contexts::connections::domain::errors::ConnectionError;
+use crate::contexts::connections::domain::services::resolve_connection;
 use crate::contexts::connections::domain::types::{
-    ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery, SslMode,
+    ConnectionEntry, ConnectionSource, ConnectionStatus, Discovery, PasswordSource, SslMode,
 };
 use crate::contexts::connections::infrastructure::data_sources::azure::{AzureCli, SystemClock};
 use crate::contexts::connections::infrastructure::data_sources::connection_file::DbeaverAccess;
@@ -137,6 +139,67 @@ fn une_connexion_azure_declaree_sur_un_hote_hors_azure_ne_lance_jamais_az_et_n_e
     assert!(shop.params.is_none());
     assert!(!marker.path().join("az-ran").exists());
     assert!(!setup.marker().exists());
+}
+
+fn mongo_entry(auth_lines: &str) -> String {
+    format!(
+        "[[connection]]\nname = \"atlas\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\nuser = \"reader\"\ntype = \"dev\"\n{auth_lines}\n"
+    )
+}
+
+#[test]
+fn une_connexion_mongodb_en_mode_azure_ou_pgpass_ne_lance_jamais_az() {
+    let marker = TempDir::new().unwrap();
+    let body = format!("touch {}/az-ran\n{WORKING_AZ}", marker.path().display());
+    let setup = Setup::new(&body, "*:*:*:*:pw\n");
+    for auth in ["auth = \"azure\"", "auth = \"pgpass\""] {
+        setup.write(&mongo_entry(auth));
+        let atlas = entry(&setup.discover(), "atlas");
+        assert_eq!(atlas.engine, "mongodb");
+        assert!(reason_of(&atlas).contains("`auth`"), "{atlas:?}");
+        assert!(atlas.params.is_none() && atlas.mongo.is_none());
+        assert!(!marker.path().join("az-ran").exists());
+    }
+}
+
+#[test]
+fn une_connexion_mongodb_en_mode_commande_porte_ses_parametres_sans_ouvrir_de_session() {
+    let setup = Setup::new("exit 1", "");
+    setup.write(&mongo_entry(
+        "auth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]\ndatabase = \"shop\"",
+    ));
+    let atlas = entry(&setup.discover(), "atlas");
+    assert_eq!(atlas.engine, "mongodb");
+    assert_eq!(atlas.status, ConnectionStatus::Available);
+    assert_eq!(atlas.database.as_deref(), Some("shop"));
+    assert!(atlas.params.is_none());
+    let mongo = atlas.mongo.expect("mongodb parameters");
+    assert_eq!(mongo.host, "pl-0.atlas.scarif.test");
+    assert_eq!(mongo.port, 1024);
+    assert_eq!(mongo.user, "reader");
+    assert!(!mongo.srv && !mongo.tls);
+    assert_eq!(mongo.replica_set.as_deref(), Some("rs0"));
+    assert_eq!(mongo.database.as_deref(), Some("shop"));
+    assert_eq!(
+        mongo.password,
+        PasswordSource::Command(vec!["/bin/echo".into(), "x".into()])
+    );
+    assert!(mongo.ssh_hops.is_none());
+}
+
+#[test]
+fn resoudre_une_connexion_mongodb_est_refuse_avec_un_motif_fixe_de_moteur_non_pris_en_charge() {
+    let setup = Setup::new("exit 1", "");
+    setup.write(&mongo_entry(
+        "auth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]",
+    ));
+    let error = resolve_connection(&setup.discover(), "atlas").unwrap_err();
+    let ConnectionError::Unsupported { reason } = error else {
+        panic!("expected an unsupported error, got {error:?}");
+    };
+    assert!(reason.contains("mongodb"), "{reason}");
+    assert!(reason.contains("not supported"), "{reason}");
+    assert!(!reason.contains("pl-0.atlas.scarif.test"), "{reason}");
 }
 
 #[test]

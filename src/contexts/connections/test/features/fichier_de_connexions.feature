@@ -217,3 +217,177 @@ Fonctionnalité: Fichier de connexions
     Et la raison de la connexion "via-absent" contient "SSH alias bastion-absent is not defined in the OpenSSH config"
     Et la raison de la connexion "via-absent" contient "add a Host block"
     Et la liste ne montre ni hôte, ni utilisateur, ni mot de passe
+
+  Scénario: Une connexion sans moteur déclaré est listée avec le moteur postgresql
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "app-prod"
+      host = "db.internal.example"
+      user = "reader"
+      type = "prod"
+      auth = "pgpass"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "app-prod" est listée avec le moteur "postgresql"
+
+  Scénario: Une connexion MongoDB en mode commande est listée disponible avec son moteur sans exécuter la commande
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-dev"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-dev" est listée comme disponible
+    Et la connexion "atlas-dev" est listée avec le moteur "mongodb"
+    Et la commande de mot de passe n'a pas été exécutée
+    Et la liste ne montre ni hôte, ni utilisateur, ni mot de passe
+
+  Scénario: Une connexion MongoDB sans SRV avec port, jeu de réplicas et TLS désactivé est listée disponible
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-local"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      port = 1024
+      srv = false
+      tls = false
+      replica_set = "rs0"
+      database = "shop"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/echo", "reader-secret"]
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-local" est listée comme disponible
+    Et la connexion "atlas-local" est listée avec le moteur "mongodb"
+
+  @ae11
+  Scénario: Une connexion MongoDB en mode azure est indisponible avec une raison qui nomme auth
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-azure"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "azure"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-azure" est listée comme indisponible
+    Et la raison de la connexion "atlas-azure" contient "`auth`"
+
+  Scénario: Une connexion MongoDB en mode pgpass est indisponible avec une raison qui nomme auth
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-pgpass"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "pgpass"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-pgpass" est listée comme indisponible
+    Et la raison de la connexion "atlas-pgpass" contient "`auth`"
+
+  Scénario: Une clé propre à l'autre moteur rend la connexion indisponible avec une raison qui la nomme
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-sslmode"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/echo", "reader-secret"]
+      sslmode = "require"
+
+      [[connection]]
+      name = "pg-srv"
+      host = "db.internal.example"
+      user = "reader"
+      type = "dev"
+      auth = "pgpass"
+      srv = true
+
+      [[connection]]
+      name = "pg-tls"
+      host = "db.internal.example"
+      user = "reader"
+      type = "dev"
+      auth = "pgpass"
+      tls = true
+
+      [[connection]]
+      name = "pg-replica"
+      host = "db.internal.example"
+      user = "reader"
+      type = "dev"
+      auth = "pgpass"
+      replica_set = "rs0"
+
+      [[connection]]
+      name = "atlas-tls-off"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      tls = false
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/echo", "reader-secret"]
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "atlas-sslmode" est listée comme indisponible
+    Et la raison de la connexion "atlas-sslmode" contient "`sslmode`"
+    Et la connexion "pg-srv" est listée comme indisponible
+    Et la raison de la connexion "pg-srv" contient "`srv`"
+    Et la connexion "pg-tls" est listée comme indisponible
+    Et la raison de la connexion "pg-tls" contient "`tls`"
+    Et la connexion "pg-replica" est listée comme indisponible
+    Et la raison de la connexion "pg-replica" contient "`replica_set`"
+    Et la connexion "atlas-tls-off" est listée comme indisponible
+    Et la raison de la connexion "atlas-tls-off" contient "`tls`"
+
+  Scénario: Un moteur inconnu rend la connexion indisponible avec une raison qui nomme engine
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "app"
+      engine = "mysql"
+      host = "db.internal.example"
+      user = "reader"
+      type = "dev"
+      auth = "pgpass"
+      """
+    Quand l'agent liste les connexions
+    Alors la connexion "app" est listée comme indisponible
+    Et la raison de la connexion "app" contient "`engine`"
+
+  Scénario: Un outil qui ouvrirait une session sur une connexion MongoDB est refusé sans exécuter la commande ni joindre PostgreSQL
+    Étant donné le fichier de connexions suivant :
+      """
+      [[connection]]
+      name = "atlas-dev"
+      engine = "mongodb"
+      host = "pl-0.atlas.scarif.test"
+      user = "reader"
+      type = "dev"
+      auth = "command"
+      password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
+      """
+    Quand l'agent exécute une requête de lecture sur la connexion "atlas-dev"
+    Alors la requête échoue avec une erreur qui contient "not supported"
+    Et l'erreur de la requête ne contient pas "pl-0.atlas.scarif.test"
+    Et la commande de mot de passe n'a pas été exécutée

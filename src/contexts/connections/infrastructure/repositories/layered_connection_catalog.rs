@@ -50,6 +50,7 @@ fn block_entries(mut discovery: Discovery, reason: &str) -> Discovery {
             reason: reason.to_string(),
         };
         entry.params = None;
+        entry.mongo = None;
     }
     discovery
 }

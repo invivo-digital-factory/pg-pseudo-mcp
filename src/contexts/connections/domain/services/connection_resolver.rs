@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::constants::{ENGINE_MONGODB, MONGODB_NOT_SUPPORTED};
 use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::types::{ConnectParams, ConnectionStatus, Discovery};
 
@@ -29,6 +30,11 @@ pub fn resolve_connection(
         (ConnectionStatus::Unavailable { reason }, _) => Err(ConnectionError::Unavailable {
             reason: reason.clone(),
         }),
+        (ConnectionStatus::Available, None) if entry.engine == ENGINE_MONGODB => {
+            Err(ConnectionError::Unsupported {
+                reason: MONGODB_NOT_SUPPORTED.to_string(),
+            })
+        }
         (ConnectionStatus::Available, None) => Err(ConnectionError::MissingParams),
     }
 }

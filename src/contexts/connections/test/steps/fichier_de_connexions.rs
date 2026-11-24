@@ -115,6 +115,13 @@ async fn connection_has_source(world: &mut ConnectionsWorld, name: String, sourc
     assert_eq!(found[0]["source"], source);
 }
 
+#[then(regex = r#"^la connexion "([^"]+)" est listée avec le moteur "([^"]+)"$"#)]
+async fn connection_has_engine(world: &mut ConnectionsWorld, name: String, engine: String) {
+    let found = entries(world, &name);
+    assert!(!found.is_empty(), "{name} is not listed");
+    assert_eq!(found[0]["engine"], engine);
+}
+
 #[then(regex = r#"^la connexion "([^"]+)" n'est listée qu'une seule fois$"#)]
 async fn connection_listed_once(world: &mut ConnectionsWorld, name: String) {
     assert_eq!(entries(world, &name).len(), 1);

@@ -140,6 +140,7 @@ fn unreadable_entry(project: &str, file_label: &str) -> ConnectionEntry {
             reason: UNREADABLE_REASON.to_string(),
         },
         params: None,
+        mongo: None,
     }
 }
 
@@ -203,6 +204,7 @@ fn build_entry(
         database,
         status,
         params,
+        mongo: None,
     }
 }
 

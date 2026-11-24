@@ -127,3 +127,32 @@ impl fmt::Debug for ConnectParams {
             .finish()
     }
 }
+
+#[derive(Clone)]
+pub struct MongoConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub srv: bool,
+    pub tls: bool,
+    pub replica_set: Option<String>,
+    pub database: Option<String>,
+    pub user: String,
+    pub password: PasswordSource,
+    pub ssh_hops: Option<Vec<SshHop>>,
+}
+
+impl fmt::Debug for MongoConnectParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MongoConnectParams")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("srv", &self.srv)
+            .field("tls", &self.tls)
+            .field("replica_set", &self.replica_set)
+            .field("database", &self.database)
+            .field("user", &self.user)
+            .field("password", &self.password)
+            .field("ssh_hops", &self.ssh_hops)
+            .finish()
+    }
+}

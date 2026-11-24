@@ -1,4 +1,5 @@
 use super::connection_profile::SslMode;
+use crate::contexts::connections::domain::constants::{ENGINE_MONGODB, ENGINE_POSTGRESQL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionType {
@@ -34,13 +35,35 @@ pub enum AuthMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MongoSettings {
+    pub database: Option<String>,
+    pub srv: bool,
+    pub tls: bool,
+    pub replica_set: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineSettings {
+    Postgresql { database: String, sslmode: SslMode },
+    Mongodb(MongoSettings),
+}
+
+impl EngineSettings {
+    pub fn engine(&self) -> &'static str {
+        match self {
+            Self::Postgresql { .. } => ENGINE_POSTGRESQL,
+            Self::Mongodb(_) => ENGINE_MONGODB,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionDefinition {
     pub name: String,
     pub host: String,
     pub port: u16,
-    pub database: String,
     pub user: String,
-    pub sslmode: SslMode,
+    pub settings: EngineSettings,
     pub connection_type: ConnectionType,
     pub auth: AuthMode,
     pub ssh_alias: Option<String>,

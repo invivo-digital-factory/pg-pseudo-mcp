@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use super::location::locate_for_write;
 use crate::contexts::connections::domain::errors::ConnectionFileWriteError;
 use crate::contexts::connections::domain::repositories::ConnectionFileWriter;
-use crate::contexts::connections::domain::types::{AuthMode, ConnectionDefinition};
+use crate::contexts::connections::domain::types::{AuthMode, ConnectionDefinition, EngineSettings};
 
 pub struct TomlConnectionFileWriter {
     configured: Option<PathBuf>,
@@ -66,19 +66,39 @@ fn quoted(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
+fn identity_lines(definition: &ConnectionDefinition) -> String {
+    let name = quoted(&definition.name);
+    let host = quoted(&definition.host);
+    let user = quoted(&definition.user);
+    let kind = quoted(definition.connection_type.as_str());
+    match &definition.settings {
+        EngineSettings::Postgresql { database, sslmode } => format!(
+            "[[connection]]\nname = {name}\nhost = {host}\nport = {}\ndatabase = {}\nuser = {user}\nsslmode = {}\ntype = {kind}\n",
+            definition.port,
+            quoted(database),
+            quoted(sslmode.as_str()),
+        ),
+        EngineSettings::Mongodb(settings) => {
+            let mut text = format!(
+                "[[connection]]\nname = {name}\nengine = \"mongodb\"\nhost = {host}\nport = {}\nsrv = {}\ntls = {}\n",
+                definition.port, settings.srv, settings.tls,
+            );
+            if let Some(replica_set) = &settings.replica_set {
+                text.push_str(&format!("replica_set = {}\n", quoted(replica_set)));
+            }
+            if let Some(database) = &settings.database {
+                text.push_str(&format!("database = {}\n", quoted(database)));
+            }
+            text.push_str(&format!("user = {user}\ntype = {kind}\n"));
+            text
+        }
+    }
+}
+
 fn render(definitions: &[ConnectionDefinition]) -> String {
     let mut text = String::new();
     for definition in definitions {
-        text.push_str(&format!(
-            "[[connection]]\nname = {}\nhost = {}\nport = {}\ndatabase = {}\nuser = {}\nsslmode = {}\ntype = {}\n",
-            quoted(&definition.name),
-            quoted(&definition.host),
-            definition.port,
-            quoted(&definition.database),
-            quoted(&definition.user),
-            quoted(definition.sslmode.as_str()),
-            quoted(definition.connection_type.as_str()),
-        ));
+        text.push_str(&identity_lines(definition));
         match &definition.auth {
             AuthMode::Pgpass => text.push_str("auth = \"pgpass\"\n"),
             AuthMode::Azure => text.push_str("auth = \"azure\"\n"),
@@ -103,7 +123,7 @@ mod integration {
     use std::path::Path;
 
     use super::*;
-    use crate::contexts::connections::domain::types::{ConnectionType, SslMode};
+    use crate::contexts::connections::domain::types::{ConnectionType, MongoSettings, SslMode};
     use crate::contexts::connections::infrastructure::data_sources::connection_file::parse_file;
 
     fn definition(name: &str, auth: AuthMode, alias: Option<&str>) -> ConnectionDefinition {
@@ -111,12 +131,27 @@ mod integration {
             name: name.to_string(),
             host: "db.internal".to_string(),
             port: 6432,
-            database: "ap\"p".to_string(),
             user: "alice".to_string(),
-            sslmode: SslMode::VerifyFull,
+            settings: EngineSettings::Postgresql {
+                database: "ap\"p".to_string(),
+                sslmode: SslMode::VerifyFull,
+            },
             connection_type: ConnectionType::Test,
             auth,
             ssh_alias: alias.map(str::to_string),
+        }
+    }
+
+    fn mongo_definition(name: &str, settings: MongoSettings) -> ConnectionDefinition {
+        ConnectionDefinition {
+            name: name.to_string(),
+            host: "pl-0.atlas.scarif.test".to_string(),
+            port: 1024,
+            user: "alice".to_string(),
+            settings: EngineSettings::Mongodb(settings),
+            connection_type: ConnectionType::Dev,
+            auth: AuthMode::Command(vec!["/bin/echo".into(), "x".into()]),
+            ssh_alias: Some("bastion".to_string()),
         }
     }
 
@@ -134,6 +169,39 @@ mod integration {
                 "c",
                 AuthMode::Command(vec!["op".into(), "read".into(), "op://v/x y".into()]),
                 None,
+            ),
+        ];
+        let path = writer_in(dir.path()).write(&definitions, false).unwrap();
+        let parsed = parse_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let read: Vec<ConnectionDefinition> = parsed
+            .entries
+            .into_iter()
+            .map(|entry| entry.definition.unwrap())
+            .collect();
+        assert_eq!(read, definitions);
+    }
+
+    #[test]
+    fn les_cles_mongodb_font_l_aller_retour_par_le_fichier_ecrit() {
+        let dir = tempfile::tempdir().unwrap();
+        let definitions = vec![
+            mongo_definition(
+                "full",
+                MongoSettings {
+                    database: Some("shop".to_string()),
+                    srv: false,
+                    tls: false,
+                    replica_set: Some("rs0".to_string()),
+                },
+            ),
+            mongo_definition(
+                "atlas",
+                MongoSettings {
+                    database: None,
+                    srv: true,
+                    tls: true,
+                    replica_set: None,
+                },
             ),
         ];
         let path = writer_in(dir.path()).write(&definitions, false).unwrap();

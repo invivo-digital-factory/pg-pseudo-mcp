@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::connection_profile::ConnectParams;
+use super::connection_profile::{ConnectParams, MongoConnectParams};
 use super::connection_source::ConnectionSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -24,6 +24,7 @@ pub struct ConnectionEntry {
     pub database: Option<String>,
     pub status: ConnectionStatus,
     pub params: Option<ConnectParams>,
+    pub mongo: Option<MongoConnectParams>,
 }
 
 #[derive(Debug, Clone)]
