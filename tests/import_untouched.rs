@@ -78,6 +78,7 @@ mod e2e {
         let output = Command::new(env!("CARGO_BIN_EXE_scarif-database-mcp"))
             .args(["connections", "import-dbeaver"])
             .env("HOME", dir.path())
+            .env("SCARIF_DATA_DIR", dir.path().join("data"))
             .env("SCARIF_DBEAVER_HOME", &workspace)
             .env("SCARIF_CONNECTIONS_FILE", &connections)
             .env("PGPASSFILE", &pgpass)

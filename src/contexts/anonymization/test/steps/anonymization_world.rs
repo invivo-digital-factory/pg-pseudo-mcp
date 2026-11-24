@@ -49,6 +49,7 @@ impl AnonymizationWorld {
             columns_file: None,
             xdg_config_home: None,
             home_dir: None,
+            data_home: None,
         };
         let handler = mapping_purge_handler(&config).expect("purge handler");
         let status = handler.run(true);

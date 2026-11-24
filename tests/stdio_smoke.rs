@@ -16,6 +16,7 @@ impl McpProcess {
         let ssh_config = isolation.path().join("ssh_config");
         std::fs::write(&ssh_config, "").expect("empty ssh config");
         let mut child = Command::new(env!("CARGO_BIN_EXE_scarif-database-mcp"))
+            .env("SCARIF_DATA_DIR", isolation.path().join("data"))
             .env(
                 "SCARIF_CONNECTIONS_FILE",
                 isolation.path().join("absent-connections.toml"),
