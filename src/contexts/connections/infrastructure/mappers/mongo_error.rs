@@ -13,6 +13,9 @@ pub const AUTHENTICATION_REFUSED: &str =
 pub const PROXY_CHANNEL_REFUSED: &str =
     "the bastion did not open a channel to the MongoDB cluster through the local SOCKS5 front";
 
+pub const BSON_CONVERSION_FAILED: &str =
+    "a document could not be converted between BSON and the result";
+
 const PLACEHOLDER: &str = "[redacted]";
 const MAX_TIME_EXPIRED: i32 = 50;
 const AUTHENTICATION_FAILED: i32 = 18;
@@ -30,7 +33,7 @@ enum FailureClass {
     Timeout,
     Refused { code_name: String, message: String },
     Unreachable(String),
-    Undecodable(String),
+    Undecodable,
     InvalidRequest(String),
 }
 
@@ -114,9 +117,9 @@ fn classify(failure: MongoFailure) -> FailureClass {
             },
             message: command.message.clone(),
         },
-        kind @ (ErrorKind::BsonDeserialization(_)
+        ErrorKind::BsonDeserialization(_)
         | ErrorKind::BsonSerialization(_)
-        | ErrorKind::InvalidResponse { .. }) => FailureClass::Undecodable(kind.to_string()),
+        | ErrorKind::InvalidResponse { .. } => FailureClass::Undecodable,
         ErrorKind::ProxyConnect { .. } => FailureClass::Proxy,
         kind => {
             let text = kind.to_string();
@@ -149,8 +152,8 @@ fn connection_error_from_class(
             connect_failed(SessionError::Connect(redaction.redact(&text)))
         }
         FailureClass::Timeout => ConnectionError::Session(SessionError::Timeout),
-        FailureClass::Undecodable(text) => {
-            ConnectionError::Session(SessionError::Decode(redaction.redact(&text)))
+        FailureClass::Undecodable => {
+            ConnectionError::Session(SessionError::Decode(BSON_CONVERSION_FAILED.to_string()))
         }
         FailureClass::Refused { code_name, message } => {
             ConnectionError::Session(server_message(Some(code_name), redaction.redact(&message)))
@@ -401,6 +404,27 @@ mod unit {
         assert!(text.contains("refused"), "{text}");
         for secret in ["bastion.corp.example", "jump.user", MEMBER] {
             assert!(!text.contains(secret), "{secret} in {text}");
+        }
+    }
+
+    #[test]
+    fn une_erreur_de_conversion_bson_rend_un_motif_fixe_sans_la_valeur_fautive() {
+        let canary = "invalid type: string \"jane.doe@canary-mail.fr\", expected i32";
+        let failures = [
+            driver(ErrorKind::BsonDeserialization(serde::de::Error::custom(
+                canary,
+            ))),
+            driver(ErrorKind::BsonSerialization(serde::ser::Error::custom(
+                canary,
+            ))),
+        ];
+        for failure in failures {
+            let error = connection_error_from_mongo("atlas", failure, &redaction(None));
+            assert_eq!(
+                error,
+                ConnectionError::Session(SessionError::Decode(BSON_CONVERSION_FAILED.into()))
+            );
+            assert!(!error.to_string().contains("canary-mail"), "{error}");
         }
     }
 
