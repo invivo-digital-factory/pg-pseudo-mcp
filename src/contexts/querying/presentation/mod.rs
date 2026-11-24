@@ -1,6 +1,9 @@
+mod aggregate;
 mod describe_table;
+mod engine_refusal;
 mod error_mapping;
 mod explain;
+mod find;
 mod json_result;
 mod list_databases;
 mod list_tables;
@@ -8,10 +11,13 @@ mod query;
 mod search_schema;
 mod tool_error;
 
-pub use describe_table::{DescribeTableArgs, describe_table};
+pub use aggregate::{AggregateArgs, aggregate};
+pub use describe_table::{DescribeTableArgs, describe_collection, describe_table};
+pub use engine_refusal::{use_document_tools, use_sql_tools};
 pub use explain::{ExplainArgs, explain};
+pub use find::{FindArgs, find};
 pub use json_result::json_result;
-pub use list_databases::{ListDatabasesArgs, list_databases};
-pub use list_tables::{ListTablesArgs, list_tables};
+pub use list_databases::{ListDatabasesArgs, list_databases, list_mongo_databases};
+pub use list_tables::{ListTablesArgs, list_collections, list_tables};
 pub use query::{QueryArgs, query};
-pub use search_schema::{SearchSchemaArgs, search_schema};
+pub use search_schema::{SearchSchemaArgs, search_collections, search_schema};

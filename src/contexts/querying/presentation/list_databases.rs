@@ -4,9 +4,9 @@ use serde::Deserialize;
 
 use super::error_mapping::tool_error;
 use super::json_result::json_result;
-use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
+use crate::contexts::querying::domain::repositories::{ReadOnlyDatabase, ReadOnlyDocumentStore};
 use crate::contexts::querying::domain::types::ListDatabasesRequest;
-use crate::contexts::querying::use_cases::ListDatabases;
+use crate::contexts::querying::use_cases::{ListDatabases, ListMongoDatabases};
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct ListDatabasesArgs {
@@ -16,6 +16,19 @@ pub struct ListDatabasesArgs {
 
 pub async fn list_databases<D: ReadOnlyDatabase>(
     use_case: &ListDatabases<D>,
+    args: ListDatabasesArgs,
+) -> CallToolResult {
+    let request = ListDatabasesRequest {
+        connection: args.connection,
+    };
+    match use_case.execute(request).await {
+        Ok(response) => json_result(&response),
+        Err(error) => tool_error(error).into_call_result(),
+    }
+}
+
+pub async fn list_mongo_databases<S: ReadOnlyDocumentStore>(
+    use_case: &ListMongoDatabases<S>,
     args: ListDatabasesArgs,
 ) -> CallToolResult {
     let request = ListDatabasesRequest {

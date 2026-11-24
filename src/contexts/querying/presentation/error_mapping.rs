@@ -138,6 +138,15 @@ pub fn tool_error(error: QueryingError) -> ToolError {
     }
 }
 
+pub fn wrong_engine(message: &str) -> ToolError {
+    ToolError::new(
+        ErrorCategory::ConnectionUnavailable,
+        "wrong_engine",
+        message,
+    )
+    .with_hint("list_connections shows the engine of each connection")
+}
+
 #[cfg(test)]
 mod unit {
     use super::*;

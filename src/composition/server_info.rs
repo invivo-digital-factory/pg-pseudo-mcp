@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::contexts::querying::domain::constants::limits;
+use crate::contexts::querying::domain::constants::{limits, mongo_policy};
 
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
@@ -15,8 +15,26 @@ pub struct ServerInfo {
     pub non_reversible_kinds: &'static [&'static str],
     pub acts_on_real_values: &'static [&'static str],
     pub known_limits: &'static [&'static str],
+    pub mongodb: MongoInfo,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<InfoWarning>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MongoInfo {
+    pub tools: &'static [&'static str],
+    pub stages: &'static [&'static str],
+    pub first_stage_only: &'static [&'static str],
+    pub query_operators: Vec<&'static str>,
+    pub expression_operators: &'static [&'static str],
+    pub max_pipeline_stages: usize,
+    pub max_nesting_depth: usize,
+    pub max_request_bytes: usize,
+    pub max_request_array_elements: usize,
+    pub max_returned_array_items: usize,
+    pub pseudonym_translation: &'static str,
+    pub acts_on_real_values: &'static [&'static str],
+    pub known_limits: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,7 +62,7 @@ pub fn server_info(
     ServerInfo {
         name: super::server::SERVER_NAME,
         version: env!("CARGO_PKG_VERSION"),
-        engines: &["postgresql"],
+        engines: &["postgresql", "mongodb"],
         defaults: Limits {
             max_rows: limits::DEFAULT_MAX_ROWS,
             max_bytes: limits::DEFAULT_MAX_BYTES,
@@ -61,6 +79,7 @@ pub fn server_info(
         non_reversible_kinds: NON_REVERSIBLE_KINDS,
         acts_on_real_values: ACTS_ON_REAL_VALUES,
         known_limits: KNOWN_LIMITS,
+        mongodb: mongo_info(),
         warnings: column_policy_warnings
             .into_iter()
             .map(|message| InfoWarning {
@@ -71,6 +90,46 @@ pub fn server_info(
             .collect(),
     }
 }
+
+fn mongo_info() -> MongoInfo {
+    MongoInfo {
+        tools: &["find", "aggregate"],
+        stages: mongo_policy::STAGES,
+        first_stage_only: mongo_policy::FIRST_STAGE_ONLY,
+        query_operators: mongo_policy::TOP_LEVEL_QUERY_OPERATORS
+            .iter()
+            .chain(mongo_policy::FIELD_QUERY_OPERATORS)
+            .chain(mongo_policy::GEOMETRY_OPERATORS)
+            .chain(mongo_policy::TEXT_OPERATORS)
+            .copied()
+            .collect(),
+        expression_operators: mongo_policy::EXPRESSION_OPERATORS,
+        max_pipeline_stages: mongo_policy::MAX_PIPELINE_STAGES,
+        max_nesting_depth: mongo_policy::MAX_NESTING_DEPTH,
+        max_request_bytes: mongo_policy::MAX_REQUEST_BYTES,
+        max_request_array_elements: mongo_policy::MAX_ARRAY_ELEMENTS,
+        max_returned_array_items: mongo_policy::MAX_RETURNED_ARRAY_ITEMS,
+        pseudonym_translation: mongo_policy::NOT_TRANSLATED_POSITIONS,
+        acts_on_real_values: MONGO_ACTS_ON_REAL_VALUES,
+        known_limits: MONGO_KNOWN_LIMITS,
+    }
+}
+
+pub const MONGO_ACTS_ON_REAL_VALUES: &[&str] = &[
+    "sort, $min and $max",
+    "range operators ($gt, $gte, $lt, $lte)",
+    "$regex, $text and string operators ($substrCP, $strLenCP, $indexOfCP)",
+    "counts and $group keys",
+    "date operators",
+];
+
+pub const MONGO_KNOWN_LIMITS: &[&str] = &[
+    "the guard is the only protection against writes when the MongoDB user holds readWrite",
+    "character-by-character probing through $regex or string operators is not prevented",
+    "describe_table reads a random sample of up to 100 documents; rare fields may be missing",
+    "a field computed by a pipeline is in clear only when every field it reads is declared clear in the column policy",
+    "object keys that contain a dot are never matched by the column policy",
+];
 
 pub const REVERSIBLE_KINDS: &[&str] = &[
     "email",
