@@ -335,4 +335,53 @@ mod unit {
             Some(&PolicyDecision::Clear)
         );
     }
+
+    #[test]
+    fn une_section_mongodb_invalide_dans_un_fichier_n_ecarte_pas_l_autre_fichier() {
+        let valid = |file: &str| document(file, &[("*.products", "name")], &[]);
+        let invalid = |file: &str| {
+            document(
+                file,
+                &[("shop.orders", "status")],
+                &[("shop.orders", "status", "person_name")],
+            )
+        };
+        for (first, second, ignored) in [
+            (invalid("shared.toml"), valid("local.toml"), "shared.toml"),
+            (valid("shared.toml"), invalid("local.toml"), "local.toml"),
+        ] {
+            let load = merge_policy(&[first, second], &known_kind);
+            assert_eq!(load.warnings.len(), 1, "{:?}", load.warnings);
+            assert!(load.warnings[0].contains(ignored), "{:?}", load.warnings);
+            assert_eq!(
+                load.policy
+                    .decide_field(&source("shop", "products", "name")),
+                Some(&PolicyDecision::Clear)
+            );
+            assert_eq!(
+                load.policy
+                    .decide_field(&source("shop", "orders", "status")),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn un_chemin_clair_et_personnel_qui_ne_differe_que_par_la_casse_fait_ignorer_le_fichier() {
+        let load = merge_policy(
+            &[document(
+                "shared.toml",
+                &[("shop.customers", "Name")],
+                &[("shop.customers", "name", "last_name")],
+            )],
+            &known_kind,
+        );
+        assert_eq!(load.policy, ColumnPolicy::default());
+        assert_eq!(load.warnings.len(), 1, "{:?}", load.warnings);
+        assert!(
+            load.warnings[0].contains("is ignored") && load.warnings[0].contains("shared.toml"),
+            "{:?}",
+            load.warnings
+        );
+    }
 }
