@@ -7,7 +7,7 @@ PasswordAuthentication yes
 KbdInteractiveAuthentication no
 AuthorizedKeysFile .ssh/authorized_keys
 AllowTcpForwarding yes
-PermitOpen postgres:5432 localhost:22
+PermitOpen postgres:5432 localhost:22 pl-0.atlas.scarif.test:1024 pl-0.atlas.scarif.test:1025 pl-0.atlas.scarif.test:1026
 X11Forwarding no
 PidFile /run/sshd.pid
 Subsystem sftp internal-sftp
