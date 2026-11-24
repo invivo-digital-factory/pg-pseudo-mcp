@@ -759,6 +759,52 @@ mod integration {
     }
 
     #[test]
+    fn des_codes_postaux_au_pluriel_en_aux_prennent_le_type_du_singulier_en_al() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![("codesPostaux", Node::Array(vec![Node::Int(75011)]))]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        assert_ne!(
+            field(&anonymized.documents[0], "codesPostaux"),
+            &Node::Array(vec![Node::Int(75011)])
+        );
+        assert_eq!(
+            flagged(&anonymized, "codesPostaux"),
+            flag("postal_code", Reason::Dictionary)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn des_dossiers_medicaux_au_pluriel_sont_traites_comme_le_dossier_medical_au_singulier() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "telephone",
+            object(vec![
+                ("dossierMedical", Node::Array(vec![text("DM-42")])),
+                ("dossiersMedicaux", Node::Array(vec![text("DM-43")])),
+            ]),
+        )]);
+
+        let anonymized = anonymizer.documents(vec![document], &[]);
+
+        let document = &anonymized.documents[0];
+        assert_eq!(
+            field(document, "telephone.dossierMedical"),
+            &Node::Array(vec![text("DM-42")])
+        );
+        assert_eq!(
+            field(document, "telephone.dossiersMedicaux"),
+            &Node::Array(vec![text("DM-43")])
+        );
+        assert_eq!(flagged(&anonymized, "telephone.dossiersMedicaux"), None);
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
     fn une_clearance_en_clair_sur_un_objet_ne_couvre_pas_ses_enfants_et_ses_cles_restent_scannees()
     {
         let (_dir, pseudonymizer) = pseudonymizer();

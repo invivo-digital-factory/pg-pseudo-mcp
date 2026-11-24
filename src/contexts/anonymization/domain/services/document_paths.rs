@@ -108,6 +108,11 @@ fn key_entry(key: &str) -> Option<Option<Kind>> {
 }
 
 fn singular(token: String) -> String {
+    if let Some(stem) = token.strip_suffix("aux")
+        && stem.chars().count() >= MIN_SINGULAR_CHARS
+    {
+        return format!("{stem}al");
+    }
     match token.strip_suffix('s') {
         Some(stem) if stem.chars().count() >= MIN_SINGULAR_CHARS => stem.to_string(),
         _ => token,
