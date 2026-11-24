@@ -243,6 +243,10 @@ async fn un_client_sans_les_identifiants_de_session_est_refuse_a_la_poignee_de_m
             other.credentials().password().to_string(),
         ),
         (username, other.credentials().password().to_string()),
+        (
+            other.credentials().username().to_string(),
+            front.credentials().password().to_string(),
+        ),
     ];
     for (username, password) in attempts {
         let (mut stream, status) = authenticated(&front, &username, &password).await;
