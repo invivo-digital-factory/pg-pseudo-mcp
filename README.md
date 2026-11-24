@@ -291,6 +291,8 @@ cargo test
 SCARIF_TEST_DATABASE_URL=postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo cargo test -- --include-ignored
 ```
 
+`SCARIF_PG_HOST_PORT` and `SCARIF_SSH_HOST_PORT` (compose) and `SCARIF_TEST_DATABASE_URL` and `SCARIF_TEST_SSH_PORT` (tests) must point at the same stack, which lets several local stacks coexist under different project names; `SCARIF_TEST_MONGODB=1` enables the MongoDB tests.
+
 The two-hop SSH tests need a bastion that may open a channel to itself (`PermitOpen` in `tests/ssh/sshd_config`). After pulling a change to `tests/ssh`, rebuild the bastion once with `docker compose up -d --build ssh`.
 
 The integration suite seeds fictional French personal data and checks that no seeded value, in any case, as an MD5 or base64 encoding, or as a fragment of an email, appears in any response.

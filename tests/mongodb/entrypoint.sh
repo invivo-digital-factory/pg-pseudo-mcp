@@ -10,6 +10,8 @@ KEYFILE=/etc/mongo-test-keyfile
 head -c 756 /dev/urandom | base64 -w 0 > "$KEYFILE"
 chmod 400 "$KEYFILE"
 
+rm -f /tmp/seed-done
+
 PIDS=()
 for port in $PORTS; do
   mkdir -p "/data/test/$port"
@@ -44,8 +46,14 @@ initialize() {
         { _id: 2, host: '$HOST:1026' }
       ]
     })"
-  wait_for 1024 "db.hello().isWritablePrimary"
-  mongosh --quiet --port 1024 --eval "
+  local primary=""
+  for _ in $(seq 1 120); do
+    primary=$(mongosh --quiet --port 1024 --eval "db.hello().primary || ''" 2>/dev/null || true)
+    [ -n "$primary" ] && break
+    sleep 1
+  done
+  [ -n "$primary" ] || { echo "no primary elected" >&2; return 1; }
+  mongosh --quiet --port "${primary##*:}" --eval "
     db.getSiblingDB('admin').createUser({
       user: '$ADMIN_USER', pwd: '$ADMIN_PASSWORD', roles: [{ role: 'root', db: 'admin' }]
     })"
@@ -56,7 +64,15 @@ initialize() {
 }
 
 MAIN=$$
-(initialize || { echo "replica set initialization failed" >&2; kill "$MAIN"; }) &
+(
+  set +e
+  ( set -e; initialize )
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "replica set initialization failed with status $status" >&2
+    kill "$MAIN"
+  fi
+) &
 INIT=$!
 wait -n "${PIDS[@]}"
 kill "$INIT" 2>/dev/null || true

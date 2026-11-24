@@ -8,7 +8,11 @@ mongosh --quiet \
     const members = rs.status().members;
     const primaries = members.filter((member) => member.stateStr === "PRIMARY");
     const secondaries = members.filter((member) => member.stateStr === "SECONDARY");
-    const customers = db.getSiblingDB("shop").customers.countDocuments({});
-    if (members.length !== 3 || primaries.length !== 1 || secondaries.length !== 2 || customers < 1) {
+    const shop = db.getSiblingDB("shop");
+    const seeded = ["customers", "orders", "products", "events", "customer_contacts"].every(
+      (name) => shop[name].countDocuments({}) > 0,
+    );
+    const view = shop.getCollectionInfos({ name: "customer_contacts", type: "view" }).length === 1;
+    if (members.length !== 3 || primaries.length !== 1 || secondaries.length !== 2 || !seeded || !view) {
       quit(1);
     }'
