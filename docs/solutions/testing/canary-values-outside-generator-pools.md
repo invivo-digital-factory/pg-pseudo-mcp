@@ -7,7 +7,7 @@ problem_type: best_practice
 component: testing_framework
 severity: high
 applies_when:
-  - "adding or renaming a canary value in tests/sql/seed.sql or tests/common/mod.rs"
+  - "adding or renaming a canary value in tests/sql/seed.sql or tests/common/canary_values.rs"
   - "changing the name lists used for detection or pseudonym generation"
 tags: [canary, pseudonymization, gazetteer, flaky-test, leak-detection]
 ---

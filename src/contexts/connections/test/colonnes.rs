@@ -3,7 +3,7 @@ use std::fs;
 use tempfile::TempDir;
 
 use crate::contexts::connections::domain::repositories::ColumnPolicyFiles;
-use crate::contexts::connections::domain::types::ColumnPolicyEntries;
+use crate::contexts::connections::domain::types::{ColumnPolicyEntries, MongoPolicyEntries};
 use crate::contexts::connections::infrastructure::data_sources::column_policy_file::parse_policy;
 use crate::contexts::connections::infrastructure::repositories::TomlColumnPolicyFiles;
 
@@ -32,6 +32,7 @@ mod unit {
                     ("*.siret_client".to_string(), "siret".to_string()),
                     ("customer.contact".to_string(), "person_name".to_string()),
                 ],
+                ..ColumnPolicyEntries::default()
             })
         );
     }
@@ -63,6 +64,54 @@ mod unit {
     }
 
     #[test]
+    fn la_section_mongodb_donne_les_champs_clairs_et_personnels_par_collection() {
+        let contents = r#"
+clear = ["*.product_name"]
+
+[mongodb.clear]
+"shop.orders" = ["items.label", "status"]
+"*.products" = ["name"]
+
+[mongodb.personal."shop.customers"]
+"contact.mobile" = "phone"
+"#;
+        assert_eq!(
+            parse_policy(contents),
+            Ok(ColumnPolicyEntries {
+                clear: vec!["*.product_name".to_string()],
+                personal: Vec::new(),
+                mongodb: MongoPolicyEntries {
+                    clear: vec![
+                        ("*.products".to_string(), "name".to_string()),
+                        ("shop.orders".to_string(), "items.label".to_string()),
+                        ("shop.orders".to_string(), "status".to_string()),
+                    ],
+                    personal: vec![(
+                        "shop.customers".to_string(),
+                        "contact.mobile".to_string(),
+                        "phone".to_string()
+                    )],
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn une_section_mongodb_mal_structuree_est_refusee() {
+        for contents in [
+            "mongodb = 1",
+            "[mongodb]\nclear = [\"name\"]",
+            "[mongodb]\nsecret = {}",
+            "[mongodb.clear]\n\"shop.orders\" = \"status\"",
+            "[mongodb.clear]\n\"shop.orders\" = [1]",
+            "[mongodb.personal]\n\"shop.customers\" = \"phone\"",
+            "[mongodb.personal.\"shop.customers\"]\n\"contact.mobile\" = 1",
+        ] {
+            assert!(parse_policy(contents).is_err(), "{contents}");
+        }
+    }
+
+    #[test]
     fn le_fichier_partage_est_lu_avant_le_fichier_local() {
         let dir = TempDir::new().unwrap();
         let shared = dir.path().join("shared.toml");
@@ -78,6 +127,7 @@ mod unit {
             Ok(ColumnPolicyEntries {
                 clear: vec!["orders.reference".to_string()],
                 personal: Vec::new(),
+                ..ColumnPolicyEntries::default()
             })
         );
     }

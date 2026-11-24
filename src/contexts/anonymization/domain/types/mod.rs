@@ -1,3 +1,4 @@
+pub mod anonymized_documents;
 pub mod anonymized_rows;
 pub mod cell;
 pub mod clearance;
@@ -5,6 +6,7 @@ pub mod column;
 pub mod column_flag;
 pub mod column_meta;
 pub mod database_message;
+pub mod document;
 pub mod kind;
 pub mod lineage;
 pub mod pseudonym;
@@ -13,6 +15,7 @@ pub mod reason;
 pub mod store_outcome;
 pub mod text;
 
+pub use anonymized_documents::AnonymizedDocuments;
 pub use anonymized_rows::AnonymizedRows;
 pub use cell::Cell;
 pub use clearance::Clearance;
@@ -20,6 +23,7 @@ pub use column::{ColumnClass, ColumnInfo};
 pub use column_flag::ColumnFlag;
 pub use column_meta::{ColumnMeta, ColumnSource};
 pub use database_message::DatabaseMessage;
+pub use document::{FieldClearance, FieldPath, Node};
 pub use kind::Kind;
 pub use lineage::Lineage;
 pub use pseudonym::{GeneratorConfig, Pseudonym};

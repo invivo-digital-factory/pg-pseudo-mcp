@@ -10,6 +10,7 @@ mod database_listing;
 mod db_message;
 mod execution_limits;
 mod import_report;
+mod mongo_policy_entries;
 mod password_source;
 mod query_output;
 mod secret;
@@ -34,6 +35,7 @@ pub use import_report::{
     DbeaverDefinition, DbeaverRead, DbeaverTunnel, HostBlock, ImportReport, ImportedConnection,
     SkippedConnection,
 };
+pub use mongo_policy_entries::MongoPolicyEntries;
 pub use password_source::PasswordSource;
 pub use query_output::{ColumnMeta, ColumnSource, QueryOutput};
 pub use secret::Secret;

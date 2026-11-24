@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use super::{ColumnPattern, ColumnSource, PolicyDecision};
+use super::{
+    ColumnPattern, ColumnSource, FieldSource, MongoFieldPattern, MongoFieldPolicy, PolicyDecision,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ColumnPolicy {
     entries: HashMap<ColumnPattern, PolicyDecision>,
+    fields: MongoFieldPolicy,
 }
 
 impl ColumnPolicy {
@@ -12,8 +15,17 @@ impl ColumnPolicy {
         self.entries.insert(pattern, decision);
     }
 
+    pub fn insert_field(&mut self, pattern: MongoFieldPattern, decision: PolicyDecision) {
+        self.fields.insert(pattern, decision);
+    }
+
     pub fn extend(&mut self, later: ColumnPolicy) {
         self.entries.extend(later.entries);
+        self.fields.extend(later.fields);
+    }
+
+    pub fn decide_field(&self, source: &FieldSource) -> Option<&PolicyDecision> {
+        self.fields.decide(source)
     }
 
     pub fn decide(&self, source: &ColumnSource) -> Option<&PolicyDecision> {

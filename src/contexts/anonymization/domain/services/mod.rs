@@ -2,6 +2,7 @@ pub mod anonymizer;
 pub mod classify;
 pub mod detect;
 pub mod dictionary;
+pub mod document_paths;
 pub mod freetext;
 pub mod gazetteer;
 pub mod generators;

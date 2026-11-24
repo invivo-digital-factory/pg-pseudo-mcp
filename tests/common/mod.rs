@@ -21,35 +21,8 @@ pub use scarif_database_mcp::contexts::querying::presentation::{
 pub const DATABASE_URL_VAR: &str = "SCARIF_TEST_DATABASE_URL";
 pub const CONNECTION: &str = "canary-local";
 
-pub const CANARY_VALUES: &[&str] = &[
-    "Ylwenna",
-    "Kervadec",
-    "ylwenna.kervadec@canary-mail.fr",
-    "06 41 27 83 95",
-    "33641278395",
-    "FR76 3000 4000 0312 3456 7890 143",
-    "418273652",
-    "2851175123456 22",
-    "o.hazvekmor@canary-mail.fr",
-    "kervadec.ylwenna@canary-mail.fr",
-    "ylwenna.k@canary-mail.fr",
-    "yk.pro@canary-mail.fr",
-    "Odrigan",
-    "Hazvekmor",
-    "odrigan.hazvekmor@canary-mail.fr",
-    "07 58 14 92 36",
-    "33758149236",
-    "FR14 2004 1010 0505 0001 3M02 606",
-    "odrigan.h@canary-mail.fr",
-    "Maëlouz",
-    "Brizolier",
-    "maelouz.brizolier@canary-mail.fr",
-    "Ylwenna Kervadec",
-    "Odrigan Hazvekmor",
-    "06 52 18 74 30",
-    "12 rue des Lilas",
-    "zivrel.quanteb@canary-mail.fr",
-];
+mod canary_values;
+pub use canary_values::CANARY_VALUES;
 
 pub fn database_url() -> String {
     std::env::var(DATABASE_URL_VAR)

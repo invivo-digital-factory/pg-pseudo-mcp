@@ -5,12 +5,14 @@ use serde_json::{Map, Value, json};
 use super::classify::{classify_column, forced_reason, judge_text, numeric_shape_kind};
 use super::detect::{detect_spans, structural_spans};
 use super::dictionary::{dictionary_kind, fold};
+use super::document_paths::{FieldClearances, PathFlags, Place};
 use super::injected_text::replace_injected;
 use super::pseudonymizer::Pseudonymizer;
 use super::tracker::Tracker;
 use crate::contexts::anonymization::domain::types::{
-    AnonymizedRows, Cell, Clearance, ColumnClass, ColumnFlag, ColumnInfo, ColumnMeta,
-    DatabaseMessage, Kind, Lineage, Reason, Span, TextVerdict,
+    AnonymizedDocuments, AnonymizedRows, Cell, Clearance, ColumnClass, ColumnFlag, ColumnInfo,
+    ColumnMeta, DatabaseMessage, FieldClearance, FieldPath, Kind, Lineage, Node, Reason, Span,
+    TextVerdict,
 };
 
 pub struct Anonymizer<'a> {
@@ -123,6 +125,145 @@ impl<'a> Anonymizer<'a> {
             pseudonymized,
             per_column,
         }
+    }
+
+    pub fn documents(
+        &self,
+        documents: Vec<Node>,
+        clearances: &[(FieldPath, FieldClearance)],
+    ) -> AnonymizedDocuments {
+        let clearances = FieldClearances::new(clearances);
+        let root = Place::default();
+        let mut flags = PathFlags::default();
+        let documents = documents
+            .into_iter()
+            .map(|document| self.node(document, &root, &clearances, &mut flags))
+            .collect();
+        let (pseudonymized, omitted_paths) = flags.into_parts();
+        AnonymizedDocuments {
+            documents,
+            pseudonymized,
+            omitted_paths,
+        }
+    }
+
+    fn node(
+        &self,
+        node: Node,
+        place: &Place,
+        clearances: &FieldClearances,
+        flags: &mut PathFlags,
+    ) -> Node {
+        match node {
+            Node::Array(items) => Node::Array(
+                items
+                    .into_iter()
+                    .map(|item| self.node(item, place, clearances, flags))
+                    .collect(),
+            ),
+            Node::Object(entries) => {
+                let (class, tainted) = place.class(DOCUMENT_TEXT);
+                Node::Object(
+                    entries
+                        .into_iter()
+                        .map(|(key, value)| {
+                            let mut tracker = Tracker::default();
+                            let shown =
+                                self.json_key(&key, class.structural_only, tainted, &mut tracker);
+                            let child = place.child(&key, &shown, clearances);
+                            flags.record(child.shown(), &tracker, class.derived);
+                            (shown, self.node(value, &child, clearances, flags))
+                        })
+                        .collect(),
+                )
+            }
+            scalar => {
+                let mut tracker = Tracker::default();
+                let (value, derived) = self.scalar(scalar, place, &mut tracker);
+                flags.record(place.shown(), &tracker, derived);
+                value
+            }
+        }
+    }
+
+    fn scalar(&self, node: Node, place: &Place, tracker: &mut Tracker) -> (Node, bool) {
+        match node {
+            Node::Int(value) => {
+                let (class, _) = place.class("long");
+                let value = match self.number_pseudonym(&value.to_string(), &class, tracker) {
+                    Some(pseudonym) => pseudonym.parse().map_or(Node::Text(pseudonym), Node::Int),
+                    None => Node::Int(value),
+                };
+                (value, class.derived)
+            }
+            Node::Double(value)
+                if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e18 =>
+            {
+                let (class, _) = place.class("double");
+                let digits = format!("{}", value as i64);
+                let value = match self.number_pseudonym(&digits, &class, tracker) {
+                    Some(pseudonym) => pseudonym
+                        .parse::<i64>()
+                        .map_or(Node::Text(pseudonym), |number| Node::Double(number as f64)),
+                    None => Node::Double(value),
+                };
+                (value, class.derived)
+            }
+            Node::Decimal(text) => {
+                let (class, _) = place.class("decimal");
+                let value = match self.number_pseudonym(&text, &class, tracker) {
+                    Some(pseudonym) if pseudonym.parse::<i64>().is_ok() => Node::Decimal(pseudonym),
+                    Some(pseudonym) => Node::Text(pseudonym),
+                    None => Node::Decimal(text),
+                };
+                (value, class.derived)
+            }
+            Node::Text(text) => {
+                let (class, tainted) = place.class(DOCUMENT_TEXT);
+                (
+                    Node::Text(self.text(&text, &class, tainted, tracker)),
+                    class.derived,
+                )
+            }
+            Node::Date(text) => {
+                let (class, _) = place.class("date");
+                let value = if class.derived && class.forced_kind.is_none() {
+                    self.pseudonymize(Kind::BirthDate, &text, Reason::Derived, tracker)
+                } else if class.forced_kind == Some(Kind::BirthDate) {
+                    self.pseudonymize(Kind::BirthDate, &text, forced_reason(&class), tracker)
+                } else {
+                    text
+                };
+                (Node::Date(value), class.derived)
+            }
+            Node::Binary { len, .. } => self.opaque_node("binary", len, place, tracker),
+            Node::Opaque { type_name, len } => self.opaque_node(&type_name, len, place, tracker),
+            Node::Double(_)
+            | Node::Null
+            | Node::Bool(_)
+            | Node::ObjectId(_)
+            | Node::Uuid(_)
+            | Node::Timestamp(_)
+            | Node::MinKey
+            | Node::MaxKey
+            | Node::Array(_)
+            | Node::Object(_) => (node, false),
+        }
+    }
+
+    fn opaque_node(
+        &self,
+        type_name: &str,
+        len: usize,
+        place: &Place,
+        tracker: &mut Tracker,
+    ) -> (Node, bool) {
+        tracker.note(Kind::PersonName, Reason::Default, false);
+        let (class, _) = place.class(type_name);
+        (
+            Node::Text(format!("<{type_name} len={len}>")),
+            class.derived,
+        )
     }
 
     pub fn free_text(&self, text: &str) -> String {
@@ -248,28 +389,33 @@ impl<'a> Anonymizer<'a> {
         class: &ColumnClass,
         tracker: &mut Tracker,
     ) -> Value {
-        let hint = match class.forced_kind {
-            Some(hint) => hint,
-            None if class.derived => {
-                let Some(kind) = DERIVED_NUMBER_KINDS
-                    .iter()
-                    .find_map(|kind| numeric_shape_kind(digits, Some(*kind)))
-                else {
-                    return original;
-                };
-                kind
-            }
-            None => return original,
+        let Some(pseudonym) = self.number_pseudonym(digits, class, tracker) else {
+            return original;
         };
-        let kind = numeric_shape_kind(digits, Some(hint)).unwrap_or(hint);
-        let integral = digits.split('.').next().unwrap_or(digits);
-        let pseudonym = self.pseudonymize(kind, integral, forced_reason(class), tracker);
         if original.is_number()
             && let Ok(number) = pseudonym.parse::<i64>()
         {
             return json!(number);
         }
         Value::String(pseudonym)
+    }
+
+    fn number_pseudonym(
+        &self,
+        digits: &str,
+        class: &ColumnClass,
+        tracker: &mut Tracker,
+    ) -> Option<String> {
+        let hint = match class.forced_kind {
+            Some(hint) => hint,
+            None if class.derived => DERIVED_NUMBER_KINDS
+                .iter()
+                .find_map(|kind| numeric_shape_kind(digits, Some(*kind)))?,
+            None => return None,
+        };
+        let kind = numeric_shape_kind(digits, Some(hint)).unwrap_or(hint);
+        let integral = digits.split('.').next().unwrap_or(digits);
+        Some(self.pseudonymize(kind, integral, forced_reason(class), tracker))
     }
 
     fn text(
@@ -516,6 +662,8 @@ impl<'a> Anonymizer<'a> {
 }
 
 const DERIVED_WHOLE_VALUE_WORDS: usize = 6;
+
+const DOCUMENT_TEXT: &str = "string";
 
 const DERIVED_PERSONAL: &str = "derived_personal";
 
