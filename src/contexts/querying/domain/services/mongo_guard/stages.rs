@@ -47,6 +47,15 @@ impl Walker {
                 &format!("a pipeline holds more than {MAX_PIPELINE_STAGES} stages"),
             ));
         }
+        self.stages += stages.len();
+        if self.stages > MAX_PIPELINE_STAGES {
+            return Err(self.refuse(
+                "mongo_pipeline_too_long",
+                &format!(
+                    "the pipeline and its sub-pipelines hold more than {MAX_PIPELINE_STAGES} stages in all"
+                ),
+            ));
+        }
         for (index, stage) in stages.iter().enumerate() {
             self.enter_index(index, |walker| walker.stage(stage, top_level && index == 0))?;
         }

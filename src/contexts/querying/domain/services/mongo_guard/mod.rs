@@ -156,6 +156,7 @@ struct Walker {
     path: Vec<Segment>,
     sites: Vec<LiteralSite>,
     in_expr: bool,
+    stages: usize,
 }
 
 impl Walker {

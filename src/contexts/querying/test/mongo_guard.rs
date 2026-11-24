@@ -1326,4 +1326,30 @@ mod unit {
         unique.dedup();
         assert_eq!(unique.len(), EXPRESSION_OPERATORS.len());
     }
+
+    #[test]
+    fn le_plafond_d_etapes_compte_toutes_les_branches_et_sous_pipelines() {
+        let branch = |count: usize| -> Value {
+            Value::Array((0..count).map(|_| json!({"$match": {}})).collect())
+        };
+        let refusal = aggregate_refusal(json!([
+            {"$facet": {"a": branch(20), "b": branch(20), "c": branch(20)}}
+        ]));
+        assert_eq!(refusal.code, "mongo_pipeline_too_long");
+        assert!(refusal.message.contains("50"), "{}", refusal.message);
+
+        let refusal = aggregate_refusal(json!([
+            {"$lookup": {"from": "orders", "as": "o", "pipeline": branch(30)}},
+            {"$unionWith": {"coll": "orders", "pipeline": branch(30)}}
+        ]));
+        assert_eq!(refusal.code, "mongo_pipeline_too_long");
+
+        assert!(
+            prepare_aggregate(
+                &aggregate(json!([{"$facet": {"a": branch(24), "b": branch(24)}}])),
+                &FakeStore::known()
+            )
+            .is_ok()
+        );
+    }
 }
