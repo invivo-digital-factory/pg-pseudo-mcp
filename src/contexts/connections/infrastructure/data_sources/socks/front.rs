@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -12,17 +13,17 @@ use fast_socks5::server::{Config, DenyAuthentication, Socks5Socket};
 use fast_socks5::util::target_addr::TargetAddr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::{AbortHandle, JoinHandle, JoinSet};
 
 use super::authentication::authenticate;
 use super::channel_opener::ChannelOpener;
 use super::credentials::ProxyCredentials;
 use super::target_policy::{AllowedTarget, TargetPolicy};
 
+const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
-const PENDING_NEGOTIATIONS: usize = 32;
+const PENDING_HANDSHAKES: usize = 32;
 
 type RequestConfig = Config<DenyAuthentication>;
 
@@ -83,43 +84,59 @@ fn request_config() -> RequestConfig {
 }
 
 async fn serve<C: ChannelOpener>(listener: TcpListener, relay: Arc<Relay<C>>) {
-    let mut connections = JoinSet::new();
-    let pending = Arc::new(Semaphore::new(PENDING_NEGOTIATIONS));
+    let mut handshakes = JoinSet::new();
+    let mut oldest_first: VecDeque<AbortHandle> = VecDeque::new();
+    let mut relays = JoinSet::new();
     loop {
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
-                    if let Ok(slot) = pending.clone().try_acquire_owned() {
-                        connections.spawn(relay_connection(stream, relay.clone(), slot));
+                    if oldest_first.len() >= PENDING_HANDSHAKES
+                        && let Some(oldest) = oldest_first.pop_front()
+                    {
+                        oldest.abort();
                     }
+                    let credentials = relay.credentials.clone();
+                    oldest_first.push_back(handshakes.spawn(handshake(stream, credentials)));
                 }
                 Err(_) => tokio::time::sleep(ACCEPT_BACKOFF).await,
             },
-            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+            Some(finished) = handshakes.join_next_with_id(), if !handshakes.is_empty() => {
+                let id = match &finished {
+                    Ok((id, _)) => *id,
+                    Err(error) => error.id(),
+                };
+                oldest_first.retain(|handle| handle.id() != id);
+                if let Ok((_, Some(stream))) = finished {
+                    relays.spawn(relay_connection(stream, relay.clone()));
+                }
+            }
+            Some(_) = relays.join_next(), if !relays.is_empty() => {}
         }
     }
 }
 
-async fn relay_connection<C: ChannelOpener>(
-    stream: TcpStream,
-    relay: Arc<Relay<C>>,
-    slot: OwnedSemaphorePermit,
-) {
+async fn handshake(mut stream: TcpStream, credentials: ProxyCredentials) -> Option<TcpStream> {
     let _ = stream.set_nodelay(true);
+    let accepted = tokio::time::timeout(
+        AUTHENTICATION_TIMEOUT,
+        authenticate(&mut stream, &credentials),
+    )
+    .await;
+    matches!(accepted, Ok(Ok(true))).then_some(stream)
+}
+
+async fn relay_connection<C: ChannelOpener>(stream: TcpStream, relay: Arc<Relay<C>>) {
     let negotiated = tokio::time::timeout(NEGOTIATION_TIMEOUT, negotiate(stream, &relay)).await;
-    drop(slot);
     if let Ok(Some((mut client, mut channel))) = negotiated {
         let _ = tokio::io::copy_bidirectional(&mut client, &mut channel).await;
     }
 }
 
 async fn negotiate<C: ChannelOpener>(
-    mut stream: TcpStream,
+    stream: TcpStream,
     relay: &Relay<C>,
 ) -> Option<(TcpStream, C::Stream)> {
-    if !authenticate(&mut stream, &relay.credentials).await.ok()? {
-        return None;
-    }
     let socket = Socks5Socket::new(stream, relay.config.clone())
         .upgrade_to_socks5()
         .await

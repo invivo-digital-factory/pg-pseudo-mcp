@@ -28,7 +28,8 @@ const GENERAL_FAILURE: u8 = 0x01;
 const COMMAND_NOT_SUPPORTED: u8 = 0x07;
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(5);
-const PENDING_NEGOTIATIONS: usize = 32;
+const PENDING_HANDSHAKES: usize = 32;
+const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
 struct CountingOpener {
@@ -394,41 +395,6 @@ async fn un_message_d_accueil_mal_forme_est_refuse_sans_ouvrir_de_canal() {
     assert!(opener.opened().is_empty());
 }
 
-#[tokio::test]
-async fn une_negociation_bloquee_est_coupee_apres_vingt_secondes() {
-    let opener = Arc::new(CountingOpener::default());
-    let front = front_with(opener.clone()).await;
-    let started = tokio::time::Instant::now();
-    let mut stream = TcpStream::connect(front.address())
-        .await
-        .expect("reach the front");
-    stream
-        .write_all(&[SOCKS_VERSION, 1, PASSWORD_AUTH])
-        .await
-        .expect("send methods");
-    let mut method = [0u8; 2];
-    stream
-        .read_exact(&mut method)
-        .await
-        .expect("read the method choice");
-    assert_eq!(method, [SOCKS_VERSION, PASSWORD_AUTH]);
-    tokio::time::pause();
-    let mut buffer = [0u8; 1];
-    let before_deadline = tokio::time::timeout(
-        NEGOTIATION_TIMEOUT - Duration::from_secs(1),
-        stream.read(&mut buffer),
-    )
-    .await;
-    assert!(before_deadline.is_err(), "still open before the deadline");
-    let after_deadline = stream.read(&mut buffer).await;
-    assert!(
-        matches!(after_deadline, Ok(0) | Err(_)),
-        "closed at the deadline"
-    );
-    assert!(started.elapsed() >= NEGOTIATION_TIMEOUT);
-    assert!(opener.opened().is_empty());
-}
-
 async fn greeted(front: &SocksFront) -> Option<TcpStream> {
     let mut stream = TcpStream::connect(front.address())
         .await
@@ -446,32 +412,99 @@ async fn greeted(front: &SocksFront) -> Option<TcpStream> {
 }
 
 #[tokio::test]
-async fn les_negociations_en_attente_sont_bornees_et_l_excedent_est_ferme_aussitot() {
+async fn une_authentification_bloquee_est_coupee_apres_deux_secondes() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let started = std::time::Instant::now();
+    let mut stream = greeted(&front).await.expect("the greeting is answered");
+    let mut buffer = [0u8; 1];
+    let before_deadline = tokio::time::timeout(
+        AUTHENTICATION_TIMEOUT - Duration::from_secs(1),
+        stream.read(&mut buffer),
+    )
+    .await;
+    assert!(before_deadline.is_err(), "still open before the deadline");
+    let after_deadline = tokio::time::timeout(WAIT, stream.read(&mut buffer)).await;
+    assert!(
+        matches!(after_deadline, Ok(Ok(0) | Err(_))),
+        "closed at the authentication deadline, long before the negotiation one"
+    );
+    assert!(started.elapsed() >= AUTHENTICATION_TIMEOUT);
+    assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn une_requete_bloquee_apres_l_authentification_est_coupee_apres_vingt_secondes() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let started = tokio::time::Instant::now();
+    let credentials = front.credentials();
+    let (mut stream, status) =
+        authenticated(&front, credentials.username(), credentials.password()).await;
+    assert_eq!(status, SUCCEEDED);
+    tokio::time::pause();
+    let mut buffer = [0u8; 1];
+    let before_deadline = tokio::time::timeout(
+        NEGOTIATION_TIMEOUT - Duration::from_secs(1),
+        stream.read(&mut buffer),
+    )
+    .await;
+    assert!(before_deadline.is_err(), "still open before the deadline");
+    let after_deadline = stream.read(&mut buffer).await;
+    assert!(
+        matches!(after_deadline, Ok(0) | Err(_)),
+        "closed at the deadline"
+    );
+    assert!(started.elapsed() >= NEGOTIATION_TIMEOUT);
+    assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn au_dela_des_places_la_plus_ancienne_connexion_non_authentifiee_est_fermee() {
     let opener = Arc::new(CountingOpener::default());
     let front = front_with(opener.clone()).await;
     let mut pending = Vec::new();
-    for _ in 0..PENDING_NEGOTIATIONS {
-        pending.push(greeted(&front).await.expect("a pending negotiation"));
+    for _ in 0..PENDING_HANDSHAKES {
+        pending.push(greeted(&front).await.expect("a pending handshake"));
     }
-    let mut excess = TcpStream::connect(front.address())
-        .await
-        .expect("reach the front");
+    let newest = greeted(&front).await;
+    assert!(newest.is_some(), "a new connection is still answered");
     assert!(
-        closed(&mut excess).await,
-        "a connection beyond the pending limit is closed at once"
-    );
-    drop(pending);
-    let mut served = None;
-    for _ in 0..50 {
-        served = greeted(&front).await;
-        if served.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(
-        served.is_some(),
-        "the slots come back once the clients leave"
+        closed(&mut pending[0]).await,
+        "the oldest unauthenticated connection makes room"
     );
     assert!(opener.opened().is_empty());
+}
+
+#[tokio::test]
+async fn un_client_authentifie_passe_quand_des_connexions_muettes_occupent_toutes_les_places() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut silent = Vec::new();
+    for _ in 0..PENDING_HANDSHAKES {
+        silent.push(greeted(&front).await.expect("a silent connection"));
+    }
+    let credentials = front.credentials();
+    let mut client = tokio::time::timeout(
+        WAIT,
+        Socks5Stream::connect_with_password(
+            front.address(),
+            MEMBER.to_string(),
+            1025,
+            credentials.username().to_string(),
+            credentials.password().to_string(),
+            Config::default(),
+        ),
+    )
+    .await
+    .expect("CONNECT in time")
+    .expect("CONNECT through the front despite the silent connections");
+    client.write_all(b"hello").await.expect("write through");
+    let mut echoed = [0u8; 5];
+    tokio::time::timeout(WAIT, client.read_exact(&mut echoed))
+        .await
+        .expect("echo in time")
+        .expect("read the echo");
+    assert_eq!(&echoed, b"hello");
+    assert_eq!(opener.opened(), vec![(MEMBER.to_string(), 1025)]);
 }
