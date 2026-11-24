@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod connections_import;
 pub mod contexts;
+pub mod logging;
 pub mod mapping_purge;
 pub mod notices;
 pub mod querying;

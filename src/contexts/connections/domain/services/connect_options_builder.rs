@@ -1,7 +1,9 @@
 use std::path::Path;
 
+use crate::contexts::connections::domain::constants::MONGODB_DEFAULT_PORT;
 use crate::contexts::connections::domain::types::{
-    ConnectOptions, ConnectParams, Hop, HostKeyPolicy, SshAuth, SshHop, Tunnel, TunnelAuth,
+    ConnectOptions, ConnectParams, Hop, HostKeyPolicy, MongoConnectParams, MongoTransport, SshAuth,
+    SshHop, Tunnel, TunnelAuth,
 };
 
 pub fn connect_options(params: &ConnectParams, known_hosts: Option<&Path>) -> ConnectOptions {
@@ -22,6 +24,21 @@ pub fn connect_options(params: &ConnectParams, known_hosts: Option<&Path>) -> Co
             remote_port: tunnel.remote_port,
         }),
     }
+}
+
+pub fn mongo_tunnel(params: &MongoConnectParams, known_hosts: Option<&Path>) -> Option<Tunnel> {
+    let (remote_host, remote_port) = match &params.transport {
+        MongoTransport::Srv { host } => (host.clone(), MONGODB_DEFAULT_PORT),
+        MongoTransport::Seed { host, port, .. } => (host.clone(), *port),
+    };
+    params.ssh_hops.as_ref().map(|hops| Tunnel {
+        hops: hops
+            .iter()
+            .map(|hop| hop_options(hop, known_hosts))
+            .collect(),
+        remote_host,
+        remote_port,
+    })
 }
 
 fn hop_options(hop: &SshHop, configured_known_hosts: Option<&Path>) -> Hop {
@@ -68,6 +85,71 @@ mod unit {
     use crate::contexts::connections::domain::types::{
         PasswordSource, Secret, SslMode, TunnelParams,
     };
+
+    fn mongo(transport: MongoTransport, ssh_hops: Option<Vec<SshHop>>) -> MongoConnectParams {
+        MongoConnectParams {
+            transport,
+            replica_set: None,
+            database: None,
+            user: "atlas-reader".into(),
+            password_command: vec!["/bin/echo".into()],
+            ssh_hops,
+        }
+    }
+
+    fn bastion_hop() -> SshHop {
+        SshHop {
+            label: "bastion-alias".into(),
+            host: "bastion.example".into(),
+            port: 2228,
+            user: "jump".into(),
+            auth: SshAuth::Agent,
+            host_key: verified(vec![PathBuf::from("/home/me/.ssh/known_hosts")]),
+        }
+    }
+
+    #[test]
+    fn une_connexion_mongodb_sans_alias_ssh_n_a_pas_de_tunnel() {
+        let params = mongo(
+            MongoTransport::Srv {
+                host: "cluster0.atlas.scarif.test".into(),
+            },
+            None,
+        );
+        assert_eq!(mongo_tunnel(&params, None), None);
+    }
+
+    #[test]
+    fn le_tunnel_mongodb_vise_l_hote_d_amorce_avec_le_known_hosts_configure() {
+        let configured = PathBuf::from("/etc/scarif/known_hosts");
+        let params = mongo(
+            MongoTransport::Seed {
+                host: "pl-0.atlas.scarif.test".into(),
+                port: 1025,
+                tls: false,
+            },
+            Some(vec![bastion_hop()]),
+        );
+        let tunnel = mongo_tunnel(&params, Some(&configured)).expect("tunnel");
+        assert_eq!(tunnel.remote_host, "pl-0.atlas.scarif.test");
+        assert_eq!(tunnel.remote_port, 1025);
+        assert_eq!(tunnel.hops.len(), 1);
+        assert_eq!(tunnel.hops[0].known_hosts, vec![configured]);
+        assert!(tunnel.hops[0].verify_host_key);
+    }
+
+    #[test]
+    fn le_tunnel_d_une_connexion_srv_vise_le_nom_srv_sur_le_port_par_defaut() {
+        let params = mongo(
+            MongoTransport::Srv {
+                host: "cluster0.atlas.scarif.test".into(),
+            },
+            Some(vec![bastion_hop()]),
+        );
+        let tunnel = mongo_tunnel(&params, None).expect("tunnel");
+        assert_eq!(tunnel.remote_host, "cluster0.atlas.scarif.test");
+        assert_eq!(tunnel.remote_port, 27017);
+    }
 
     fn tunneled(auth: SshAuth, host_key: HostKeyPolicy) -> ConnectParams {
         ConnectParams {

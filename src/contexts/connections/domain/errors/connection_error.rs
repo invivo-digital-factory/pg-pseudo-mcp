@@ -18,6 +18,8 @@ pub enum ConnectionError {
         connection: String,
         source: SessionError,
     },
+    #[error("no collection or view named {requested}")]
+    UnknownCollection { requested: String },
     #[error(transparent)]
     Session(#[from] SessionError),
 }

@@ -15,12 +15,14 @@ use crate::contexts::connections::infrastructure::data_sources::openssh::{
 use crate::contexts::connections::infrastructure::data_sources::password_command::ProcessPasswordCommand;
 use crate::contexts::connections::infrastructure::repositories::{
     CachedAzureSignInTokens, CachedCommandPasswords, DbeaverConnectionCatalog,
-    FileConnectionCatalog, LayeredConnectionCatalog, PostgresSessionPool, TomlColumnPolicyFiles,
+    FileConnectionCatalog, LayeredConnectionCatalog, MongoSessionPool, PostgresSessionPool,
+    TomlColumnPolicyFiles,
 };
 use crate::contexts::connections::presentation::ImportDbeaverHandler;
 use crate::contexts::connections::use_cases::{
-    ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases, ReadCatalog,
-    ReadColumnPolicyFiles, ReadEnumLabels, RunReadOnlyStatement,
+    ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases,
+    ListDocumentDatabases, ReadCatalog, ReadCollections, ReadColumnPolicyFiles, ReadEnumLabels,
+    RunAggregate, RunFind, RunReadOnlyStatement, SampleFields,
 };
 
 const COLUMN_POLICY_FILE: &str = "columns.toml";
@@ -33,6 +35,11 @@ pub struct ConnectionsContext {
     pub list_databases: ListDatabases<PostgresSessionPool>,
     pub read_enum_labels: ReadEnumLabels<PostgresSessionPool>,
     pub read_column_policy_files: ReadColumnPolicyFiles,
+    pub run_find: RunFind<MongoSessionPool>,
+    pub run_aggregate: RunAggregate<MongoSessionPool>,
+    pub list_document_databases: ListDocumentDatabases<MongoSessionPool>,
+    pub read_collections: ReadCollections<MongoSessionPool>,
+    pub sample_fields: SampleFields<MongoSessionPool>,
 }
 
 pub fn import_dbeaver_handler(config: &AppConfig) -> ImportDbeaverHandler {
@@ -94,6 +101,11 @@ impl ConnectionsContext {
             catalog.clone(),
             config.ssh_known_hosts.clone(),
             tokens,
+            commands.clone(),
+        ));
+        let documents = Arc::new(MongoSessionPool::new(
+            catalog.clone(),
+            config.ssh_known_hosts.clone(),
             commands,
         ));
         Self {
@@ -114,6 +126,11 @@ impl ConnectionsContext {
                     .map(|file| file.path),
                 ),
             )),
+            run_find: RunFind::new(documents.clone()),
+            run_aggregate: RunAggregate::new(documents.clone()),
+            list_document_databases: ListDocumentDatabases::new(documents.clone()),
+            read_collections: ReadCollections::new(documents.clone()),
+            sample_fields: SampleFields::new(documents),
         }
     }
 }

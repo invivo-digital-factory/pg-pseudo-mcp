@@ -3,6 +3,7 @@ pub mod bounded_process;
 pub mod column_policy_file;
 pub mod connection_file;
 pub mod dbeaver;
+pub mod mongodb;
 pub mod openssh;
 pub mod password_command;
 pub(crate) mod password_resolution;

@@ -17,6 +17,7 @@ fast-socks5 = "0.10.0"
 futures-util = "0.3.34"
 hex = "0.4.3"
 hmac = "0.13.0"
+mongodb = { version = "3.10.2", features = ["socks5-proxy"] }
 postgres-protocol = "0.6.12"
 postgres-types = "0.2.14"
 rand = "0.10.4"

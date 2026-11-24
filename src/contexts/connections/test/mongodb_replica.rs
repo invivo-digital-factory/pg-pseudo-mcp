@@ -17,7 +17,7 @@ use crate::contexts::connections::infrastructure::data_sources::socks::{
 use crate::contexts::connections::infrastructure::data_sources::ssh::{SshLink, TunnelStream};
 
 const GATE_VAR: &str = "SCARIF_TEST_MONGODB";
-const MEMBER_HOST: &str = "pl-0.atlas.scarif.test";
+pub(super) const MEMBER_HOST: &str = "pl-0.atlas.scarif.test";
 const MEMBER_PORTS: [u16; 3] = [1024, 1025, 1026];
 const UNPERMITTED_HOST: &str = "mongodb";
 const UNPERMITTED_PORT: u16 = 1024;
@@ -34,7 +34,7 @@ impl client::Handler for AcceptAnyKey {
     }
 }
 
-fn require_gate() {
+pub(super) fn require_gate() {
     assert!(
         std::env::var(GATE_VAR).is_ok_and(|value| !value.is_empty()),
         "{GATE_VAR} must be set to run the tests that need the docker compose mongodb service"

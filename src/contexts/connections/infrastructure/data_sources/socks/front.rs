@@ -13,6 +13,7 @@ use fast_socks5::server::{Config, DenyAuthentication, Socks5Socket};
 use fast_socks5::util::target_addr::TargetAddr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{AbortHandle, JoinHandle, JoinSet};
 
 use super::authentication::authenticate;
@@ -24,6 +25,8 @@ const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 const PENDING_HANDSHAKES: usize = 32;
+const MAX_OPEN_CHANNELS: usize = 5;
+const CHANNEL_WAIT: Duration = Duration::from_secs(2);
 
 type RequestConfig = Config<DenyAuthentication>;
 
@@ -38,6 +41,7 @@ struct Relay<C> {
     config: Arc<RequestConfig>,
     opener: Arc<C>,
     policy: TargetPolicy,
+    channels: Arc<Semaphore>,
 }
 
 impl SocksFront {
@@ -50,6 +54,7 @@ impl SocksFront {
             config: Arc::new(request_config()),
             opener,
             policy,
+            channels: Arc::new(Semaphore::new(MAX_OPEN_CHANNELS)),
         });
         let serving = tokio::spawn(serve(listener, relay));
         Ok(Self {
@@ -128,7 +133,7 @@ async fn handshake(mut stream: TcpStream, credentials: ProxyCredentials) -> Opti
 
 async fn relay_connection<C: ChannelOpener>(stream: TcpStream, relay: Arc<Relay<C>>) {
     let negotiated = tokio::time::timeout(NEGOTIATION_TIMEOUT, negotiate(stream, &relay)).await;
-    if let Ok(Some((mut client, mut channel))) = negotiated {
+    if let Ok(Some((mut client, mut channel, _open))) = negotiated {
         let _ = tokio::io::copy_bidirectional(&mut client, &mut channel).await;
     }
 }
@@ -136,7 +141,7 @@ async fn relay_connection<C: ChannelOpener>(stream: TcpStream, relay: Arc<Relay<
 async fn negotiate<C: ChannelOpener>(
     stream: TcpStream,
     relay: &Relay<C>,
-) -> Option<(TcpStream, C::Stream)> {
+) -> Option<(TcpStream, C::Stream, OwnedSemaphorePermit)> {
     let socket = Socks5Socket::new(stream, relay.config.clone())
         .upgrade_to_socks5()
         .await
@@ -147,10 +152,15 @@ async fn negotiate<C: ChannelOpener>(
         let _ = reply(&mut client, SOCKS5_REPLY_CONNECTION_NOT_ALLOWED).await;
         return None;
     };
+    let free = tokio::time::timeout(CHANNEL_WAIT, relay.channels.clone().acquire_owned()).await;
+    let Ok(Ok(open)) = free else {
+        let _ = reply(&mut client, SOCKS5_REPLY_GENERAL_FAILURE).await;
+        return None;
+    };
     match relay.opener.open_channel(&target).await {
         Ok(channel) => {
             reply(&mut client, SOCKS5_REPLY_SUCCEEDED).await.ok()?;
-            Some((client, channel))
+            Some((client, channel, open))
         }
         Err(_) => {
             let _ = reply(&mut client, SOCKS5_REPLY_GENERAL_FAILURE).await;

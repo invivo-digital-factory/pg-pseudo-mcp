@@ -30,6 +30,7 @@ const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(5);
 const PENDING_HANDSHAKES: usize = 32;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_OPEN_CHANNELS: usize = 5;
 
 #[derive(Default)]
 struct CountingOpener {
@@ -507,4 +508,24 @@ async fn un_client_authentifie_passe_quand_des_connexions_muettes_occupent_toute
         .expect("read the echo");
     assert_eq!(&echoed, b"hello");
     assert_eq!(opener.opened(), vec![(MEMBER.to_string(), 1025)]);
+}
+
+#[tokio::test]
+async fn le_front_n_ouvre_jamais_plus_de_cinq_canaux_a_la_fois_et_rend_la_place_d_un_canal_ferme() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut open = Vec::new();
+    for _ in 0..MAX_OPEN_CHANNELS {
+        let (stream, status) = connect_request(&front, &domain(MEMBER), 1024).await;
+        assert_eq!(status, SUCCEEDED);
+        open.push(stream);
+    }
+    let (_, status) = connect_request(&front, &domain(MEMBER), 1025).await;
+    assert_eq!(status, GENERAL_FAILURE);
+    assert_eq!(opener.opened().len(), MAX_OPEN_CHANNELS);
+
+    drop(open.pop());
+    let (_, status) = connect_request(&front, &domain(MEMBER), 1026).await;
+    assert_eq!(status, SUCCEEDED);
+    assert_eq!(opener.opened().len(), MAX_OPEN_CHANNELS + 1);
 }

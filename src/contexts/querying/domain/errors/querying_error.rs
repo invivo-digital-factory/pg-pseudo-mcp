@@ -86,6 +86,10 @@ impl QueryingError {
             DatabaseFailure::Decode(original) => Self::ResultWithheld {
                 message: scrubbed_text(scrubbed, original),
             },
+            DatabaseFailure::UnknownTable { requested } => Self::UnknownTable {
+                requested,
+                suggestions: Vec::new(),
+            },
         }
     }
 }
