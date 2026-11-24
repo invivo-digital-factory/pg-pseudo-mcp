@@ -12,6 +12,8 @@ pub mod literal_collector;
 pub mod literal_rewriter;
 pub mod literal_text;
 pub mod literal_walker;
+pub mod mongo_filter_walker;
+pub mod mongo_guard;
 pub mod qualified_name;
 pub mod relation;
 pub mod result_bounds;

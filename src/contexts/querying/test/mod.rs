@@ -4,5 +4,6 @@ mod column_policy_mongodb;
 mod fakes;
 mod guard;
 mod list_databases;
+mod mongo_guard;
 mod run_query;
 mod scrubbing;

@@ -5,7 +5,9 @@ use scarif_database_mcp::common::AppConfig;
 use scarif_database_mcp::composition::contexts::Contexts;
 use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
 use scarif_database_mcp::contexts::connections::presentation::list_connections_with_warnings;
-use scarif_database_mcp::contexts::querying::domain::types::{ColumnPolicy, FieldPolicyHint};
+use scarif_database_mcp::contexts::querying::domain::types::{
+    ColumnPolicy, FieldPolicyHint, GuardedMongo,
+};
 use scarif_database_mcp::contexts::querying::presentation::{
     DescribeTableArgs, ListDatabasesArgs, QueryArgs, describe_table, list_databases, query,
 };
@@ -33,6 +35,11 @@ impl Answer {
     }
 }
 
+pub struct MongoAnswer {
+    pub outcome: Result<GuardedMongo, String>,
+    pub lookups: usize,
+}
+
 #[derive(World)]
 #[world(init = Self::new)]
 pub struct QueryingWorld {
@@ -46,6 +53,8 @@ pub struct QueryingWorld {
     pub policy: ColumnPolicy,
     pub policy_warnings: Vec<String>,
     pub hint: Option<FieldPolicyHint>,
+    pub mongo_pseudonyms: Vec<(String, String)>,
+    pub mongo: Option<MongoAnswer>,
 }
 
 impl std::fmt::Debug for QueryingWorld {
@@ -70,6 +79,8 @@ impl QueryingWorld {
             policy: ColumnPolicy::default(),
             policy_warnings: Vec::new(),
             hint: None,
+            mongo_pseudonyms: Vec::new(),
+            mongo: None,
         }
     }
 
@@ -205,6 +216,10 @@ impl QueryingWorld {
             refused: is_error(&result),
             text: text_of(&result),
         });
+    }
+
+    pub fn mongo_answer(&self) -> &MongoAnswer {
+        self.mongo.as_ref().expect("a MongoDB request was guarded")
     }
 
     pub fn answer(&self) -> &Answer {
