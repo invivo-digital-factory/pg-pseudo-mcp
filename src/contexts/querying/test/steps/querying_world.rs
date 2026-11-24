@@ -5,6 +5,7 @@ use scarif_database_mcp::common::AppConfig;
 use scarif_database_mcp::composition::contexts::Contexts;
 use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
 use scarif_database_mcp::contexts::connections::presentation::list_connections_with_warnings;
+use scarif_database_mcp::contexts::querying::domain::types::{ColumnPolicy, FieldPolicyHint};
 use scarif_database_mcp::contexts::querying::presentation::{
     DescribeTableArgs, ListDatabasesArgs, QueryArgs, describe_table, list_databases, query,
 };
@@ -42,6 +43,9 @@ pub struct QueryingWorld {
     pub pseudonym: Option<String>,
     pub shared_policy: Option<String>,
     pub local_policy: Option<String>,
+    pub policy: ColumnPolicy,
+    pub policy_warnings: Vec<String>,
+    pub hint: Option<FieldPolicyHint>,
 }
 
 impl std::fmt::Debug for QueryingWorld {
@@ -63,11 +67,13 @@ impl QueryingWorld {
             pseudonym: None,
             shared_policy: None,
             local_policy: None,
+            policy: ColumnPolicy::default(),
+            policy_warnings: Vec::new(),
+            hint: None,
         }
     }
 
-    pub fn connect_to_test_database(&mut self) {
-        write_workspace(self._dbeaver.path(), &database_target(), true, None);
+    fn config(&self) -> AppConfig {
         let ssh_config = self._data.path().join("ssh_config");
         std::fs::write(&ssh_config, "").expect("empty ssh config");
         let columns_file = self.shared_policy.as_ref().map(|contents| {
@@ -81,7 +87,7 @@ impl QueryingWorld {
             std::fs::write(folder.join("columns.toml"), contents).expect("local column policy");
             self._data.path().join("xdg").into_os_string()
         });
-        let config = AppConfig {
+        AppConfig {
             dbeaver_home: Some(self._dbeaver.path().to_path_buf()),
             data_dir: Some(self._data.path().to_path_buf()),
             ssh_known_hosts: None,
@@ -91,12 +97,35 @@ impl QueryingWorld {
             xdg_config_home,
             home_dir: None,
             data_home: None,
-        };
+        }
+    }
+
+    fn open_contexts(&mut self, config: &AppConfig) {
         let anonymization = AnonymizationInjector::new(self._data.path()).use_cases();
         self.contexts = Some(Arc::new(Contexts::with_anonymization(
-            &config,
+            config,
             anonymization,
         )));
+    }
+
+    pub fn connect_to_test_database(&mut self) {
+        write_workspace(self._dbeaver.path(), &database_target(), true, None);
+        let config = self.config();
+        self.open_contexts(&config);
+    }
+
+    pub fn load_column_policy(&mut self) {
+        let config = self.config();
+        self.open_contexts(&config);
+        let load = self
+            .contexts
+            .as_ref()
+            .expect("contexts")
+            .querying
+            .read_column_policy
+            .execute();
+        self.policy = load.policy;
+        self.policy_warnings = load.warnings;
     }
 
     pub async fn ask(&mut self, sql: &str) {

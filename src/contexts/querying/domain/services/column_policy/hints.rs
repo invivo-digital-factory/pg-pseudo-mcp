@@ -4,16 +4,36 @@ use crate::contexts::querying::domain::constants::column_policy::{
 };
 use crate::contexts::querying::domain::types::{
     ColumnClassification, ColumnEntry, ColumnFlag, ColumnMeta, ColumnPolicy, ColumnPolicyHint,
-    Reason,
+    FieldPolicyHint, FieldSource, Reason,
 };
 
-pub fn column_hint(column: String, reason: Reason, kind: &str) -> Option<ColumnPolicyHint> {
-    let hinted = match reason {
+fn is_hinted(reason: Reason, kind: &str) -> bool {
+    match reason {
         Reason::Default => true,
         Reason::Dictionary => HINTED_DICTIONARY_KINDS.contains(&kind),
         _ => false,
-    };
-    hinted.then_some(ColumnPolicyHint {
+    }
+}
+
+pub fn field_hint(
+    policy: &ColumnPolicy,
+    source: &FieldSource,
+    reason: Reason,
+    kind: &str,
+) -> Option<FieldPolicyHint> {
+    if policy.decide_field(source).is_some() {
+        return None;
+    }
+    is_hinted(reason, kind).then(|| FieldPolicyHint {
+        collection: format!("{}.{}", source.database, source.collection),
+        field: source.path.clone(),
+        reason,
+        hint: POLICY_HINT,
+    })
+}
+
+pub fn column_hint(column: String, reason: Reason, kind: &str) -> Option<ColumnPolicyHint> {
+    is_hinted(reason, kind).then_some(ColumnPolicyHint {
         column,
         reason,
         hint: POLICY_HINT,

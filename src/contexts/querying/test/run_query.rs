@@ -275,6 +275,7 @@ mod unit {
                     .iter()
                     .map(|(pattern, kind)| (pattern.to_string(), kind.to_string()))
                     .collect(),
+                ..ColumnPolicyEntries::default()
             }),
         };
         Arc::new(FakePolicy(merge_policy(&[document], &|_| true)))

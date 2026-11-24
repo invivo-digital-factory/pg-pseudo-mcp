@@ -6,7 +6,7 @@ use crate::contexts::connections::injector::ConnectionsContext;
 use crate::contexts::querying::domain::repositories::ColumnPolicySource;
 use crate::contexts::querying::domain::services::column_policy::merge_policy;
 use crate::contexts::querying::domain::types::{
-    ColumnPolicyDocument, ColumnPolicyEntries, ColumnPolicyLoad,
+    ColumnPolicyDocument, ColumnPolicyEntries, ColumnPolicyLoad, MongoPolicyEntries,
 };
 
 pub struct ColumnPolicySourceAdapter {
@@ -38,6 +38,10 @@ fn document(file: connections::ColumnPolicyFile) -> ColumnPolicyDocument {
         content: file.content.map(|entries| ColumnPolicyEntries {
             clear: entries.clear,
             personal: entries.personal,
+            mongodb: MongoPolicyEntries {
+                clear: entries.mongodb.clear,
+                personal: entries.mongodb.personal,
+            },
         }),
     }
 }
