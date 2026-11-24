@@ -16,6 +16,10 @@ pub const PROXY_CHANNEL_REFUSED: &str =
 pub const BSON_CONVERSION_FAILED: &str =
     "a document could not be converted between BSON and the result";
 
+pub const DRIVER_REFUSED: &str = "the MongoDB driver refused the request";
+
+const DRIVER_REFUSED_CODE: &str = "DriverError";
+const INVALID_ARGUMENT: &str = "InvalidArgument";
 const PLACEHOLDER: &str = "[redacted]";
 const MAX_TIME_EXPIRED: i32 = 50;
 const AUTHENTICATION_FAILED: i32 = 18;
@@ -121,7 +125,16 @@ fn classify(failure: MongoFailure) -> FailureClass {
         | ErrorKind::BsonSerialization(_)
         | ErrorKind::InvalidResponse { .. } => FailureClass::Undecodable,
         ErrorKind::ProxyConnect { .. } => FailureClass::Proxy,
-        kind => {
+        ErrorKind::InvalidArgument { message, .. } => FailureClass::Refused {
+            code_name: INVALID_ARGUMENT.to_string(),
+            message: message.clone(),
+        },
+        kind @ (ErrorKind::Io(_)
+        | ErrorKind::ServerSelection { .. }
+        | ErrorKind::ConnectionPoolCleared { .. }
+        | ErrorKind::DnsResolve { .. }
+        | ErrorKind::InvalidTlsConfig { .. }
+        | ErrorKind::Shutdown) => {
             let text = kind.to_string();
             if text.contains(PROXY_FAILURE_MARK) {
                 FailureClass::Proxy
@@ -129,6 +142,10 @@ fn classify(failure: MongoFailure) -> FailureClass {
                 FailureClass::Unreachable(text)
             }
         }
+        _ => FailureClass::Refused {
+            code_name: DRIVER_REFUSED_CODE.to_string(),
+            message: DRIVER_REFUSED.to_string(),
+        },
     }
 }
 
@@ -425,6 +442,49 @@ mod unit {
                 ConnectionError::Session(SessionError::Decode(BSON_CONVERSION_FAILED.into()))
             );
             assert!(!error.to_string().contains("canary-mail"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn une_erreur_de_requete_du_pilote_ne_ferme_pas_la_session() {
+        let invalid = mongodb::options::ClientOptions::parse(
+            "mongodb://pl-0.atlas.scarif.test/?maxPoolSize=many",
+        )
+        .await
+        .expect_err("an invalid option");
+        assert!(
+            matches!(invalid.kind.as_ref(), ErrorKind::InvalidArgument { .. }),
+            "{invalid:?}"
+        );
+        let failures = [
+            MongoFailure::Driver(invalid),
+            driver(ErrorKind::SessionsNotSupported),
+            driver(ErrorKind::MissingResumeToken),
+            driver(ErrorKind::Custom(std::sync::Arc::new("unexpected"))),
+        ];
+        for failure in failures {
+            let error = connection_error_from_mongo("atlas", failure, &redaction(None));
+            let ConnectionError::Session(SessionError::Db(message)) = &error else {
+                panic!("{error:?}");
+            };
+            assert!(!message.message.contains(MEMBER), "{message:?}");
+        }
+    }
+
+    #[test]
+    fn une_erreur_de_transport_ferme_la_session() {
+        let failures = [
+            driver(ErrorKind::Shutdown),
+            driver(ErrorKind::Io(std::sync::Arc::new(std::io::Error::other(
+                "broken pipe",
+            )))),
+        ];
+        for failure in failures {
+            let error = connection_error_from_mongo("atlas", failure, &redaction(None));
+            assert!(
+                matches!(error, ConnectionError::ConnectFailed { .. }),
+                "{error:?}"
+            );
         }
     }
 

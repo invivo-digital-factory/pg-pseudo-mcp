@@ -194,7 +194,7 @@ fn une_connexion_mongodb_en_mode_commande_porte_ses_parametres_sans_ouvrir_de_se
 }
 
 #[test]
-fn resoudre_une_connexion_mongodb_est_refuse_avec_un_motif_fixe_de_moteur_non_pris_en_charge() {
+fn resoudre_une_connexion_mongodb_par_le_chemin_sql_renvoie_vers_find_ou_aggregate() {
     let setup = Setup::new("exit 1", "");
     setup.write(&mongo_entry(
         "auth = \"command\"\npassword_command = [\"/bin/echo\", \"x\"]",
@@ -204,7 +204,10 @@ fn resoudre_une_connexion_mongodb_est_refuse_avec_un_motif_fixe_de_moteur_non_pr
         panic!("expected an unsupported error, got {error:?}");
     };
     assert!(reason.contains("mongodb"), "{reason}");
-    assert!(reason.contains("not supported"), "{reason}");
+    assert!(
+        reason.contains("find") && reason.contains("aggregate"),
+        "{reason}"
+    );
     assert!(!reason.contains("pl-0.atlas.scarif.test"), "{reason}");
 }
 
