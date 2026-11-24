@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: pgpseudo
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${SCARIF_PG_HOST_PORT:-55432}:5432"
     volumes:
       - ./tests/sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -17,7 +17,7 @@ services:
   ssh:
     build: tests/ssh
     ports:
-      - "127.0.0.1:55222:22"
+      - "127.0.0.1:${SCARIF_SSH_HOST_PORT:-55222}:22"
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,3 +26,16 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  mongodb:
+    build: tests/mongodb
+    hostname: pl-0.atlas.scarif.test
+    networks:
+      default:
+        aliases:
+          - pl-0.atlas.scarif.test
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 3s
+      timeout: 10s
+      retries: 60
+      start_period: 10s

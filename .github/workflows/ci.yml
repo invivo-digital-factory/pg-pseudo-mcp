@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SCARIF_TEST_DATABASE_URL: postgres://pgpseudo:pgpseudo@localhost:55432/pgpseudo
+      SCARIF_TEST_MONGODB: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
