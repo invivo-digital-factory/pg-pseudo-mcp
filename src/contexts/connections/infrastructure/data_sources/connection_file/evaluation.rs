@@ -12,7 +12,6 @@ use crate::contexts::connections::infrastructure::data_sources::password_resolut
 };
 use crate::contexts::connections::infrastructure::data_sources::pgpass;
 
-const MONGODB_AUTH_REASON: &str = "`auth` must be \"command\" when `engine` is \"mongodb\"";
 const AZURE_HOST_REASON: &str = "auth = \"azure\" needs an Azure PostgreSQL host (ending in .postgres.database.azure.com): the Azure token is only sent to Azure PostgreSQL hosts";
 
 struct Evaluation {
@@ -124,9 +123,7 @@ impl<'a> FileEvaluator<'a> {
         database: Option<String>,
     ) -> Result<MongoConnectParams, ConnectionStatus> {
         let AuthMode::Command(argv) = &definition.auth else {
-            return Err(ConnectionStatus::Unavailable {
-                reason: MONGODB_AUTH_REASON.to_string(),
-            });
+            unreachable!("the schema accepts only auth = \"command\" for mongodb")
         };
         let ssh_hops = definition
             .ssh_alias
