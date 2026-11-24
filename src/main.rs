@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use scarif_database_mcp::composition::connections_import::import_dbeaver;
+use scarif_database_mcp::composition::logging::log_filter;
 use scarif_database_mcp::composition::mapping_purge::mapping_purge;
 use scarif_database_mcp::composition::server::serve;
 use tracing_subscriber::EnvFilter;
@@ -8,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(log_filter(EnvFilter::from_default_env()))
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();

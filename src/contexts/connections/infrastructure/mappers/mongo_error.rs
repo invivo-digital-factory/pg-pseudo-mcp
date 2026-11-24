@@ -10,10 +10,14 @@ use crate::contexts::connections::infrastructure::data_sources::socks::{
 pub const AUTHENTICATION_REFUSED: &str =
     "the MongoDB server refused the user name or the password of the password command";
 
+pub const PROXY_CHANNEL_REFUSED: &str =
+    "the bastion did not open a channel to the MongoDB cluster through the local SOCKS5 front";
+
 const PLACEHOLDER: &str = "[redacted]";
 const MAX_TIME_EXPIRED: i32 = 50;
 const AUTHENTICATION_FAILED: i32 = 18;
 const SERVER_ERROR: &str = "ERROR";
+const PROXY_FAILURE_MARK: &str = "connecting to a proxy host";
 
 pub struct MongoRedaction {
     literals: Vec<String>,
@@ -22,6 +26,7 @@ pub struct MongoRedaction {
 
 enum FailureClass {
     Authentication,
+    Proxy,
     Timeout,
     Refused { code_name: String, message: String },
     Unreachable(String),
@@ -112,7 +117,15 @@ fn classify(failure: MongoFailure) -> FailureClass {
         kind @ (ErrorKind::BsonDeserialization(_)
         | ErrorKind::BsonSerialization(_)
         | ErrorKind::InvalidResponse { .. }) => FailureClass::Undecodable(kind.to_string()),
-        kind => FailureClass::Unreachable(kind.to_string()),
+        ErrorKind::ProxyConnect { .. } => FailureClass::Proxy,
+        kind => {
+            let text = kind.to_string();
+            if text.contains(PROXY_FAILURE_MARK) {
+                FailureClass::Proxy
+            } else {
+                FailureClass::Unreachable(text)
+            }
+        }
     }
 }
 
@@ -129,6 +142,9 @@ fn connection_error_from_class(
         FailureClass::Authentication => connect_failed(SessionError::Authentication(
             AUTHENTICATION_REFUSED.to_string(),
         )),
+        FailureClass::Proxy => {
+            connect_failed(SessionError::Connect(PROXY_CHANNEL_REFUSED.to_string()))
+        }
         FailureClass::Unreachable(text) => {
             connect_failed(SessionError::Connect(redaction.redact(&text)))
         }

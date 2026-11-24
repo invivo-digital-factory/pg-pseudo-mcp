@@ -4,8 +4,8 @@ mod postgres_error;
 
 pub use connect_error_redaction::redact_connection_identity;
 pub use mongo_error::{
-    AUTHENTICATION_REFUSED, MongoRedaction, connection_error_from_mongo, is_authentication_failure,
-    redacted_connect_failure,
+    AUTHENTICATION_REFUSED, MongoRedaction, PROXY_CHANNEL_REFUSED, connection_error_from_mongo,
+    is_authentication_failure, redacted_connect_failure,
 };
 
 pub use postgres_error::{
