@@ -71,9 +71,9 @@ fn hashed_host_pattern() -> String {
     )
 }
 
-struct KnownHosts {
+pub(super) struct KnownHosts {
     _dir: tempfile::TempDir,
-    path: PathBuf,
+    pub(super) path: PathBuf,
 }
 
 fn known_hosts(contents: &str) -> KnownHosts {
@@ -83,7 +83,7 @@ fn known_hosts(contents: &str) -> KnownHosts {
     KnownHosts { _dir: dir, path }
 }
 
-fn listing_container_key() -> KnownHosts {
+pub(super) fn listing_container_key() -> KnownHosts {
     known_hosts(&format!(
         "# test entries\nother.example ssh-ed25519 {}\n{} {}\n",
         public_key_fields("other_host_ed25519_test.pub")
