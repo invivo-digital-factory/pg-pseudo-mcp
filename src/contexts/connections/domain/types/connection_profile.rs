@@ -129,7 +129,7 @@ impl fmt::Debug for ConnectParams {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MongoConnectParams {
     pub transport: MongoTransport,
     pub replica_set: Option<String>,

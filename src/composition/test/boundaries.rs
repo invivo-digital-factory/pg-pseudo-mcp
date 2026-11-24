@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 
 const FORBIDDEN_IN_DOMAIN: &str =
-    r"\b(?:rmcp|tokio_postgres|postgres_types|rusqlite|russh|toml|fast_socks5)::";
+    r"\b(?:rmcp|tokio_postgres|postgres_types|rusqlite|russh|toml|fast_socks5|mongodb|bson)::";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Layer {
@@ -494,6 +494,17 @@ mod integration {
         assert_reported(
             "infrastructure_crate_in_domain",
             &["contexts/connections/domain/types/session.rs: domain imports rusqlite"],
+        );
+    }
+
+    #[test]
+    fn le_pilote_mongodb_et_bson_dans_le_domaine_sont_signales() {
+        assert_reported(
+            "driver_crate_in_domain",
+            &[
+                "contexts/connections/domain/types/documents.rs: domain imports bson",
+                "contexts/connections/domain/types/documents.rs: domain imports mongodb",
+            ],
         );
     }
 

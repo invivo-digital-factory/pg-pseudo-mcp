@@ -8,11 +8,16 @@ mod connection_profile;
 mod connection_source;
 mod database_listing;
 mod db_message;
+mod document_catalog;
+mod document_node;
+mod document_output;
+mod document_request;
 mod execution_limits;
 mod import_report;
 mod mongo_policy_entries;
 mod password_source;
 mod query_output;
+mod sampled_field;
 mod secret;
 
 pub use cell::Cell;
@@ -30,6 +35,12 @@ pub use connection_profile::{
 pub use connection_source::ConnectionSource;
 pub use database_listing::DatabaseListing;
 pub use db_message::DbMessage;
+pub use document_catalog::{
+    CollectionDescription, CollectionInfo, CollectionKind, DatabaseNames, IndexKeys,
+};
+pub use document_node::DocumentNode;
+pub use document_output::DocumentOutput;
+pub use document_request::{AggregateRequest, FindRequest};
 pub use execution_limits::ExecutionLimits;
 pub use import_report::{
     DbeaverDefinition, DbeaverRead, DbeaverTunnel, HostBlock, ImportReport, ImportedConnection,
@@ -38,4 +49,5 @@ pub use import_report::{
 pub use mongo_policy_entries::MongoPolicyEntries;
 pub use password_source::PasswordSource;
 pub use query_output::{ColumnMeta, ColumnSource, QueryOutput};
+pub use sampled_field::SampledField;
 pub use secret::Secret;
