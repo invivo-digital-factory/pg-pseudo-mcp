@@ -803,16 +803,7 @@ mod integration {
     }
 }
 
-const PRODUCTION_FILES: [&str; 8] = [
-    "infrastructure/data_sources/mongodb/catalog.rs",
-    "infrastructure/data_sources/mongodb/client_options.rs",
-    "infrastructure/data_sources/mongodb/decode.rs",
-    "infrastructure/data_sources/mongodb/extended_json.rs",
-    "infrastructure/data_sources/mongodb/failure.rs",
-    "infrastructure/data_sources/mongodb/mod.rs",
-    "infrastructure/data_sources/mongodb/sample.rs",
-    "infrastructure/data_sources/mongodb/session.rs",
-];
+const DRIVER_SOURCES: &str = "infrastructure/data_sources/mongodb";
 
 const POOL_FILE: &str = "infrastructure/repositories/mongo_session_pool.rs";
 
@@ -824,14 +815,21 @@ fn les_sources_mongodb_n_appellent_que_les_actions_de_lecture_du_pilote() {
     let forbidden = Regex::new(DRIVER_WRITES_AND_COMMANDS).expect("regex");
     let reads = Regex::new(r"\.(find|aggregate|list_database_names|list_collections|list_indexes|estimated_document_count)\(").expect("regex");
     let mut seen = Vec::new();
-    for file in PRODUCTION_FILES.iter().chain([&POOL_FILE]) {
-        let source = std::fs::read_to_string(context.join(file)).expect("source file");
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(context.join(DRIVER_SOURCES))
+        .expect("driver sources")
+        .map(|entry| entry.expect("source entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .collect();
+    assert!(files.len() >= 8, "{files:?}");
+    files.push(context.join(POOL_FILE));
+    for file in &files {
+        let source = std::fs::read_to_string(file).expect("source file");
         let production = source.split("#[cfg(test)]").next().unwrap_or_default();
         let found: Vec<&str> = forbidden
             .find_iter(production)
             .map(|found| found.as_str())
             .collect();
-        assert!(found.is_empty(), "{file} calls {found:?}");
+        assert!(found.is_empty(), "{} calls {found:?}", file.display());
         seen.extend(
             reads
                 .captures_iter(production)
