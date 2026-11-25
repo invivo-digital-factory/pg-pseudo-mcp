@@ -57,6 +57,8 @@ jobs:
           name="scarif-database-mcp-$TARGET"
           mkdir "$name"
           cp "target/$TARGET/release/scarif-database-mcp" LICENSE README.md data/NOTICE "$name/"
+          mkdir "$name/docs"
+          cp docs/*.md docs/claude-code-deny-rules.json "$name/docs/"
           tar -czf "$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
