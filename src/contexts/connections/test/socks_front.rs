@@ -30,7 +30,8 @@ const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const WAIT: Duration = Duration::from_secs(5);
 const PENDING_HANDSHAKES: usize = 32;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_OPEN_CHANNELS: usize = 5;
+const CHANNELS_PER_TARGET: usize = 2;
+const MAX_TARGETS: usize = 50;
 
 #[derive(Default)]
 struct CountingOpener {
@@ -73,7 +74,7 @@ impl ChannelOpener for CountingOpener {
 
 async fn front_with(opener: Arc<CountingOpener>) -> SocksFront {
     let policy = TargetPolicy::from_seed_host(MEMBER).expect("valid seed host");
-    SocksFront::start(opener, policy)
+    SocksFront::start(opener, policy, CHANNELS_PER_TARGET)
         .await
         .expect("start the SOCKS5 front")
 }
@@ -510,22 +511,59 @@ async fn un_client_authentifie_passe_quand_des_connexions_muettes_occupent_toute
     assert_eq!(opener.opened(), vec![(MEMBER.to_string(), 1025)]);
 }
 
+fn member(index: usize) -> String {
+    format!("pl-{index}.atlas.scarif.test")
+}
+
 #[tokio::test]
-async fn le_front_n_ouvre_jamais_plus_de_cinq_canaux_a_la_fois_et_rend_la_place_d_un_canal_ferme() {
+async fn un_cluster_de_sept_membres_ouvre_moniteur_et_pool_vers_chacun_sans_aucun_refus() {
     let opener = Arc::new(CountingOpener::default());
     let front = front_with(opener.clone()).await;
     let mut open = Vec::new();
-    for _ in 0..MAX_OPEN_CHANNELS {
+    for index in 0..7 {
+        for _ in 0..CHANNELS_PER_TARGET {
+            let (stream, status) = connect_request(&front, &domain(&member(index)), 1024).await;
+            assert_eq!(status, SUCCEEDED, "member {index}");
+            open.push(stream);
+        }
+    }
+    assert_eq!(opener.opened().len(), 7 * CHANNELS_PER_TARGET);
+}
+
+#[tokio::test]
+async fn un_canal_de_trop_vers_un_meme_membre_attend_puis_echoue_et_reprend_quand_un_canal_se_ferme()
+ {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut open = Vec::new();
+    for _ in 0..CHANNELS_PER_TARGET {
         let (stream, status) = connect_request(&front, &domain(MEMBER), 1024).await;
         assert_eq!(status, SUCCEEDED);
         open.push(stream);
     }
-    let (_, status) = connect_request(&front, &domain(MEMBER), 1025).await;
+    let (_, status) = connect_request(&front, &domain(MEMBER), 1024).await;
     assert_eq!(status, GENERAL_FAILURE);
-    assert_eq!(opener.opened().len(), MAX_OPEN_CHANNELS);
+    assert_eq!(opener.opened().len(), CHANNELS_PER_TARGET);
+    let (_, status) = connect_request(&front, &domain(&member(1)), 1024).await;
+    assert_eq!(status, SUCCEEDED, "another member keeps its own budget");
 
     drop(open.pop());
-    let (_, status) = connect_request(&front, &domain(MEMBER), 1026).await;
+    let (_, status) = connect_request(&front, &domain(MEMBER), 1024).await;
     assert_eq!(status, SUCCEEDED);
-    assert_eq!(opener.opened().len(), MAX_OPEN_CHANNELS + 1);
+    assert_eq!(opener.opened().len(), CHANNELS_PER_TARGET + 2);
+}
+
+#[tokio::test]
+async fn le_front_refuse_une_cible_au_dela_du_nombre_maximal_de_membres() {
+    let opener = Arc::new(CountingOpener::default());
+    let front = front_with(opener.clone()).await;
+    let mut open = Vec::new();
+    for index in 0..MAX_TARGETS {
+        let (stream, status) = connect_request(&front, &domain(&member(index)), 1024).await;
+        assert_eq!(status, SUCCEEDED, "member {index}");
+        open.push(stream);
+    }
+    let (_, status) = connect_request(&front, &domain(&member(MAX_TARGETS)), 1024).await;
+    assert_eq!(status, GENERAL_FAILURE);
+    assert_eq!(opener.opened().len(), MAX_TARGETS);
 }

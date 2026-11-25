@@ -1,7 +1,7 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fast_socks5::Socks5Command;
@@ -25,7 +25,7 @@ const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 const PENDING_HANDSHAKES: usize = 32;
-const MAX_OPEN_CHANNELS: usize = 5;
+const MAX_TARGETS: usize = 50;
 const CHANNEL_WAIT: Duration = Duration::from_secs(2);
 
 type RequestConfig = Config<DenyAuthentication>;
@@ -41,11 +41,45 @@ struct Relay<C> {
     config: Arc<RequestConfig>,
     opener: Arc<C>,
     policy: TargetPolicy,
-    channels: Arc<Semaphore>,
+    channels: ChannelBudget,
+}
+
+struct ChannelBudget {
+    per_target: usize,
+    targets: Mutex<HashMap<AllowedTarget, Arc<Semaphore>>>,
+}
+
+impl ChannelBudget {
+    fn new(per_target: usize) -> Self {
+        Self {
+            per_target,
+            targets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn of(&self, target: &AllowedTarget) -> Option<Arc<Semaphore>> {
+        let mut targets = self
+            .targets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(budget) = targets.get(target) {
+            return Some(budget.clone());
+        }
+        if targets.len() >= MAX_TARGETS {
+            return None;
+        }
+        let budget = Arc::new(Semaphore::new(self.per_target));
+        targets.insert(target.clone(), budget.clone());
+        Some(budget)
+    }
 }
 
 impl SocksFront {
-    pub async fn start<C: ChannelOpener>(opener: Arc<C>, policy: TargetPolicy) -> io::Result<Self> {
+    pub async fn start<C: ChannelOpener>(
+        opener: Arc<C>,
+        policy: TargetPolicy,
+        channels_per_target: usize,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
         let address = listener.local_addr()?;
         let credentials = ProxyCredentials::generate()?;
@@ -54,7 +88,7 @@ impl SocksFront {
             config: Arc::new(request_config()),
             opener,
             policy,
-            channels: Arc::new(Semaphore::new(MAX_OPEN_CHANNELS)),
+            channels: ChannelBudget::new(channels_per_target),
         });
         let serving = tokio::spawn(serve(listener, relay));
         Ok(Self {
@@ -152,8 +186,7 @@ async fn negotiate<C: ChannelOpener>(
         let _ = reply(&mut client, SOCKS5_REPLY_CONNECTION_NOT_ALLOWED).await;
         return None;
     };
-    let free = tokio::time::timeout(CHANNEL_WAIT, relay.channels.clone().acquire_owned()).await;
-    let Ok(Ok(open)) = free else {
+    let Some(open) = channel_permit(&relay.channels, &target).await else {
         let _ = reply(&mut client, SOCKS5_REPLY_GENERAL_FAILURE).await;
         return None;
     };
@@ -167,6 +200,17 @@ async fn negotiate<C: ChannelOpener>(
             None
         }
     }
+}
+
+async fn channel_permit(
+    channels: &ChannelBudget,
+    target: &AllowedTarget,
+) -> Option<OwnedSemaphorePermit> {
+    let budget = channels.of(target)?;
+    tokio::time::timeout(CHANNEL_WAIT, budget.acquire_owned())
+        .await
+        .ok()?
+        .ok()
 }
 
 fn admitted(

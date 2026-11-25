@@ -3120,6 +3120,7 @@ dependencies = [
  "fast-socks5",
  "futures-util",
  "hex",
+ "hickory-resolver",
  "hmac",
  "libc",
  "md-5",

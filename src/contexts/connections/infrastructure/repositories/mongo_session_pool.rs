@@ -19,7 +19,8 @@ use crate::contexts::connections::domain::types::{
     ExecutionLimits, FindRequest, MongoConnectParams, MongoTransport, SampledField, Secret,
 };
 use crate::contexts::connections::infrastructure::data_sources::mongodb::{
-    MongoFailure, MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
+    CHANNELS_PER_MEMBER, MongoFailure, MongoSession, ProxyEndpoint, SELECTION_TIMEOUT,
+    client_options,
 };
 use crate::contexts::connections::infrastructure::data_sources::socks::{SocksFront, TargetPolicy};
 use crate::contexts::connections::infrastructure::data_sources::ssh::SshLink;
@@ -194,7 +195,7 @@ impl MongoSessionPool {
                     })
                     .map(Arc::new)
                     .map_err(|error| redacted_connect_failure(connection, error, &unproxied))?;
-                let front = SocksFront::start(link.clone(), policy.clone())
+                let front = SocksFront::start(link.clone(), policy.clone(), CHANNELS_PER_MEMBER)
                     .await
                     .map_err(|error| ConnectionError::ConnectFailed {
                         connection: connection.to_string(),

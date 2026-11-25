@@ -14,6 +14,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const APP_NAME: &str = "scarif";
 const AUTH_SOURCE: &str = "admin";
 const MAX_POOL_SIZE: u32 = 1;
+const MONITOR_CONNECTIONS: usize = 1;
+pub const CHANNELS_PER_MEMBER: usize = MONITOR_CONNECTIONS + MAX_POOL_SIZE as usize;
 const MAX_IDLE_TIME: Duration = Duration::from_secs(30);
 
 pub struct ProxyEndpoint<'a> {
