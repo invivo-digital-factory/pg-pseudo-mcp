@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::schema::RawEntry;
 use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider;
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
@@ -24,6 +26,7 @@ struct Evaluation {
 
 pub struct FileEvaluator<'a> {
     sign_in: SignIn<'a>,
+    pgpass_file: Option<&'a Path>,
     resolver: &'a OpenSshResolver,
     database: Option<&'a str>,
 }
@@ -31,11 +34,13 @@ pub struct FileEvaluator<'a> {
 impl<'a> FileEvaluator<'a> {
     pub fn new(
         tokens: &'a dyn AzureSignInTokenProvider,
+        pgpass_file: Option<&'a Path>,
         resolver: &'a OpenSshResolver,
         database: Option<&'a str>,
     ) -> Self {
         Self {
             sign_in: SignIn::new(tokens),
+            pgpass_file,
             resolver,
             database,
         }
@@ -147,14 +152,16 @@ impl<'a> FileEvaluator<'a> {
         sslmode: SslMode,
     ) -> Result<ConnectParams, ConnectionStatus> {
         let password = match &definition.auth {
-            AuthMode::Pgpass => pgpass_or_azure_token(target, false, &self.sign_in)?,
+            AuthMode::Pgpass => {
+                pgpass_or_azure_token(target, false, self.pgpass_file, &self.sign_in)?
+            }
             AuthMode::Azure => {
                 if !is_azure_postgres_host(target.host) {
                     return Err(ConnectionStatus::Unavailable {
                         reason: AZURE_HOST_REASON.to_string(),
                     });
                 }
-                pgpass_or_azure_token(target, true, &self.sign_in)?
+                pgpass_or_azure_token(target, true, self.pgpass_file, &self.sign_in)?
             }
             AuthMode::Command(argv) => PasswordSource::Command(argv.clone()),
         };

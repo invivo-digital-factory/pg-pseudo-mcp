@@ -36,14 +36,16 @@ impl AzureSignInTokenProvider for NoTokens {
     }
 }
 
-pub(super) static PGPASS_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn discover(home: Option<&Path>) -> Discovery {
     discover_in(home, None)
 }
 
 fn discover_in(home: Option<&Path>, database: Option<&str>) -> Discovery {
-    discover_in_with(home, &NoTokens, database)
+    discover_in_with(home, &NoTokens, None, database)
+}
+
+fn discover_pgpass(home: Option<&Path>, pgpass: &Path, database: Option<&str>) -> Discovery {
+    discover_in_with(home, &NoTokens, Some(pgpass), database)
 }
 
 fn write_project(root: &Path, project: &str, suffix: &str, sources: &Value, creds: Option<&Value>) {
@@ -110,7 +112,7 @@ fn find_connection(home: &Path, name: &str) -> Result<ConnectParams, ConnectionE
 }
 
 async fn list_connections(home: &Path) -> CallToolResult {
-    let catalog = DbeaverConnectionCatalog::new(Some(home.to_path_buf()), Arc::new(NoTokens));
+    let catalog = DbeaverConnectionCatalog::new(Some(home.to_path_buf()), Arc::new(NoTokens), None);
     presentation::list_connections(&ListConnections::new(Arc::new(catalog))).await
 }
 
@@ -875,7 +877,6 @@ mod integration {
 
     #[test]
     fn pgpass_fournit_le_mot_de_passe_de_la_base() {
-        let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let home = TempDir::new().unwrap();
         let key = key_file(&home);
         let pgpass = home.path().join("pgpass-dbeaver-test");
@@ -913,8 +914,7 @@ mod integration {
                 "pg-2": { "#connection": { "user": "reader" } }
             })),
         );
-        unsafe { std::env::set_var("PGPASSFILE", &pgpass) };
-        let discovery = discover(Some(home.path()));
+        let discovery = discover_pgpass(Some(home.path()), &pgpass, None);
         let by_name = |name: &str| {
             discovery
                 .connections
@@ -945,16 +945,16 @@ mod integration {
         set_mode(&pgpass, 0o644);
         if cfg!(unix) {
             assert_eq!(
-                by_name_in(&discover(Some(home.path())), "Shop").status,
+                by_name_in(&discover_pgpass(Some(home.path()), &pgpass, None), "Shop").status,
                 ConnectionStatus::Unavailable {
                     reason: "pgpass file permissions are too open; run chmod 600 on it".to_string()
                 }
             );
         }
 
-        unsafe { std::env::set_var("PGPASSFILE", home.path().join("absent-pgpass")) };
+        let absent = home.path().join("absent-pgpass");
         assert_eq!(
-            by_name_in(&discover(Some(home.path())), "Shop").status,
+            by_name_in(&discover_pgpass(Some(home.path()), &absent, None), "Shop").status,
             ConnectionStatus::Unavailable {
                 reason: "no matching entry in the pgpass file".to_string()
             }
@@ -963,7 +963,6 @@ mod integration {
 
     #[test]
     fn pgpass_est_cherche_avec_la_base_demandee_et_non_celle_de_dbeaver() {
-        let _env = PGPASS_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let home = TempDir::new().unwrap();
         let pgpass = home.path().join("pgpass-database-test");
         fs::write(
@@ -983,18 +982,23 @@ mod integration {
             })),
             Some(&json!({ "pg-1": { "#connection": { "user": "reader" } } })),
         );
-        unsafe { std::env::set_var("PGPASSFILE", &pgpass) };
-
-        let default = resolve_connection(&discover(Some(home.path())), "Shop").unwrap();
+        let default =
+            resolve_connection(&discover_pgpass(Some(home.path()), &pgpass, None), "Shop").unwrap();
         assert_eq!(default.database, "shop");
         assert_eq!(default.password.expose(), "shop-pw");
 
-        let billing =
-            resolve_connection(&discover_in(Some(home.path()), Some("billing")), "Shop").unwrap();
+        let billing = resolve_connection(
+            &discover_pgpass(Some(home.path()), &pgpass, Some("billing")),
+            "Shop",
+        )
+        .unwrap();
         assert_eq!(billing.database, "billing");
         assert_eq!(billing.password.expose(), "billing-pw");
 
-        let unknown = resolve_connection(&discover_in(Some(home.path()), Some("absent")), "Shop");
+        let unknown = resolve_connection(
+            &discover_pgpass(Some(home.path()), &pgpass, Some("absent")),
+            "Shop",
+        );
         assert!(matches!(unknown, Err(ConnectionError::Unavailable { .. })));
     }
 

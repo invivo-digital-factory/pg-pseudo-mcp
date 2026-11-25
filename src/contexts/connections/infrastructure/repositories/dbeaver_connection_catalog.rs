@@ -10,19 +10,30 @@ use crate::contexts::connections::infrastructure::data_sources::dbeaver::discove
 pub struct DbeaverConnectionCatalog {
     dbeaver_home: Option<PathBuf>,
     tokens: Arc<dyn AzureSignInTokenProvider>,
+    pgpass_file: Option<PathBuf>,
 }
 
 impl DbeaverConnectionCatalog {
-    pub fn new(dbeaver_home: Option<PathBuf>, tokens: Arc<dyn AzureSignInTokenProvider>) -> Self {
+    pub fn new(
+        dbeaver_home: Option<PathBuf>,
+        tokens: Arc<dyn AzureSignInTokenProvider>,
+        pgpass_file: Option<PathBuf>,
+    ) -> Self {
         Self {
             dbeaver_home,
             tokens,
+            pgpass_file,
         }
     }
 }
 
 impl ConnectionCatalog for DbeaverConnectionCatalog {
     fn discover_in(&self, database: Option<&str>) -> Discovery {
-        discover_in(self.dbeaver_home.as_deref(), self.tokens.as_ref(), database)
+        discover_in(
+            self.dbeaver_home.as_deref(),
+            self.tokens.as_ref(),
+            self.pgpass_file.as_deref(),
+            database,
+        )
     }
 }

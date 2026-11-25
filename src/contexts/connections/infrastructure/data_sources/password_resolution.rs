@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::path::Path;
 
 use super::pgpass;
 use crate::contexts::connections::domain::errors::AccessTokenError;
@@ -31,12 +32,13 @@ impl<'a> SignIn<'a> {
 pub(crate) fn pgpass_or_azure_token(
     target: &pgpass::Target<'_>,
     azure: bool,
+    pgpass_file: Option<&Path>,
     sign_in: &SignIn<'_>,
 ) -> Result<PasswordSource, ConnectionStatus> {
     let unavailable = |reason: String| ConnectionStatus::Unavailable { reason };
     let from_pgpass = || -> Result<Option<Secret>, ConnectionStatus> {
-        match pgpass::default_path() {
-            Some(path) => pgpass::lookup(&path, target).map_err(unavailable),
+        match pgpass_file {
+            Some(path) => pgpass::lookup(path, target).map_err(unavailable),
             None => Ok(None),
         }
     };
