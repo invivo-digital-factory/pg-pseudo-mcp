@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use scarif_database_mcp::contexts::anonymization::domain::types::{
-    AnonymizedDocuments, Cell, ColumnMeta, ColumnSource, FieldClearance, FieldPath, Kind, Node,
+    AnonymizedDocuments, Cell, ColumnMeta, ColumnSource, FieldClearance, FieldPath, Node,
 };
 use serde_json::Value;
 
-use crate::anonymization_world::AnonymizationWorld;
+use crate::anonymization_world::{AnonymizationWorld, kind_named, listed};
 
 fn node(value: &Value) -> Node {
     match value {
@@ -29,6 +31,14 @@ fn node(value: &Value) -> Node {
             Some((key, Value::String(inner))) if entries.len() == 1 && key == "$numberLong" => {
                 Node::Int(inner.parse().expect("an Int64"))
             }
+            Some((key, Value::Object(binary))) if entries.len() == 1 && key == "$binary" => {
+                let data = binary["base64"].as_str().expect("base64 data");
+                let subtype = binary["subType"].as_str().expect("a subtype");
+                Node::Binary {
+                    subtype: u8::from_str_radix(subtype, 16).expect("a hexadecimal subtype"),
+                    len: STANDARD.decode(data).expect("base64").len(),
+                }
+            }
             _ => Node::Object(
                 entries
                     .iter()
@@ -49,22 +59,6 @@ fn field<'a>(document: &'a Node, path: &str) -> &'a Node {
                 .unwrap_or_else(|| panic!("no field {key} in {current:?}")),
             other => panic!("{other:?} has no field {key}"),
         })
-}
-
-fn listed(values: &str) -> Vec<String> {
-    values
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-fn kind_named(name: &str) -> Kind {
-    Kind::ALL
-        .into_iter()
-        .find(|kind| kind.as_str() == name)
-        .unwrap_or_else(|| panic!("unknown kind {name}"))
 }
 
 fn anonymized(world: &AnonymizationWorld) -> &AnonymizedDocuments {
@@ -98,6 +92,25 @@ async fn given_personal_field(world: &mut AnonymizationWorld, path: String, kind
     world.clearances.push((
         FieldPath::new(&path),
         FieldClearance::Personal(kind_named(&kind)),
+    ));
+}
+
+#[given(regex = r#"^la politique déclare le champ "([^"]+)" renommé depuis "([^"]+)"$"#)]
+async fn given_renamed_field(world: &mut AnonymizationWorld, path: String, source: String) {
+    world
+        .clearances
+        .push((FieldPath::new(&path), FieldClearance::NamedAs(source)));
+}
+
+#[given(
+    regex = r#"^la politique déclare le champ "([^"]+)" calculé à partir d'une donnée personnelle$"#
+)]
+async fn given_tainted_field(world: &mut AnonymizationWorld, path: String) {
+    world.clearances.push((
+        FieldPath::new(&path),
+        FieldClearance::Derived {
+            proven_clear: false,
+        },
     ));
 }
 
@@ -181,6 +194,26 @@ async fn field_is_another_date(world: &mut AnonymizationWorld, path: String) {
     assert_ne!(output, input);
 }
 
+#[then(regex = r#"^le champ "([^"]+)" vaut "([^"]+)"$"#)]
+async fn field_equals(world: &mut AnonymizationWorld, path: String, expected: String) {
+    let (_, output) = read_field(world, &path);
+    assert_eq!(output, &Node::Text(expected));
+}
+
+#[then(regex = r#"^le champ "([^"]+)" est un jeton opaque "([^"]+)"$"#)]
+async fn field_is_token(world: &mut AnonymizationWorld, path: String, label: String) {
+    let (_, output) = read_field(world, &path);
+    let Node::Text(text) = output else {
+        panic!("{path} is not text: {output:?}");
+    };
+    let id = text
+        .strip_prefix(&format!("<{label} id="))
+        .and_then(|rest| rest.strip_suffix('>'))
+        .unwrap_or_else(|| panic!("{text} is not a {label} token"));
+    assert_eq!(id.len(), 8, "{text}");
+    assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "{text}");
+}
+
 #[then(regex = r#"^les clés du champ "([^"]+)" sont les pseudonymes de "([^"]+)"$"#)]
 async fn keys_are_pseudonyms(world: &mut AnonymizationWorld, path: String, values: String) {
     let anonymize = world.use_cases().anonymize_free_text;
@@ -218,5 +251,13 @@ async fn response_has_no_real_value(world: &mut AnonymizationWorld, values: Stri
         for form in [value.clone(), value.to_lowercase(), value.to_uppercase()] {
             assert!(!response.contains(&form), "{form} leaked in {response}");
         }
+    }
+}
+
+#[then(regex = r#"^la réponse contient encore les valeurs "([^"]+)"$"#)]
+async fn response_keeps_values(world: &mut AnonymizationWorld, values: String) {
+    let response = format!("{:?}", anonymized(world).documents);
+    for value in listed(&values) {
+        assert!(response.contains(&value), "{value} missing in {response}");
     }
 }

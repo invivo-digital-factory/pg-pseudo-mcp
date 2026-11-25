@@ -1,0 +1,9 @@
+mod casse_et_forme_des_pseudonymes;
+mod colonnes_calculees_et_politique;
+mod detection_des_valeurs_personnelles;
+mod dictionnaire_des_colonnes;
+mod magasin_de_pseudonymes_et_purge;
+mod messages_et_plans;
+mod nombres_et_dates;
+mod pseudonymes_par_type;
+mod repertoire_de_donnees;
