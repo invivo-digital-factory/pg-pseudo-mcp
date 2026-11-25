@@ -8,53 +8,10 @@ mod anonymization_world;
 mod connections_steps;
 #[path = "../src/contexts/connections/test/steps/connections_world.rs"]
 mod connections_world;
+#[path = "../src/contexts/querying/test/steps/mod.rs"]
+mod querying_steps;
 #[path = "../src/contexts/querying/test/steps/querying_world.rs"]
 mod querying_world;
-
-#[path = "../src/contexts/querying/test/steps/champs_derives_mongodb.rs"]
-mod champs_derives_mongodb;
-#[path = "../src/contexts/querying/test/steps/choix_de_la_base.rs"]
-mod choix_de_la_base;
-#[path = "../src/contexts/querying/test/steps/colonnes_derivees.rs"]
-mod colonnes_derivees;
-#[path = "../src/contexts/connections/test/steps/decouverte_des_connexions.rs"]
-mod decouverte_des_connexions;
-#[path = "../src/contexts/querying/test/steps/decouverte_du_schema.rs"]
-mod decouverte_du_schema;
-#[path = "../src/contexts/querying/test/steps/erreurs_des_outils.rs"]
-mod erreurs_des_outils;
-#[path = "../src/contexts/connections/test/steps/fichier_de_connexions.rs"]
-mod fichier_de_connexions;
-#[path = "../src/contexts/connections/test/steps/import_dbeaver.rs"]
-mod import_dbeaver;
-#[path = "../src/contexts/querying/test/steps/informations_du_serveur.rs"]
-mod informations_du_serveur;
-#[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
-mod lecture_seule;
-#[path = "../src/contexts/querying/test/steps/lecture_seule_mongodb.rs"]
-mod lecture_seule_mongodb;
-#[path = "../src/contexts/querying/test/steps/limites_des_reponses.rs"]
-mod limites_des_reponses;
-#[path = "../src/contexts/querying/test/steps/outils_mongodb.rs"]
-mod outils_mongodb;
-#[path = "../src/contexts/querying/test/steps/plan_d_execution.rs"]
-mod plan_d_execution;
-#[path = "../src/contexts/querying/test/steps/politique_de_champs_mongodb.rs"]
-mod politique_de_champs_mongodb;
-#[path = "../src/contexts/querying/test/steps/politique_de_colonnes.rs"]
-mod politique_de_colonnes;
-#[path = "../src/contexts/anonymization/test/steps/pseudonymisation.rs"]
-mod pseudonymisation;
-#[path = "../src/contexts/anonymization/test/steps/pseudonymisation_des_documents.rs"]
-mod pseudonymisation_des_documents;
-#[path = "../src/contexts/connections/test/steps/rebond_ssh.rs"]
-mod rebond_ssh;
-#[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme.rs"]
-mod suivi_par_pseudonyme;
-#[path = "../src/contexts/querying/test/steps/suivi_par_pseudonyme_mongodb.rs"]
-mod suivi_par_pseudonyme_mongodb;
-#[path = "../src/contexts/connections/test/steps/tunnel_ssh.rs"]
-mod tunnel_ssh;
 
 use std::collections::BTreeSet;
 use std::fs;

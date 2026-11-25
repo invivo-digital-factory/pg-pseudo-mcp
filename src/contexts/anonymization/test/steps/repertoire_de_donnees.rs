@@ -8,6 +8,7 @@ use scarif_database_mcp::contexts::anonymization::infrastructure::data_sources::
 use crate::anonymization_world::AnonymizationWorld;
 
 const LEGACY_DIRECTORY: &str = "pg-pseudo-mcp";
+
 const KNOWN_EMAIL: &str = "ylwenna.kervadec@canary-mail.fr";
 
 fn root(world: &AnonymizationWorld) -> &std::path::Path {

@@ -1,5 +1,5 @@
 use base64::Engine;
-use cucumber::{given, then, when};
+use cucumber::{given, when};
 use hmac::{Hmac, KeyInit, Mac};
 use scarif_database_mcp::contexts::connections::domain::types::ExecutionLimits;
 use serde_json::json;
@@ -9,7 +9,9 @@ use crate::bdd_support::{
     BASTION_HOST, BASTION_USER, CONNECTION, TunnelSpec, bastion_port, known_hosts_pattern,
     public_key_fields, ssh_asset, write_workspace,
 };
-use crate::connections_steps::support::{database_target_or_offline, dbeaver_dir};
+use crate::connections_steps::support::{
+    STRICT_NO, bastion_key, database_target_or_offline, dbeaver_dir, test_bastion, write_ssh_config,
+};
 use crate::connections_world::ConnectionsWorld;
 
 fn tunneled_workspace(world: &mut ConnectionsWorld) {
@@ -44,10 +46,6 @@ async fn tunneled_connection_bypassing(world: &mut ConnectionsWorld) {
     std::fs::write(&sources, document.to_string()).expect("data sources");
 }
 
-fn bastion_key() -> String {
-    public_key_fields("ssh_host_ed25519_test.pub")
-}
-
 fn hashed(pattern: &str) -> String {
     let salt = [42u8; 20];
     let mut mac = Hmac::<Sha1>::new_from_slice(&salt).expect("hmac key");
@@ -58,11 +56,6 @@ fn hashed(pattern: &str) -> String {
         engine.encode(salt),
         engine.encode(mac.finalize().into_bytes())
     )
-}
-
-#[given(regex = r"^un fichier known_hosts qui connaît la clé du bastion$")]
-async fn known_hosts_with_bastion_key(world: &mut ConnectionsWorld) {
-    world.write_known_hosts(&format!("{} {}\n", known_hosts_pattern(), bastion_key()));
 }
 
 #[given(regex = r"^un fichier known_hosts qui connaît la clé du bastion sous une forme hachée$")]
@@ -120,25 +113,6 @@ async fn known_hosts_cert_authority(world: &mut ConnectionsWorld) {
     ));
 }
 
-#[given(regex = r"^un fichier known_hosts qui connaît la clé du bastion à ses deux sauts$")]
-async fn known_hosts_both_hops(world: &mut ConnectionsWorld) {
-    world.write_known_hosts(&format!(
-        "{} {key}\n{BASTION_HOST} {key}\n",
-        known_hosts_pattern(),
-        key = bastion_key()
-    ));
-}
-
-#[given(regex = r"^un fichier known_hosts qui ne connaît la clé du bastion qu'à son second saut$")]
-async fn known_hosts_second_hop(world: &mut ConnectionsWorld) {
-    world.write_known_hosts(&format!("{BASTION_HOST} {}\n", bastion_key()));
-}
-
-#[given(regex = r"^un fichier known_hosts qui ne connaît la clé du bastion qu'à son premier saut$")]
-async fn known_hosts_first_hop(world: &mut ConnectionsWorld) {
-    world.write_known_hosts(&format!("{} {}\n", known_hosts_pattern(), bastion_key()));
-}
-
 #[when(regex = r"^l'agent exécute une requête de lecture sur la connexion tunnelée$")]
 async fn agent_runs_read_through_tunnel(world: &mut ConnectionsWorld) {
     let context = world.context();
@@ -156,34 +130,9 @@ async fn agent_runs_read_through_tunnel(world: &mut ConnectionsWorld) {
     );
 }
 
-#[then(regex = r"^la session s'ouvre et répond$")]
-async fn session_answers(world: &mut ConnectionsWorld) {
-    assert_eq!(world.outcome, Some(Ok(())));
-}
-
-fn refusal(world: &ConnectionsWorld) -> &str {
-    match world.outcome.as_ref().expect("a statement was run") {
-        Ok(()) => panic!("the connection was accepted"),
-        Err(message) => message,
-    }
-}
-
-#[then(regex = r"^la connexion est refusée$")]
-async fn connection_is_refused(world: &mut ConnectionsWorld) {
-    refusal(world);
-}
-
-#[then(regex = r#"^le message de refus contient "(.+)"$"#)]
-async fn refusal_contains(world: &mut ConnectionsWorld, expected: String) {
-    let message = refusal(world);
-    assert!(message.contains(&expected), "{message}");
-}
-
-#[then(regex = r#"^le message de refus contient l'empreinte "([^"]+)" de la clé du bastion$"#)]
-async fn refusal_carries_fingerprint(world: &mut ConnectionsWorld, prefix: String) {
-    let message = refusal(world);
-    assert!(
-        message.contains(&format!("ssh-ed25519 {prefix}")),
-        "{message}"
-    );
+#[given(
+    regex = r#"^un fichier de configuration SSH de test avec l'alias "([^"]+)" en StrictHostKeyChecking no$"#
+)]
+async fn ssh_config_with_alias_strict_no(world: &mut ConnectionsWorld, alias: String) {
+    write_ssh_config(world, &test_bastion(&alias, STRICT_NO));
 }

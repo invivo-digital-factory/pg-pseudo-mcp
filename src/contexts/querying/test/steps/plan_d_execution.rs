@@ -1,22 +1,7 @@
 use cucumber::{then, when};
-use scarif_database_mcp::composition::tools;
-use scarif_database_mcp::contexts::querying::presentation::ExplainArgs;
 
-use crate::bdd_support::CONNECTION;
+use crate::querying_steps::support::explain;
 use crate::querying_world::QueryingWorld;
-
-async fn explain(world: &mut QueryingWorld, sql: String) {
-    let result = tools::explain(
-        world.contexts(),
-        ExplainArgs {
-            connection: CONNECTION.into(),
-            sql,
-            database: None,
-        },
-    )
-    .await;
-    world.record(&result);
-}
 
 #[when(regex = r"^l'agent demande le plan du filtre des clients sur ce pseudonyme$")]
 async fn agent_explains_pseudonym_filter(world: &mut QueryingWorld) {

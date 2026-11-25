@@ -4,16 +4,10 @@ use scarif_database_mcp::contexts::querying::presentation::{
     AggregateArgs, DescribeTableArgs, ExplainArgs, FindArgs, ListDatabasesArgs, ListTablesArgs,
     QueryArgs, SearchSchemaArgs,
 };
-use serde_json::Value;
 
 use crate::bdd_support::CONNECTION;
+use crate::querying_steps::support::error;
 use crate::querying_world::{MONGO_CONNECTION, QueryingWorld};
-
-fn error(world: &QueryingWorld) -> Value {
-    let answer = world.answer();
-    assert!(answer.refused, "{}", answer.text);
-    answer.body()["error"].clone()
-}
 
 #[given(regex = r"^une connexion PostgreSQL dont le magasin de pseudonymes est inutilisable$")]
 async fn store_unavailable(world: &mut QueryingWorld) {
@@ -143,19 +137,6 @@ async fn error_category(world: &mut QueryingWorld, category: String) {
     assert_eq!(error["category"], category.as_str(), "{error}");
 }
 
-#[then(regex = r#"^l'indice de l'erreur contient "([^"]+)"$"#)]
-async fn error_hint_contains(world: &mut QueryingWorld, text: String) {
-    let error = error(world);
-    let hint = error["hint"].as_str().unwrap_or_default();
-    assert!(hint.contains(&text), "{error}");
-}
-
-#[then(regex = r"^l'erreur (peut|ne peut pas) être retentée$")]
-async fn error_retryable(world: &mut QueryingWorld, verdict: String) {
-    let error = error(world);
-    assert_eq!(error["retryable"], verdict == "peut", "{error}");
-}
-
 #[then(regex = r#"^l'erreur porte le code SQLSTATE "([^"]+)"$"#)]
 async fn error_sqlstate(world: &mut QueryingWorld, sqlstate: String) {
     let error = error(world);
@@ -169,9 +150,17 @@ async fn error_code_name(world: &mut QueryingWorld) {
     assert!(error.get("sqlstate").is_none(), "{error}");
 }
 
-#[then(regex = r"^la réponse cite le pseudonyme$")]
-async fn answer_quotes_pseudonym(world: &mut QueryingWorld) {
-    let pseudonym = world.pseudonym.clone().expect("a pseudonym was read");
-    let text = &world.answer().text;
-    assert!(text.contains(&pseudonym), "{text}");
+#[then(regex = r#"^l'outil est refusé et renvoie vers "([^"]+)"$"#)]
+async fn redirected(world: &mut QueryingWorld, tool: String) {
+    let answer = world.answer();
+    assert!(answer.refused, "{}", answer.text);
+    let body = answer.body();
+    assert_eq!(body["error"]["code"], "wrong_engine");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&tool),
+        "{body}"
+    );
 }

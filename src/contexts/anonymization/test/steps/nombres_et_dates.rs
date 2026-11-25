@@ -1,37 +1,11 @@
 use cucumber::{then, when};
-use scarif_database_mcp::contexts::anonymization::domain::types::Cell;
-use serde_json::{Value, json};
 
-use super::detection_des_valeurs_personnelles::read_column;
+use crate::anonymization_steps::support::{read_column, rendered_cell, typed_cell};
 use crate::anonymization_world::AnonymizationWorld;
 
 const MIN_SHIFT_WEEKS: i64 = 1;
-const MAX_SHIFT_WEEKS: i64 = 52;
 
-fn typed_cell(type_name: &str, value: &str) -> (Cell, Value) {
-    let text = || Value::String(value.to_string());
-    match type_name {
-        "int2" | "int4" | "int8" => {
-            let number: i64 = value.parse().expect("an integer");
-            (Cell::Int(number), json!(number))
-        }
-        "float8" => {
-            let number: f64 = value.parse().expect("a float");
-            (Cell::Float(number), json!(number))
-        }
-        "numeric" => (Cell::Numeric(value.to_string()), text()),
-        "bool" => {
-            let flag: bool = value.parse().expect("a boolean");
-            (Cell::Bool(flag), json!(flag))
-        }
-        "uuid" => (Cell::Uuid(value.to_string()), text()),
-        "date" => (Cell::Date(value.to_string()), text()),
-        "timestamp" => (Cell::Timestamp(value.to_string()), text()),
-        "timestamptz" => (Cell::TimestampTz(value.to_string()), text()),
-        "inet" => (Cell::Inet(value.to_string()), text()),
-        _ => (Cell::Text(value.to_string()), text()),
-    }
-}
+const MAX_SHIFT_WEEKS: i64 = 52;
 
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
@@ -54,17 +28,6 @@ fn day_number(text: &str) -> i64 {
     } else {
         days_from_civil(number(6..10), number(3..5), number(0..2))
     }
-}
-
-#[when(regex = r#"^l'agent lit "([^"]*)" dans la colonne "([^"]+)" de type "([^"]+)"$"#)]
-async fn agent_reads_typed_column(
-    world: &mut AnonymizationWorld,
-    value: String,
-    column: String,
-    type_name: String,
-) {
-    let (cell, clear) = typed_cell(&type_name, &value);
-    read_column(world, &column, true, &type_name, cell, clear);
 }
 
 #[when(regex = r#"^l'agent lit "([^"]*)" dans la colonne calculée "([^"]+)" de type "([^"]+)"$"#)]
@@ -101,4 +64,10 @@ async fn date_is_plausible(world: &mut AnonymizationWorld, from: i64, to: i64) {
     );
     let year: i64 = date[..4].parse().expect("a year");
     assert!((from..=to).contains(&year), "{date}");
+}
+
+#[then(regex = r"^la valeur rendue est un nombre$")]
+async fn rendered_value_is_a_number(world: &mut AnonymizationWorld) {
+    let rendered = rendered_cell(world);
+    assert!(rendered.is_number(), "{rendered}");
 }

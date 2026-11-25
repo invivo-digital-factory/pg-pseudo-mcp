@@ -1,91 +1,12 @@
-use cucumber::gherkin::Step;
 use cucumber::{given, then};
 
-use crate::bdd_support::{BASTION_HOST, BASTION_USER, bastion_port, database_target, ssh_asset};
-use crate::connections_steps::support::{write_connection_file, write_ssh_config};
+use crate::bdd_support::{
+    BASTION_HOST, BASTION_USER, bastion_port, database_target, known_hosts_pattern, ssh_asset,
+};
+use crate::connections_steps::support::{
+    STRICT_NO, bastion_key, params, reason, write_connection_file, write_ssh_config,
+};
 use crate::connections_world::ConnectionsWorld;
-
-const STRICT_NO: &str = "  StrictHostKeyChecking no\n";
-
-fn test_bastion(alias: &str, extra: &str) -> String {
-    format!(
-        "Host {alias}\n  HostName {BASTION_HOST}\n  Port {}\n  User {BASTION_USER}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n{extra}",
-        bastion_port(),
-        ssh_asset("tunnel_test_ed25519").display()
-    )
-}
-
-#[given(regex = r#"^un fichier de configuration SSH de test avec l'alias "([^"]+)"$"#)]
-async fn ssh_config_with_alias(world: &mut ConnectionsWorld, alias: String) {
-    write_ssh_config(world, &test_bastion(&alias, ""));
-}
-
-#[given(
-    regex = r#"^un fichier de configuration SSH de test avec l'alias "([^"]+)" en StrictHostKeyChecking no$"#
-)]
-async fn ssh_config_with_alias_strict_no(world: &mut ConnectionsWorld, alias: String) {
-    write_ssh_config(world, &test_bastion(&alias, STRICT_NO));
-}
-
-#[given(
-    regex = r#"^un fichier de configuration SSH de test qui ne définit pas l'alias "([^"]+)"$"#
-)]
-async fn ssh_config_without_alias(world: &mut ConnectionsWorld, alias: String) {
-    let contents = format!(
-        "Host autre-bastion\n  HostName bastion.example.com\n\nHost *\n  User someone\n# {alias} is deliberately absent\n"
-    );
-    write_ssh_config(world, &contents);
-}
-
-#[given(regex = r"^un fichier de configuration SSH qui contient :$")]
-async fn ssh_config_contents(world: &mut ConnectionsWorld, step: &Step) {
-    write_ssh_config(world, step.docstring.as_deref().expect("a docstring"));
-}
-
-#[given(
-    regex = r#"^un fichier de configuration SSH qui inclut un fichier où est défini l'alias "([^"]+)"$"#
-)]
-async fn ssh_config_with_include(world: &mut ConnectionsWorld, alias: String) {
-    let included = world.config_dir.path().join("config.d");
-    std::fs::create_dir_all(&included).expect("include dir");
-    std::fs::write(
-        included.join("bastions.conf"),
-        format!("Host {alias}\n  HostName bastion.example.com\n"),
-    )
-    .expect("included file");
-    let contents = format!("Include {}/*.conf\n", included.display());
-    write_ssh_config(world, &contents);
-}
-
-#[given(
-    regex = r#"^un fichier de configuration SSH qui définit l'alias "([^"]+)" vers "([^"]+)"$"#
-)]
-async fn ssh_config_alias_to(world: &mut ConnectionsWorld, alias: String, host: String) {
-    write_ssh_config(world, &format!("Host {alias}\n  HostName {host}\n"));
-}
-
-#[given(
-    regex = r#"^un fichier de configuration SSH dont l'alias "([^"]+)" mène à "([^"]+)" sur le port (\d+) avec l'utilisateur "([^"]+)"$"#
-)]
-async fn ssh_config_alias_to_endpoint(
-    world: &mut ConnectionsWorld,
-    alias: String,
-    host: String,
-    port: u16,
-    user: String,
-) {
-    let contents = format!("Host {alias}\n  HostName {host}\n  Port {port}\n  User {user}\n");
-    write_ssh_config(world, &contents);
-}
-
-#[then(regex = r"^le fichier de configuration SSH est inchangé$")]
-async fn ssh_config_unchanged(world: &mut ConnectionsWorld) {
-    let dir = world.config_dir.path();
-    assert_eq!(
-        std::fs::read_to_string(dir.join("ssh_config")).expect("ssh config"),
-        std::fs::read_to_string(dir.join("ssh_config.before")).expect("ssh config copy")
-    );
-}
 
 #[given(
     regex = r#"^un fichier de configuration SSH où l'alias "([^"]+)" atteint son bastion par (\d+) rebonds successifs$"#
@@ -101,11 +22,6 @@ async fn ssh_config_with_chain(world: &mut ConnectionsWorld, alias: String, jump
         }
     }
     write_ssh_config(world, &contents);
-}
-
-#[given(regex = r"^le client OpenSSH n'est pas installé$")]
-async fn no_ssh_client(world: &mut ConnectionsWorld) {
-    world.ssh_installed = false;
 }
 
 fn two_hop_connection(world: &mut ConnectionsWorld, name: &str, alias: &str, strict: &str) {
@@ -140,4 +56,46 @@ async fn two_hop(world: &mut ConnectionsWorld, name: String, alias: String) {
 )]
 async fn two_hop_strict_no(world: &mut ConnectionsWorld, name: String, alias: String) {
     two_hop_connection(world, &name, &alias, STRICT_NO);
+}
+
+#[then(regex = r#"^la raison de la connexion "([^"]+)" ne contient pas "(.+)"$"#)]
+async fn reason_does_not_contain(world: &mut ConnectionsWorld, name: String, forbidden: String) {
+    let reason = reason(world, &name);
+    assert!(!reason.contains(&forbidden), "{reason}");
+}
+
+#[then(regex = r#"^la connexion "([^"]+)" traverse (\d+) sauts SSH$"#)]
+async fn hop_count(world: &mut ConnectionsWorld, name: String, count: usize) {
+    let tunnel = params(world, &name).tunnel.expect("a tunnel");
+    assert_eq!(tunnel.hops.len(), count);
+}
+
+#[then(regex = r#"^la connexion "([^"]+)" traverse les sauts SSH "([^"]+)"$"#)]
+async fn hop_list(world: &mut ConnectionsWorld, name: String, hops: String) {
+    let tunnel = params(world, &name).tunnel.expect("a tunnel");
+    let actual: Vec<String> = tunnel
+        .hops
+        .iter()
+        .map(|hop| format!("{}:{}", hop.host, hop.port))
+        .collect();
+    assert_eq!(actual.join(", "), hops);
+}
+
+#[given(regex = r"^un fichier known_hosts qui connaît la clé du bastion à ses deux sauts$")]
+async fn known_hosts_both_hops(world: &mut ConnectionsWorld) {
+    world.write_known_hosts(&format!(
+        "{} {key}\n{BASTION_HOST} {key}\n",
+        known_hosts_pattern(),
+        key = bastion_key()
+    ));
+}
+
+#[given(regex = r"^un fichier known_hosts qui ne connaît la clé du bastion qu'à son second saut$")]
+async fn known_hosts_second_hop(world: &mut ConnectionsWorld) {
+    world.write_known_hosts(&format!("{BASTION_HOST} {}\n", bastion_key()));
+}
+
+#[given(regex = r"^un fichier known_hosts qui ne connaît la clé du bastion qu'à son premier saut$")]
+async fn known_hosts_first_hop(world: &mut ConnectionsWorld) {
+    world.write_known_hosts(&format!("{} {}\n", known_hosts_pattern(), bastion_key()));
 }

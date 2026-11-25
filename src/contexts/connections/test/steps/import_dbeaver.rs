@@ -6,10 +6,11 @@ use scarif_database_mcp::contexts::connections::presentation::summary;
 use serde_json::{Value, json};
 
 use crate::bdd_support::{TunnelSpec, offline_target, write_workspace};
-use crate::connections_steps::support::{postgres_connection, write_dbeaver};
+use crate::connections_steps::support::{postgres_connection, write_dbeaver, write_ssh_config};
 use crate::connections_world::ConnectionsWorld;
 
 const EXISTING_CONTENT: &str = "# hand written, must survive\n";
+
 const SAVED_SECRET: &str = "dbeaver-saved-canary-7741";
 
 struct Spec<'a> {
@@ -455,5 +456,28 @@ async fn no_exact_name(world: &mut ConnectionsWorld, name: String) {
     assert!(
         !contents.contains(&format!("name = \"{name}\"")),
         "{contents}"
+    );
+}
+
+#[given(
+    regex = r#"^un fichier de configuration SSH dont l'alias "([^"]+)" mène à "([^"]+)" sur le port (\d+) avec l'utilisateur "([^"]+)"$"#
+)]
+async fn ssh_config_alias_to_endpoint(
+    world: &mut ConnectionsWorld,
+    alias: String,
+    host: String,
+    port: u16,
+    user: String,
+) {
+    let contents = format!("Host {alias}\n  HostName {host}\n  Port {port}\n  User {user}\n");
+    write_ssh_config(world, &contents);
+}
+
+#[then(regex = r"^le fichier de configuration SSH est inchangé$")]
+async fn ssh_config_unchanged(world: &mut ConnectionsWorld) {
+    let dir = world.config_dir.path();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ssh_config")).expect("ssh config"),
+        std::fs::read_to_string(dir.join("ssh_config.before")).expect("ssh config copy")
     );
 }
