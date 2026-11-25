@@ -139,7 +139,7 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 
 | Tool | What it does |
 |---|---|
-| `list_connections` | Connections of the connection file and of DBeaver (PostgreSQL only), with engine (`postgresql` or `mongodb`), source (`file` or `dbeaver`), status (available, unavailable, unsupported), reason and type (dev, test, prod). Never hosts or credentials. |
+| `list_connections` | Connections of the connection file and of DBeaver (whose other engines are listed as unsupported), with engine (`postgresql` or `mongodb`), source (`file` or `dbeaver`), status (available, unavailable, unsupported), reason and type (dev, test, prod). Never hosts or credentials. |
 | `list_databases` | The databases of the server behind a connection, ordered by name (connectable, not templates), and the connection's default database, the one the connection points at. The fixed query is run by the server itself; `SELECT ... FROM pg_database` sent through `query` stays refused. |
 | `search_schema` | Tables and columns whose name matches a pattern. |
 | `list_tables` | Tables and views with kind, estimated rows and column count. |
@@ -335,7 +335,7 @@ scarif-database-mcp protects against **accidental disclosure by a cooperative ag
 - **Every database of the server.** The `database` argument reaches any database the connection's role may connect to, not only the connection's own. This is deliberate; restrict the role's `CONNECT` privileges on the server if some databases must stay out of reach.
 - **The connection file is trusted configuration.** Like `ProxyCommand` in `~/.ssh/config`, it can run a program (`password_command`) and decide where credentials go (`host`, `ssh_alias`, and the Azure token for an `azure` entry). It holds no secret, but a file kept in a shared repository gives its committers command execution on your machine: review its changes like code. The agent must not be able to edit it, see the deny rules below.
 - **MongoDB writes.** When the MongoDB user holds `readWrite` or more, the [read-only guard](#read-only-guard) is the only protection against writes: an operator it wrongly accepted would run with that role. Ask for a user with the `read` role only wherever you can, so that the guard is defence in depth.
-- **Probing MongoDB values.** `$regex`, `$substrCP`, `$strLenCP`, `$indexOfCP`, `$group` keys and counts run on real values, as `LIKE` does in SQL, so a regular expression, its options included, can rebuild a value one character at a time.
+- **Probing MongoDB values.** `$regex`, `$substrCP`, `$strLenCP`, `$indexOfCP`, ranges (`$gt`, `$lt`...), sorts, `$group` keys and counts run on real values, as `LIKE` and `ORDER BY` do in SQL, so a regular expression, its options included, or a range can rebuild a value one character at a time.
 - **Arithmetic on personal numbers.** A computed integer derived from a personal number (`{"$add": ["$telephone", 1]}`) is pseudonymized only when the result still has a known shape (phone, SIREN, SIRET, card number...), as in SQL; otherwise it is returned as computed.
 - **Sampled documents.** `describe_table` and `search_schema` read a random sample of up to 100 documents per collection. Their values never reach the response, but their field names do, judged by the detectors like JSON keys: a personal value used as a key and missed by them passes through.
 - **Views and the field policy.** A view is matched by its own name: entries declared on its base collection do not apply to it. Declare them for the view too, or with `*`.
