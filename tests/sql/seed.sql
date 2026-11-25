@@ -69,7 +69,7 @@ INSERT INTO orders (id, customer_id, titulaire, status, payment_method, status_l
   (13, 3, '', 'pending', 'CASH', 'PENDING', 0.0000, '2026-04-12 08:15:00+00');
 
 INSERT INTO notes (id, customer_id, body) VALUES
-  (100, 1, 'Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Lilas'),
+  (100, 1, 'Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Quenvrelles'),
   (101, 2, 'Client prefers email odrigan.hazvekmor@canary-mail.fr, IBAN FR76 3000 4000 0312 3456 7890 143');
 
 CREATE TABLE products (

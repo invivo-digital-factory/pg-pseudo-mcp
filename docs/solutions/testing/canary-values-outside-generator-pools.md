@@ -23,6 +23,7 @@ Two failures followed. A generated pseudonym email such as `odilon.braiblepevill
 ## Guidance
 
 - Canary names are invented and absent from `NAME_FIRST_NAME` and `NAME_LAST_NAME` of `fake::locales::FR_FR`. `tests/canary_hygiene.rs` enforces it.
+- The same holds for places: a canary never contains a street name or a city of `STREET_NAMES` and `CITIES` in `generators.rs`, enforced by a unit test next to those lists that reads the shared canary list. The canary `12 rue des Lilas` failed the leak checks about once per 2,800 fresh secrets, because the generator keeps the street type and draws a number in 1..=150 and a street name from a list holding `des Lilas`, so the pseudonym came out as `12 rue des Lilas` or `112 rue des Lilas`. It is now `12 rue des Quenvrelles`.
 - Also check that no 6-character window of a canary word appears in generated pseudonyms: simulate about a million pseudonym emails with the real `Pseudonymizer` before adopting a new canary. `Thaumassin` was replaced by `Hazvekmor` because its windows (`aumass`, `umassi`) appeared about 5 times per 100,000 generated emails.
 - A canary that the detectors recognise does not test the miss path. Keep at least one canary that only the column dictionary or lineage can protect, such as a rare name in a column the dictionary does not match (`orders.titulaire`).
 
@@ -33,7 +34,7 @@ A canary that detection already knows makes leak tests pass for the wrong reason
 ## When to Apply
 
 - Any change to the canary list or the seed data.
-- Any change to the name lists used by `src/contexts/anonymization/domain/services/gazetteer.rs` or `src/contexts/anonymization/domain/services/generators.rs`.
+- Any change to the name, street or city lists used by `src/contexts/anonymization/domain/services/gazetteer.rs` or `src/contexts/anonymization/domain/services/generators.rs`.
 
 ## Examples
 
