@@ -1,5 +1,5 @@
 use crate::contexts::connections::domain::constants::{
-    ENGINE_MONGODB, MONGODB_NOT_SUPPORTED, NOT_A_MONGODB_CONNECTION,
+    ENGINE_MONGODB, MONGODB_NEEDS_DOCUMENT_TOOLS, NOT_A_MONGODB_CONNECTION,
 };
 use crate::contexts::connections::domain::errors::ConnectionError;
 use crate::contexts::connections::domain::types::{
@@ -21,7 +21,7 @@ pub fn resolve_connection(
         }),
         (ConnectionStatus::Available, None) if entry.engine == ENGINE_MONGODB => {
             Err(ConnectionError::Unsupported {
-                reason: MONGODB_NOT_SUPPORTED.to_string(),
+                reason: MONGODB_NEEDS_DOCUMENT_TOOLS.to_string(),
             })
         }
         (ConnectionStatus::Available, None) => Err(ConnectionError::MissingParams),
@@ -132,16 +132,16 @@ mod unit {
     }
 
     #[test]
-    fn une_connexion_mongodb_reste_refusee_par_le_resolveur_postgresql() {
+    fn une_connexion_mongodb_est_renvoyee_vers_find_ou_aggregate_par_le_resolveur_postgresql() {
         let found = discovery(vec![entry(
             "atlas",
             ConnectionStatus::Available,
             Some(mongo_params()),
         )]);
         assert_eq!(
-            resolve_connection(&found, "atlas").expect_err("interim refusal"),
+            resolve_connection(&found, "atlas").expect_err("document tools"),
             ConnectionError::Unsupported {
-                reason: MONGODB_NOT_SUPPORTED.to_string()
+                reason: MONGODB_NEEDS_DOCUMENT_TOOLS.to_string()
             }
         );
     }

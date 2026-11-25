@@ -128,6 +128,7 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
                 by: TruncatedBy::Rows,
                 limit: limits.max_rows as u64,
                 column: None,
+                field: None,
                 hint: "narrow the filter or page with a keyset condition (WHERE id > last_id ORDER BY id) instead of OFFSET".into(),
             });
         }

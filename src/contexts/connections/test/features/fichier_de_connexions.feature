@@ -375,7 +375,7 @@ Fonctionnalité: Fichier de connexions
     Alors la connexion "app" est listée comme indisponible
     Et la raison de la connexion "app" contient "`engine`"
 
-  Scénario: Un outil qui ouvrirait une session sur une connexion MongoDB est refusé sans exécuter la commande ni joindre PostgreSQL
+  Scénario: Le chemin SQL renvoie une connexion MongoDB vers find ou aggregate sans exécuter la commande ni joindre PostgreSQL
     Étant donné le fichier de connexions suivant :
       """
       [[connection]]
@@ -388,7 +388,7 @@ Fonctionnalité: Fichier de connexions
       password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
       """
     Quand l'agent exécute une requête de lecture sur la connexion "atlas-dev"
-    Alors la requête échoue avec une erreur qui contient "not supported"
+    Alors la requête échoue avec une erreur qui contient "find or aggregate"
     Et l'erreur de la requête ne contient pas "pl-0.atlas.scarif.test"
     Et la commande de mot de passe n'a pas été exécutée
 
@@ -409,7 +409,7 @@ Fonctionnalité: Fichier de connexions
     Alors la connexion "atlas-port" est listée comme indisponible
     Et la raison de la connexion "atlas-port" contient "`port`"
 
-  Scénario: La lecture du catalogue d'une connexion MongoDB est refusée sans exécuter la commande
+  Scénario: La lecture du catalogue SQL d'une connexion MongoDB renvoie vers find ou aggregate sans exécuter la commande
     Étant donné le fichier de connexions suivant :
       """
       [[connection]]
@@ -422,5 +422,5 @@ Fonctionnalité: Fichier de connexions
       password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
       """
     Quand l'agent lit le catalogue de la connexion "atlas-dev"
-    Alors la requête échoue avec une erreur qui contient "not supported"
+    Alors la requête échoue avec une erreur qui contient "find or aggregate"
     Et la commande de mot de passe n'a pas été exécutée

@@ -28,6 +28,10 @@ struct FindBounds {
     limit: Option<u64>,
 }
 
+pub fn check_names(database: &str, collection: Option<&str>) -> Result<(), Refusal> {
+    limits::check_namespace(Some(database), collection.unwrap_or("documents"))
+}
+
 pub fn inspect_find(request: &FindRequest) -> Result<InspectedMongo, Refusal> {
     limits::check_namespace(request.database.as_deref(), &request.collection)?;
     let mut root = Map::new();
@@ -156,6 +160,7 @@ struct Walker {
     path: Vec<Segment>,
     sites: Vec<LiteralSite>,
     in_expr: bool,
+    stages: usize,
 }
 
 impl Walker {

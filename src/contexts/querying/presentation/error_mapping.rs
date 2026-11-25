@@ -80,6 +80,14 @@ pub fn tool_error(error: QueryingError) -> ToolError {
                 (None, None) => error,
             }
         }
+        QueryingError::DocumentServerError { message, code_name } => {
+            let error = ToolError::new(ErrorCategory::MongodbError, "mongodb_error", message)
+                .with_hint("the MongoDB server refused the request; values it quoted are pseudonymized");
+            match code_name {
+                Some(code_name) => error.with_code_name(code_name),
+                None => error,
+            }
+        }
         QueryingError::ConnectionLost { message } => ToolError::new(
             ErrorCategory::ConnectionUnavailable,
             "connection_lost",
@@ -130,9 +138,31 @@ pub fn tool_error(error: QueryingError) -> ToolError {
     }
 }
 
+pub fn wrong_engine(message: &str) -> ToolError {
+    ToolError::new(
+        ErrorCategory::ConnectionUnavailable,
+        "wrong_engine",
+        message,
+    )
+    .with_hint("list_connections shows the engine of each connection")
+}
+
 #[cfg(test)]
 mod unit {
     use super::*;
+
+    #[test]
+    fn une_erreur_mongodb_porte_son_code_name_et_jamais_un_sqlstate() {
+        let error = tool_error(QueryingError::DocumentServerError {
+            message: "Failed to parse number '<value id=1>'".into(),
+            code_name: Some("ConversionFailure".into()),
+        });
+        let json = serde_json::to_value(&error).unwrap();
+        assert_eq!(json["code"], "mongodb_error");
+        assert_eq!(json["category"], "mongodb_error");
+        assert_eq!(json["code_name"], "ConversionFailure");
+        assert!(json.get("sqlstate").is_none(), "{json}");
+    }
 
     #[test]
     fn une_connexion_inconnue_liste_les_connexions_disponibles() {

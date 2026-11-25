@@ -92,7 +92,7 @@ mod e2e {
     use super::*;
 
     #[test]
-    fn le_serveur_expose_huit_outils_en_lecture_seule_sur_stdio() {
+    fn le_serveur_expose_dix_outils_en_lecture_seule_sur_stdio() {
         let mut server = McpProcess::start();
         server.initialize();
         server.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
@@ -106,8 +106,10 @@ mod e2e {
         assert_eq!(
             names,
             [
+                "aggregate",
                 "describe_table",
                 "explain",
+                "find",
                 "list_connections",
                 "list_databases",
                 "list_tables",

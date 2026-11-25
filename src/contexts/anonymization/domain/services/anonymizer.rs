@@ -133,7 +133,7 @@ impl<'a> Anonymizer<'a> {
         clearances: &[(FieldPath, FieldClearance)],
     ) -> AnonymizedDocuments {
         let clearances = FieldClearances::new(clearances);
-        let root = Place::default();
+        let root = Place::root(&clearances);
         let mut flags = PathFlags::default();
         let documents = documents
             .into_iter()
@@ -209,11 +209,25 @@ impl<'a> Anonymizer<'a> {
                 };
                 (value, class.derived)
             }
+            Node::Double(value) if value.is_finite() => {
+                let (class, tainted) = place.class("double");
+                if tainted {
+                    (
+                        Node::Text(self.opaque_derived(&value.to_string(), tracker)),
+                        class.derived,
+                    )
+                } else {
+                    (Node::Double(value), false)
+                }
+            }
             Node::Decimal(text) => {
-                let (class, _) = place.class("decimal");
+                let (class, tainted) = place.class("decimal");
                 let value = match self.number_pseudonym(&text, &class, tracker) {
                     Some(pseudonym) if pseudonym.parse::<i64>().is_ok() => Node::Decimal(pseudonym),
                     Some(pseudonym) => Node::Text(pseudonym),
+                    None if tainted && text.contains('.') => {
+                        Node::Text(self.opaque_derived(&text, tracker))
+                    }
                     None => Node::Decimal(text),
                 };
                 (value, class.derived)
@@ -242,7 +256,7 @@ impl<'a> Anonymizer<'a> {
             | Node::Null
             | Node::Bool(_)
             | Node::ObjectId(_)
-            | Node::Uuid(_)
+            | Node::Uuid { .. }
             | Node::Timestamp(_)
             | Node::MinKey
             | Node::MaxKey
@@ -270,6 +284,45 @@ impl<'a> Anonymizer<'a> {
         let mut tracker = Tracker::default();
         let scrubbed = self.scrub_injected(text, false, &mut tracker);
         self.replace_spans(&scrubbed, &detect_spans(&scrubbed), false, &mut tracker)
+    }
+
+    pub fn server_message(&self, text: &str, known_names: &[&str]) -> String {
+        let scrubbed: Vec<char> = self.free_text(text).chars().collect();
+        let mut output = String::with_capacity(scrubbed.len());
+        let mut index = 0;
+        while index < scrubbed.len() {
+            let current = scrubbed[index];
+            let opens = QUOTES.contains(&current)
+                && !is_escaped(&scrubbed, index)
+                && (index == 0 || !scrubbed[index - 1].is_alphanumeric());
+            if !opens {
+                output.push(current);
+                index += 1;
+                continue;
+            }
+            let close = closing_quote(&scrubbed, index);
+            let end = close.unwrap_or(scrubbed.len());
+            let inner: String = scrubbed[index + 1..end].iter().collect();
+            output.push(current);
+            if inner.is_empty()
+                || known_names.contains(&inner.as_str())
+                || self.is_known_pseudonym(&inner)
+            {
+                output.push_str(&inner);
+            } else {
+                output.push_str(&self.pseudonymizer.opaque_token("value", &inner));
+            }
+            if close.is_some() {
+                output.push(current);
+            }
+            index = end + 1;
+        }
+        output
+    }
+
+    pub fn document_key(&self, key: &str) -> String {
+        let mut tracker = Tracker::default();
+        self.json_key(key, false, false, &mut tracker)
     }
 
     pub fn message(&self, message: &DatabaseMessage) -> DatabaseMessage {
@@ -678,6 +731,35 @@ const DERIVED_NUMBER_KINDS: [Kind; 5] = [
     Kind::Nir,
     Kind::CardNumber,
 ];
+
+const QUOTES: [char; 2] = ['\'', '"'];
+
+fn is_escaped(text: &[char], index: usize) -> bool {
+    let backslashes = text[..index]
+        .iter()
+        .rev()
+        .take_while(|character| **character == '\\')
+        .count();
+    backslashes % 2 == 1
+}
+
+fn unescaped_quotes(text: &[char], from: usize, quote: char) -> usize {
+    (from..text.len())
+        .filter(|index| text[*index] == quote && !is_escaped(text, *index))
+        .count()
+}
+
+fn closing_quote(text: &[char], open: usize) -> Option<usize> {
+    let quote = text[open];
+    (open + 1..text.len()).find(|index| {
+        text[*index] == quote
+            && !is_escaped(text, *index)
+            && text
+                .get(index + 1)
+                .is_none_or(|next| !next.is_alphanumeric())
+            && unescaped_quotes(text, index + 1, quote).is_multiple_of(2)
+    })
+}
 
 static QUOTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"(")([^"]*)(")|=\(([^)]*)\)"#).expect("quoted fragment pattern")

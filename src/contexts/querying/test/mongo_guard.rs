@@ -1326,4 +1326,70 @@ mod unit {
         unique.dedup();
         assert_eq!(unique.len(), EXPRESSION_OPERATORS.len());
     }
+
+    #[test]
+    fn le_plafond_d_etapes_compte_toutes_les_branches_et_sous_pipelines() {
+        let branch = |count: usize| -> Value {
+            Value::Array((0..count).map(|_| json!({"$match": {}})).collect())
+        };
+        let refusal = aggregate_refusal(json!([
+            {"$facet": {"a": branch(20), "b": branch(20), "c": branch(20)}}
+        ]));
+        assert_eq!(refusal.code, "mongo_pipeline_too_long");
+        assert!(refusal.message.contains("50"), "{}", refusal.message);
+
+        let refusal = aggregate_refusal(json!([
+            {"$lookup": {"from": "orders", "as": "o", "pipeline": branch(30)}},
+            {"$unionWith": {"coll": "orders", "pipeline": branch(30)}}
+        ]));
+        assert_eq!(refusal.code, "mongo_pipeline_too_long");
+
+        assert!(
+            prepare_aggregate(
+                &aggregate(json!([{"$facet": {"a": branch(24), "b": branch(24)}}])),
+                &FakeStore::known()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn un_parametre_que_le_serveur_recopie_dans_ses_erreurs_doit_etre_constant() {
+        for expression in [
+            json!({"$convert": {"input": 1, "to": "$lastName"}}),
+            json!({"$convert": {"input": 1, "to": {"type": "$lastName"}}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "$lastName"}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "week", "startOfWeek": "$lastName"}}),
+            json!({"$dateAdd": {"startDate": "$birthDate", "unit": {"$toLower": "$lastName"}, "amount": 1}}),
+            json!({"$dateDiff": {"startDate": "$birthDate", "endDate": "$birthDate", "unit": "$lastName"}}),
+            json!({"$dateToString": {"date": "$birthDate", "timezone": "$lastName"}}),
+            json!({"$hour": {"date": "$birthDate", "timezone": "$lastName"}}),
+            json!({"$regexMatch": {"input": "x", "regex": "a", "options": "$firstName"}}),
+            json!({"$regexFind": {"input": "x", "regex": "$lastName"}}),
+        ] {
+            let refusal = aggregate_refusal(json!([{"$project": {"n": expression.clone()}}]));
+            assert_eq!(
+                refusal.code, "mongo_argument_not_constant",
+                "{expression}: {}",
+                refusal.message
+            );
+            assert!(!refusal.message.contains("lastName"), "{}", refusal.message);
+        }
+        for expression in [
+            json!({"$convert": {"input": "$amount", "to": "int", "onError": 0}}),
+            json!({"$convert": {"input": "$amount", "to": {"type": "binData", "subtype": 4}}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "week", "startOfWeek": "monday"}}),
+            json!({"$dateToString": {"date": "$birthDate", "format": "%Y", "timezone": "Europe/Paris"}}),
+            json!({"$regexMatch": {"input": "$status", "regex": "^p", "options": "i"}}),
+        ] {
+            assert!(
+                prepare_aggregate(
+                    &aggregate(json!([{"$project": {"n": expression.clone()}}])),
+                    &FakeStore::known()
+                )
+                .is_ok(),
+                "{expression}"
+            );
+        }
+    }
 }

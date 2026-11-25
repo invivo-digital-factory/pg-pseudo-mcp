@@ -10,7 +10,7 @@ pub enum Node {
     Text(String),
     Date(String),
     ObjectId(String),
-    Uuid(String),
+    Uuid { subtype: u8, value: String },
     Timestamp(String),
     MinKey,
     MaxKey,
@@ -21,29 +21,41 @@ pub enum Node {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct FieldPath(String);
+pub struct FieldPath(Vec<String>);
 
 impl FieldPath {
     pub fn new(path: &str) -> Self {
-        Self(path.to_string())
+        Self(
+            path.split('.')
+                .filter(|segment| !segment.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    }
+
+    pub fn from_segments(segments: Vec<String>) -> Self {
+        Self(segments)
     }
 
     pub fn child(&self, key: &str) -> Self {
-        if self.0.is_empty() {
-            Self(key.to_string())
-        } else {
-            Self(format!("{}.{key}", self.0))
-        }
+        let mut segments = self.0.clone();
+        segments.push(key.to_string());
+        Self(segments)
     }
 
-    pub fn as_str(&self) -> &str {
+    pub fn segments(&self) -> &[String] {
         &self.0
+    }
+
+    pub fn dotted(&self) -> String {
+        self.0.join(".")
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldClearance {
     Clear,
     Personal(Kind),
     Derived { proven_clear: bool },
+    NamedAs(String),
 }

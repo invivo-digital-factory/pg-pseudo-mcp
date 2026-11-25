@@ -4,9 +4,9 @@ use serde::Deserialize;
 
 use super::error_mapping::tool_error;
 use super::json_result::json_result;
-use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
+use crate::contexts::querying::domain::repositories::{ReadOnlyDatabase, ReadOnlyDocumentStore};
 use crate::contexts::querying::domain::types::ListTablesRequest;
-use crate::contexts::querying::use_cases::ListTables;
+use crate::contexts::querying::use_cases::{ListCollections, ListTables};
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct ListTablesArgs {
@@ -28,6 +28,24 @@ pub struct ListTablesArgs {
 
 pub async fn list_tables<D: ReadOnlyDatabase>(
     use_case: &ListTables<D>,
+    args: ListTablesArgs,
+) -> CallToolResult {
+    let request = ListTablesRequest {
+        connection: args.connection,
+        database: args.database,
+        schema: args.schema,
+        name_like: args.name_like,
+        limit: args.limit,
+        offset: args.offset,
+    };
+    match use_case.execute(request).await {
+        Ok(response) => json_result(&response),
+        Err(error) => tool_error(error).into_call_result(),
+    }
+}
+
+pub async fn list_collections<S: ReadOnlyDocumentStore>(
+    use_case: &ListCollections<S>,
     args: ListTablesArgs,
 ) -> CallToolResult {
     let request = ListTablesRequest {

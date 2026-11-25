@@ -97,7 +97,7 @@ fn reason(reason: anonymization::Reason) -> querying::Reason {
     }
 }
 
-fn flag(flag: anonymization::ColumnFlag) -> querying::ColumnFlag {
+pub fn flag(flag: anonymization::ColumnFlag) -> querying::ColumnFlag {
     querying::ColumnFlag {
         kind: flag.kind,
         why: reason(flag.why),

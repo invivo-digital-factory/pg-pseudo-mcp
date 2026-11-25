@@ -7,6 +7,7 @@ use crate::common::redact_home;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCategory {
     SqlError,
+    MongodbError,
     RefusedReadOnly,
     Timeout,
     UnknownConnection,
@@ -26,6 +27,8 @@ pub struct ToolError {
     pub retryable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sqlstate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_name: Option<String>,
 }
 
 impl ToolError {
@@ -41,6 +44,7 @@ impl ToolError {
             hint: None,
             retryable: false,
             sqlstate: None,
+            code_name: None,
         }
     }
 
@@ -56,6 +60,11 @@ impl ToolError {
 
     pub fn with_sqlstate(mut self, sqlstate: impl Into<String>) -> Self {
         self.sqlstate = Some(sqlstate.into());
+        self
+    }
+
+    pub fn with_code_name(mut self, code_name: impl Into<String>) -> Self {
+        self.code_name = Some(code_name.into());
         self
     }
 

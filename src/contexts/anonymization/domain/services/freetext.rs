@@ -118,8 +118,13 @@ fn has_lowercase(word: &str) -> bool {
     word.chars().any(char::is_lowercase)
 }
 
+const QUOTE_MARKS: &[char] = &['"', '“', '”', '«', '»'];
+
 pub(crate) fn name_shape(value: &str) -> Option<Kind> {
-    let words: Vec<&str> = value.split_whitespace().collect();
+    let words: Vec<&str> = value
+        .split_whitespace()
+        .map(|word| word.trim_matches(QUOTE_MARKS))
+        .collect();
     if words.is_empty() || words.len() > 4 || !words.iter().all(|word| is_name_word(word)) {
         return None;
     }
@@ -135,7 +140,10 @@ pub(crate) fn name_shape(value: &str) -> Option<Kind> {
 }
 
 pub(crate) fn any_case_name_shape(value: &str) -> Option<Kind> {
-    let words: Vec<&str> = value.split_whitespace().collect();
+    let words: Vec<&str> = value
+        .split_whitespace()
+        .map(|word| word.trim_matches(QUOTE_MARKS))
+        .collect();
     if words.is_empty() || words.len() > 4 || !words.iter().all(|word| is_name_word(word)) {
         return None;
     }
@@ -216,6 +224,19 @@ fn is_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod unit {
+    #[test]
+    fn un_nom_entre_guillemets_garde_sa_forme_de_nom() {
+        assert_eq!(
+            super::name_shape("Zivrelle \"Brizolier\""),
+            Some(crate::contexts::anonymization::domain::types::Kind::PersonName)
+        );
+        assert_eq!(
+            super::name_shape("«Kervadec»"),
+            Some(crate::contexts::anonymization::domain::types::Kind::LastName)
+        );
+        assert_eq!(super::name_shape("\"PAID\""), None);
+    }
+
     use super::*;
 
     #[test]

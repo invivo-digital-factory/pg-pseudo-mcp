@@ -1,17 +1,15 @@
 use std::sync::Arc;
 
-use super::adapters::ReadOnlyDatabaseAdapter;
 use super::notices::deprecation_notices;
-use super::querying::querying_context;
+use super::querying::{Querying, querying_context};
 use super::server_info::InfoWarning;
 use crate::common::AppConfig;
 use crate::contexts::anonymization::injector::{AnonymizationInjector, AnonymizationUseCases};
 use crate::contexts::connections::injector::ConnectionsContext;
-use crate::contexts::querying::injector::QueryingContext;
 
 pub struct Contexts {
     pub connections: Arc<ConnectionsContext>,
-    pub querying: QueryingContext<ReadOnlyDatabaseAdapter>,
+    pub querying: Querying,
     deprecations: Vec<InfoWarning>,
 }
 

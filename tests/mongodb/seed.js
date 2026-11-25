@@ -33,6 +33,7 @@ shop.customers.insertMany([
     preferences: {
       "kervadec.ylwenna@canary-mail.fr": { newsletter: true },
       "o.hazvekmor@canary-mail.fr": { newsletter: false },
+      "zone.nord": { ref: NumberLong("418273652") },
     },
   },
   {
@@ -55,6 +56,8 @@ shop.customers.insertMany([
     firstName: "Maëlouz",
     lastName: "Brizolier",
     contact: { email: "maelouz.brizolier@canary-mail.fr", phones: [] },
+    alias: "O'Zivrelle",
+    badge: 'Zivrelle "Brizolier"',
     note: "",
     preferences: {},
   },
@@ -69,8 +72,8 @@ shop.orders.insertMany([
     holder: "Ylwenna Kervadec",
     status: "paid",
     items: [
-      { product: "Garance Bleue", quantity: NumberLong("2") },
-      { product: "Garance zivrel.quanteb@canary-mail.fr", quantity: NumberLong("1") },
+      { product: "Garance Bleue", units: NumberLong("2") },
+      { product: "Garance zivrel.quanteb@canary-mail.fr", units: NumberLong("1") },
     ],
     placedAt: ISODate("2026-03-01T09:30:00Z"),
   },
@@ -79,7 +82,7 @@ shop.orders.insertMany([
     customer: { _id: ylwenna, email: "ylwenna.kervadec@canary-mail.fr" },
     holder: "Kervadec",
     status: "shipped",
-    items: [{ product: "Garance Bleue", quantity: NumberLong("5") }],
+    items: [{ product: "Garance Bleue", units: NumberLong("5") }],
     placedAt: ISODate("2026-03-05T14:00:00Z"),
   },
   {
@@ -87,7 +90,7 @@ shop.orders.insertMany([
     customer: { _id: odrigan, email: "odrigan.hazvekmor@canary-mail.fr" },
     holder: "Odrigan Hazvekmor",
     status: "pending",
-    items: [{ product: "Garance Bleue", quantity: NumberLong("1") }],
+    items: [{ product: "Garance Bleue", units: NumberLong("1") }],
     placedAt: ISODate("2026-04-11T08:15:00Z"),
   },
 ]);

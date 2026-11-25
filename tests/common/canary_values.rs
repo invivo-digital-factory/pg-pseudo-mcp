@@ -26,4 +26,6 @@ pub const CANARY_VALUES: &[&str] = &[
     "06 52 18 74 30",
     "12 rue des Lilas",
     "zivrel.quanteb@canary-mail.fr",
+    "O'Zivrelle",
+    "Zivrelle",
 ];

@@ -411,7 +411,10 @@ mod integration {
             Node::Timestamp("1716630000:1".to_string()),
             Node::MinKey,
             Node::MaxKey,
-            Node::Uuid("3b241101-e2bb-4255-8caf-4136c566a962".to_string()),
+            Node::Uuid {
+                subtype: 4,
+                value: "3b241101-e2bb-4255-8caf-4136c566a962".to_string(),
+            },
         ];
         let document = object(vec![
             ("nom", Node::Array(neutral.clone())),
@@ -935,9 +938,9 @@ mod integration {
             ("groupe", object(vec![("cle", text("ylwenna.kervadec"))])),
         ]);
         let clearances = [
-            clearance("who", derived),
-            clearance("n", derived),
-            clearance("jour", derived),
+            clearance("who", derived.clone()),
+            clearance("n", derived.clone()),
+            clearance("jour", derived.clone()),
             clearance("groupe", derived),
         ];
 
@@ -980,8 +983,8 @@ mod integration {
             ("jour", Node::Date("2026-03-02T09:15:00.000Z".to_string())),
         ]);
         let clearances = [
-            clearance("etiquette", proven),
-            clearance("contact", proven),
+            clearance("etiquette", proven.clone()),
+            clearance("contact", proven.clone()),
             clearance("jour", proven),
         ];
 
@@ -1000,5 +1003,255 @@ mod integration {
         );
         assert_eq!(flagged(&anonymized, "etiquette"), None);
         assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn un_parent_derive_souille_n_est_jamais_eclairci_par_un_enfant_en_clair() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![(
+            "whole",
+            object(vec![
+                ("nom", text("Kervadec")),
+                (
+                    "statut",
+                    object(vec![("libelle", text("Ylwenna Kervadec"))]),
+                ),
+            ]),
+        )]);
+        let clearances = [
+            clearance(
+                "whole",
+                FieldClearance::Derived {
+                    proven_clear: false,
+                },
+            ),
+            clearance("whole.nom", FieldClearance::Clear),
+            clearance(
+                "whole.statut.libelle",
+                FieldClearance::Derived { proven_clear: true },
+            ),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let text_of_tree = format!("{:?}", anonymized.documents);
+        assert!(!text_of_tree.contains("Kervadec"), "{text_of_tree}");
+        assert!(!text_of_tree.contains("Ylwenna"), "{text_of_tree}");
+        assert!(
+            anonymized
+                .pseudonymized
+                .values()
+                .all(|flag| flag.why == Reason::Derived),
+            "{:?}",
+            anonymized.pseudonymized
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn un_champ_renomme_garde_le_type_du_nom_de_sa_source() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![
+            ("n", Node::Int(33_641_278_395)),
+            ("quantite", Node::Int(2)),
+        ]);
+        let clearances = [
+            clearance("n", FieldClearance::NamedAs("telephone".into())),
+            clearance("quantite", FieldClearance::NamedAs("quantity".into())),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_ne!(field(document, "n"), &Node::Int(33_641_278_395));
+        assert_eq!(flagged(&anonymized, "n"), flag("phone", Reason::Dictionary));
+        assert_eq!(field(document, "quantite"), &Node::Int(2));
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_cle_qui_contient_un_point_ne_prend_pas_la_clearance_du_chemin_imbrique() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![
+            ("client.nom", text("Kervadec")),
+            ("client", object(vec![("nom", text("Garance Bleue"))])),
+        ]);
+        let clearances = [clearance("client.nom", FieldClearance::Clear)];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        let Node::Object(entries) = document else {
+            panic!("an object");
+        };
+        assert_ne!(entries[0].1, text("Kervadec"));
+        assert_eq!(field(document, "client.nom"), &text("Garance Bleue"));
+        assert_no_canary(&anonymized);
+    }
+
+    const KNOWN_NAMES: &[&str] = &["$toInt", "$convert", "$project"];
+
+    #[test]
+    fn un_message_du_serveur_masque_les_valeurs_citees_entre_apostrophes() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let message = anonymizer.server_message(
+            "Failed to parse number 'Kervadec' in $convert with no onError value: '$toInt', got \"Ylwenna\"",
+            KNOWN_NAMES,
+        );
+        assert!(!message.contains("Kervadec"), "{message}");
+        assert!(!message.contains("Ylwenna"), "{message}");
+        assert!(message.contains("'$toInt'"), "{message}");
+        assert!(message.starts_with("Failed to parse number '"), "{message}");
+    }
+
+    #[test]
+    fn une_valeur_qui_contient_une_apostrophe_ou_un_guillemet_est_masquee_en_entier() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        for (message, secrets) in [
+            (
+                "Failed to parse number 'O'Zivrelle' in $convert with no onError value",
+                &["Zivrelle", "O'Z"][..],
+            ),
+            (
+                "Failed to parse number 'Zivrelle \"Brizolier\"' in $convert",
+                &["Zivrelle", "Brizolier"][..],
+            ),
+            (
+                "Error parsing date string \"O\\\"Zivrelle\"; 0: bad",
+                &["Zivrelle"][..],
+            ),
+            (
+                "Failed to parse number 'O' Zivrelle' in $convert",
+                &["Zivrelle"][..],
+            ),
+            (
+                "Failed to parse number 'Zivrelle in $convert with no onError value",
+                &["Zivrelle"][..],
+            ),
+        ] {
+            let scrubbed = anonymizer.server_message(message, KNOWN_NAMES);
+            for secret in secrets {
+                assert!(!scrubbed.contains(secret), "{secret} in {scrubbed}");
+            }
+            assert!(
+                scrubbed.starts_with("Failed to parse number")
+                    || scrubbed.starts_with("Error parsing date string"),
+                "{scrubbed}"
+            );
+        }
+    }
+
+    #[test]
+    fn seuls_un_operateur_connu_et_un_pseudonyme_connu_restent_entre_apostrophes() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let known = pseudonymizer.pseudonymize(Kind::LastName, "Kervadec").text;
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let scrubbed = anonymizer.server_message(
+            &format!("a '$toInt' b '$Zivrelle' c 'anne.lorin7@example.net' d '{known}' e"),
+            KNOWN_NAMES,
+        );
+        assert!(scrubbed.contains("'$toInt'"), "{scrubbed}");
+        assert!(!scrubbed.contains("$Zivrelle"), "{scrubbed}");
+        assert!(!scrubbed.contains("anne.lorin7@example.net"), "{scrubbed}");
+        assert!(scrubbed.contains(&format!("'{known}'")), "{scrubbed}");
+    }
+
+    #[test]
+    fn une_cle_echantillonnee_qui_est_un_email_est_pseudonymisee() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let key = anonymizer.document_key("kervadec.ylwenna@canary-mail.fr");
+        assert!(!key.contains("canary-mail"), "{key}");
+        assert_eq!(anonymizer.document_key("newsletter"), "newsletter");
+    }
+
+    #[test]
+    fn deux_chemins_qui_ne_different_que_par_la_casse_ne_s_eclaircissent_pas_l_un_l_autre() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![
+            ("Status", text("Ylwenna Kervadec")),
+            ("status", text("paid")),
+            ("Nom", text("Kervadec")),
+        ]);
+        let clearances = [
+            clearance("Status", FieldClearance::NamedAs("holder".into())),
+            clearance("status", FieldClearance::Clear),
+            clearance("nom", FieldClearance::Clear),
+            clearance("NOM", FieldClearance::Personal(Kind::LastName)),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert_ne!(field(document, "Status"), &text("Ylwenna Kervadec"));
+        assert_eq!(field(document, "status"), &text("paid"));
+        assert_ne!(field(document, "Nom"), &text("Kervadec"));
+        assert_eq!(
+            flagged(&anonymized, "Nom"),
+            flag("last_name", Reason::Policy)
+        );
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn une_racine_calculee_souille_ses_propres_cles() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![("Ylwenna_Kervadec", Node::Int(0))]);
+        let clearances = [(
+            FieldPath::default(),
+            FieldClearance::Derived {
+                proven_clear: false,
+            },
+        )];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        assert_no_canary(&anonymized);
+    }
+
+    #[test]
+    fn un_decimal_calcule_a_partir_d_une_donnee_personnelle_devient_opaque() {
+        let (_dir, pseudonymizer) = pseudonymizer();
+        let anonymizer = Anonymizer::new(&pseudonymizer, &[]);
+        let document = object(vec![
+            ("t", Node::Double(336_412_783.95)),
+            ("d", Node::Decimal("336412783.95".into())),
+            ("ratio", Node::Double(0.25)),
+        ]);
+        let clearances = [
+            clearance(
+                "t",
+                FieldClearance::Derived {
+                    proven_clear: false,
+                },
+            ),
+            clearance(
+                "d",
+                FieldClearance::Derived {
+                    proven_clear: false,
+                },
+            ),
+            clearance("ratio", FieldClearance::Derived { proven_clear: true }),
+        ];
+
+        let anonymized = anonymizer.documents(vec![document], &clearances);
+
+        let document = &anonymized.documents[0];
+        assert!(
+            !format!("{document:?}").contains("336412783"),
+            "{document:?}"
+        );
+        assert_eq!(field(document, "ratio"), &Node::Double(0.25));
+        assert_eq!(
+            flagged(&anonymized, "t").map(|flag| flag.why),
+            Some(Reason::Derived)
+        );
     }
 }

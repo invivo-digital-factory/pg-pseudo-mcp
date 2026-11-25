@@ -4,9 +4,9 @@ use serde::Deserialize;
 
 use super::error_mapping::tool_error;
 use super::json_result::json_result;
-use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
+use crate::contexts::querying::domain::repositories::{ReadOnlyDatabase, ReadOnlyDocumentStore};
 use crate::contexts::querying::domain::types::DescribeTableRequest;
-use crate::contexts::querying::use_cases::DescribeTable;
+use crate::contexts::querying::use_cases::{DescribeCollection, DescribeTable};
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct DescribeTableArgs {
@@ -22,6 +22,21 @@ pub struct DescribeTableArgs {
 
 pub async fn describe_table<D: ReadOnlyDatabase>(
     use_case: &DescribeTable<D>,
+    args: DescribeTableArgs,
+) -> CallToolResult {
+    let request = DescribeTableRequest {
+        connection: args.connection,
+        database: args.database,
+        table: args.table,
+    };
+    match use_case.execute(request).await {
+        Ok(response) => json_result(&response),
+        Err(error) => tool_error(error).into_call_result(),
+    }
+}
+
+pub async fn describe_collection<S: ReadOnlyDocumentStore>(
+    use_case: &DescribeCollection<S>,
     args: DescribeTableArgs,
 ) -> CallToolResult {
     let request = DescribeTableRequest {

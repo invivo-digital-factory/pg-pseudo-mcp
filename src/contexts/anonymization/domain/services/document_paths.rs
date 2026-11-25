@@ -11,21 +11,74 @@ const MAX_FLAGGED_PATHS: usize = 200;
 
 const MIN_SINGULAR_CHARS: usize = 2;
 
-pub struct FieldClearances(HashMap<String, FieldClearance>);
+pub struct FieldClearances {
+    exact: HashMap<Vec<String>, FieldClearance>,
+    folded: HashMap<Vec<String>, FieldClearance>,
+}
 
 impl FieldClearances {
     pub fn new(clearances: &[(FieldPath, FieldClearance)]) -> Self {
-        Self(
-            clearances
-                .iter()
-                .map(|(path, clearance)| (path.as_str().to_lowercase(), *clearance))
-                .collect(),
-        )
+        let mut exact = HashMap::new();
+        let mut folded = HashMap::new();
+        for (path, clearance) in clearances {
+            keep_strictest(&mut exact, path.segments().to_vec(), clearance);
+            keep_strictest(&mut folded, folded_segments(path), clearance);
+        }
+        Self { exact, folded }
     }
 
     fn get(&self, path: &FieldPath) -> Option<FieldClearance> {
-        self.0.get(&path.as_str().to_lowercase()).copied()
+        if let Some(clearance) = self.exact.get(path.segments()) {
+            return Some(clearance.clone());
+        }
+        self.folded
+            .get(&folded_segments(path))
+            .filter(|clearance| strictness(clearance) >= TAINTED)
+            .cloned()
     }
+}
+
+const TAINTED: u8 = 3;
+
+fn strictness(clearance: &FieldClearance) -> u8 {
+    match clearance {
+        FieldClearance::Personal(_) => 4,
+        FieldClearance::Derived {
+            proven_clear: false,
+        } => TAINTED,
+        FieldClearance::NamedAs(_) => 2,
+        FieldClearance::Derived { proven_clear: true } => 1,
+        FieldClearance::Clear => 0,
+    }
+}
+
+fn keep_strictest(
+    map: &mut HashMap<Vec<String>, FieldClearance>,
+    key: Vec<String>,
+    clearance: &FieldClearance,
+) {
+    match map.get(&key) {
+        Some(known) if strictness(known) >= strictness(clearance) => {}
+        _ => {
+            map.insert(key, clearance.clone());
+        }
+    }
+}
+
+fn folded_segments(path: &FieldPath) -> Vec<String> {
+    path.segments()
+        .iter()
+        .map(|segment| segment.to_lowercase())
+        .collect()
+}
+
+fn is_tainted(clearance: Option<&FieldClearance>) -> bool {
+    matches!(
+        clearance,
+        Some(FieldClearance::Derived {
+            proven_clear: false
+        })
+    )
 }
 
 #[derive(Default)]
@@ -37,14 +90,35 @@ pub struct Place {
 }
 
 impl Place {
+    pub fn root(clearances: &FieldClearances) -> Self {
+        Self {
+            clearance: clearances.get(&FieldPath::default()),
+            ..Self::default()
+        }
+    }
+
     pub fn child(&self, key: &str, shown: &str, clearances: &FieldClearances) -> Self {
         let source = self.source.child(key);
-        let inherited = self
-            .clearance
-            .filter(|clearance| *clearance != FieldClearance::Clear);
-        let clearance = clearances.get(&source).or(inherited);
-        let name_kind = match clearance {
+        let inherited = self.clearance.clone().filter(|clearance| {
+            !matches!(
+                clearance,
+                FieldClearance::Clear | FieldClearance::NamedAs(_)
+            )
+        });
+        let clearance = match clearances.get(&source) {
+            Some(FieldClearance::Personal(kind)) => Some(FieldClearance::Personal(kind)),
+            Some(_) if is_tainted(self.clearance.as_ref()) => inherited,
+            Some(FieldClearance::NamedAs(name)) => {
+                inherited.or(Some(FieldClearance::NamedAs(name)))
+            }
+            Some(own) => Some(own),
+            None => inherited,
+        };
+        let name_kind = match &clearance {
             Some(FieldClearance::Clear) => None,
+            Some(FieldClearance::NamedAs(name)) => key_entry(name)
+                .flatten()
+                .or_else(|| key_entry(key).unwrap_or(self.name_kind)),
             _ => key_entry(key).unwrap_or(self.name_kind),
         };
         Self {
@@ -60,8 +134,10 @@ impl Place {
     }
 
     pub fn class(&self, type_name: &str) -> (ColumnClass, bool) {
-        match self.clearance {
-            None => (classify_named(self.name_kind, type_name, false), false),
+        match &self.clearance {
+            None | Some(FieldClearance::NamedAs(_)) => {
+                (classify_named(self.name_kind, type_name, false), false)
+            }
             Some(FieldClearance::Clear) => (
                 ColumnClass {
                     structural_only: true,
@@ -71,7 +147,7 @@ impl Place {
             ),
             Some(FieldClearance::Personal(kind)) => (
                 ColumnClass {
-                    forced_kind: Some(kind),
+                    forced_kind: Some(*kind),
                     clear_by_type: false,
                     derived: false,
                     structural_only: false,
@@ -80,6 +156,7 @@ impl Place {
                 false,
             ),
             Some(FieldClearance::Derived { proven_clear }) => {
+                let proven_clear = *proven_clear;
                 let class = classify_named(self.name_kind, type_name, true);
                 if proven_clear && class.forced_kind.is_none() {
                     (
@@ -130,17 +207,17 @@ impl PathFlags {
         let Some((kind, reason)) = tracker.first else {
             return;
         };
-        let path = path.as_str();
-        if self.kept.contains_key(path) || self.omitted.contains(path) {
+        let path = path.dotted();
+        if self.kept.contains_key(&path) || self.omitted.contains(&path) {
             return;
         }
         if self.kept.len() >= MAX_FLAGGED_PATHS {
-            self.omitted.insert(path.to_string());
+            self.omitted.insert(path);
             return;
         }
         let why = if derived { Reason::Derived } else { reason };
         self.kept.insert(
-            path.to_string(),
+            path,
             ColumnFlag {
                 kind: kind.to_string(),
                 why,

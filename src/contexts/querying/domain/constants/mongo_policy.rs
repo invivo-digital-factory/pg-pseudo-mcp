@@ -330,3 +330,63 @@ pub const SYSTEM_NAMESPACE_HINT: &str = "use list_databases, list_tables or desc
 pub const CROSS_DATABASE_HINT: &str = "$lookup, $graphLookup and $unionWith may only name a collection of the same database, as a string";
 
 pub const NOT_TRANSLATED_POSITIONS: &str = "it is translated only in {field: value}, $eq, $ne, $in, $nin, $all and $elemMatch of a filter, and in $expr $eq, $ne or $in between a field path and a value";
+
+pub const MAX_RETURNED_ARRAY_ITEMS: usize = 100;
+
+pub const DECODED_BUDGET_FACTOR: usize = 4;
+
+pub const MAX_SEARCHED_COLLECTIONS: usize = 50;
+
+pub const DATABASE_REQUIRED: &str = "this connection declares no default database; pass the database argument (names come from list_databases)";
+
+pub const NO_SCHEMA_IN_MONGODB: &str =
+    "a MongoDB connection has no schemas; leave schema empty and pass the database argument";
+
+pub const USE_DOCUMENT_TOOLS: &str =
+    "this connection is a MongoDB connection; use the find or aggregate tool";
+
+pub const USE_SQL_TOOLS: &str = "this connection is a PostgreSQL connection; use the query tool";
+
+pub const KEYSET_HINT: &str = "narrow the filter or page with a keyset condition ({\"_id\": {\"$gt\": last_id}} sorted by {\"_id\": 1}) instead of skip";
+
+pub const BYTES_HINT: &str =
+    "project fewer fields, cut arrays with $slice, or fetch fewer documents";
+
+pub const ARRAY_HINT: &str =
+    "arrays are cut at 100 items; read the rest with $slice in a projection or $unwind with $skip";
+
+pub const FIELDS_HINT: &str =
+    "more pseudonymized fields than listed; project fewer fields to see them all";
+
+pub const SAMPLE_HINT: &str = "fields, types and presence come from a random sample of up to 100 documents; rare fields may be missing";
+
+pub const CONSTANT_ARGUMENTS: &[(&str, &[&str])] = &[
+    ("$convert", &["to"]),
+    (
+        "$dateTrunc",
+        &["unit", "startOfWeek", "timezone", "binSize"],
+    ),
+    ("$dateAdd", &["unit", "timezone"]),
+    ("$dateSubtract", &["unit", "timezone"]),
+    ("$dateDiff", &["unit", "startOfWeek", "timezone"]),
+    ("$dateToString", &["format", "timezone"]),
+    ("$dateFromString", &["format", "timezone"]),
+    ("$dateToParts", &["timezone"]),
+    ("$dateFromParts", &["timezone"]),
+    ("$year", &["timezone"]),
+    ("$month", &["timezone"]),
+    ("$week", &["timezone"]),
+    ("$dayOfMonth", &["timezone"]),
+    ("$dayOfWeek", &["timezone"]),
+    ("$dayOfYear", &["timezone"]),
+    ("$hour", &["timezone"]),
+    ("$minute", &["timezone"]),
+    ("$second", &["timezone"]),
+    ("$millisecond", &["timezone"]),
+    ("$isoWeek", &["timezone"]),
+    ("$isoWeekYear", &["timezone"]),
+    ("$isoDayOfWeek", &["timezone"]),
+    ("$regexMatch", &["regex", "options"]),
+    ("$regexFind", &["regex", "options"]),
+    ("$regexFindAll", &["regex", "options"]),
+];

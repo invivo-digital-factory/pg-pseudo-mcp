@@ -22,6 +22,7 @@ pub const DATABASE_URL_VAR: &str = "SCARIF_TEST_DATABASE_URL";
 pub const CONNECTION: &str = "canary-local";
 
 mod canary_values;
+pub mod mongo;
 pub use canary_values::CANARY_VALUES;
 
 pub fn database_url() -> String {
