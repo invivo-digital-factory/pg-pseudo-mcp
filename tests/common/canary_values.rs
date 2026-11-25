@@ -24,7 +24,7 @@ pub const CANARY_VALUES: &[&str] = &[
     "Ylwenna Kervadec",
     "Odrigan Hazvekmor",
     "06 52 18 74 30",
-    "12 rue des Lilas",
+    "12 rue des Quenvrelles",
     "zivrel.quanteb@canary-mail.fr",
     "O'Zivrelle",
     "Zivrelle",

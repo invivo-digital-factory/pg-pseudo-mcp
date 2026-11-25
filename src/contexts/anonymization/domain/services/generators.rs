@@ -999,6 +999,50 @@ mod unit {
         assert!(upper.contains(" BD "), "{upper}");
     }
 
+    fn padded_words(text: &str) -> String {
+        let words: Vec<String> = text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+        format!(" {} ", words.join(" "))
+    }
+
+    fn places_in_generator_pools(values: &[&str]) -> Vec<String> {
+        let mut found = Vec::new();
+        for value in values {
+            let value = padded_words(value);
+            for place in STREET_NAMES.iter().chain(CITIES.iter()) {
+                let place = place.to_string();
+                if value.contains(&padded_words(&place)) && !found.contains(&place) {
+                    found.push(place);
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn les_valeurs_canari_ne_contiennent_aucun_lieu_des_pseudonymes() {
+        let shared = places_in_generator_pools(
+            crate::contexts::anonymization::test::canary_values::CANARY_VALUES,
+        );
+        assert!(
+            shared.is_empty(),
+            "canary values contain {shared:?}, which the generator draws address and city \
+             pseudonyms from; a pseudonym can then equal or contain the canary and fail the \
+             leak checks at random; use invented street and city names absent from those lists"
+        );
+    }
+
+    #[test]
+    fn le_controle_d_hygiene_detecte_une_rue_du_generateur() {
+        assert_eq!(
+            places_in_generator_pools(&["12 rue des Lilas", "4 RUE DE L'ÉGLISE", "Ligaps"]),
+            vec!["des Lilas".to_string(), "de l'Église".to_string()]
+        );
+    }
+
     #[test]
     fn les_reconnaisseurs_n_acceptent_que_les_espaces_reserves() {
         assert_eq!(recognise("a.b1@EXAMPLE.org"), Some(Kind::Email));

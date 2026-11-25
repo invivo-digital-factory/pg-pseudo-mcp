@@ -29,7 +29,7 @@ shop.customers.insertMany([
     telephone: NumberLong("33641278395"),
     iban: "FR76 3000 4000 0312 3456 7890 143",
     birthDate: ISODate("1985-11-02T00:00:00Z"),
-    note: "Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Lilas",
+    note: "Appel de M. Brizolier au 06 52 18 74 30, livraison 12 rue des Quenvrelles",
     preferences: {
       "kervadec.ylwenna@canary-mail.fr": { newsletter: true },
       "o.hazvekmor@canary-mail.fr": { newsletter: false },
