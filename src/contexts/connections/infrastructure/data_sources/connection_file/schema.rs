@@ -80,13 +80,23 @@ pub fn parse_file(contents: &str) -> Result<ParsedFile, SyntaxError> {
                 for item in items {
                     match item {
                         Value::Table(entry) => tables.push(entry),
-                        _ => notes.push("each `connection` must be a table".to_string()),
+                        _ => {
+                            file_level_problem = true;
+                            notes.push(
+                                "each `connection` must be a table; DBeaver connections are unavailable until it is fixed"
+                                    .to_string(),
+                            );
+                        }
                     }
                 }
             }
-            ("connection", _) => notes.push(
-                "`connection` must be an array of tables, written [[connection]]".to_string(),
-            ),
+            ("connection", _) => {
+                file_level_problem = true;
+                notes.push(
+                    "`connection` must be an array of tables, written [[connection]]; DBeaver connections are unavailable until it is fixed"
+                        .to_string(),
+                );
+            }
             (other, _) => {
                 file_level_problem = true;
                 notes.push(top_level_note(other));
@@ -682,6 +692,33 @@ password_command = ["/bin/echo", "x"]
             let parsed = parse_file(&format!("{contents}{VALID}")).unwrap();
             assert_eq!(parsed.dbeaver, DbeaverAccess::Blocked, "{contents}");
         }
+    }
+
+    #[test]
+    fn une_cle_connection_mal_typee_bloque_dbeaver_et_est_signalee() {
+        for contents in [
+            "connection = \"x\"\n",
+            "connection = 3\n",
+            "connection = [1]\n",
+            "connection = [\"x\"]\n",
+        ] {
+            let parsed = parse_file(contents).unwrap();
+            assert_eq!(parsed.dbeaver, DbeaverAccess::Blocked, "{contents}");
+            assert!(parsed.notes[0].contains("`connection`"), "{contents}");
+        }
+    }
+
+    #[test]
+    fn une_cle_connection_mal_typee_n_emporte_pas_sur_read_dbeaver_false() {
+        let parsed = parse_file("read_dbeaver = false\nconnection = \"x\"\n").unwrap();
+        assert_eq!(parsed.dbeaver, DbeaverAccess::Off);
+    }
+
+    #[test]
+    fn une_entree_invalide_d_un_tableau_bien_forme_ne_bloque_pas_dbeaver() {
+        let parsed = parse_file("[[connection]]\nname = \"a\"\ncolour = 1\n").unwrap();
+        assert_eq!(parsed.dbeaver, DbeaverAccess::Read);
+        assert!(parsed.entries[0].definition.is_err());
     }
 
     #[test]
