@@ -357,6 +357,26 @@ mod integration {
 
     #[tokio::test]
     #[ignore]
+    async fn un_delai_depasse_sur_une_session_reutilisee_est_signale_et_la_laisse_utilisable() {
+        let mut session = session().await;
+        let row = single(&mut session, "SELECT 1").await;
+        assert_eq!(row[0], Cell::Int(1));
+        let timed_out = session
+            .run_read_only("SELECT count(*) FROM big_numbers a, big_numbers b", 10, 100)
+            .await
+            .map(|output| output.rows);
+        let next = session
+            .run_read_only("SELECT 2", 10, TIMEOUT_MS)
+            .await
+            .map(|output| output.rows);
+        assert_eq!(
+            (timed_out, next),
+            (Err(SessionError::Timeout), Ok(vec![vec![Cell::Int(2)]]))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn la_limite_de_lignes_s_arrete_et_signale_des_lignes_en_plus() {
         let mut session = session().await;
         let output = session

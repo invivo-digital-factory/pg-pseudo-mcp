@@ -68,6 +68,20 @@ Fonctionnalité: Limites des réponses
       Alors la réponse est coupée par "cell" à 500 sur la colonne "emails"
       Et la réponse ne contient aucune valeur canari
 
+  @integration
+  Règle: PostgreSQL : une requête qui dépasse timeout_ms est annulée et la session reste utilisable
+    Le délai s'applique à la requête de l'agent, que la session soit neuve ou déjà ouverte par un appel précédent.
+
+    Scénario: Une requête trop longue sur une session déjà ouverte est signalée comme délai dépassé
+      Étant donné l'agent connecté à la base de test
+      Quand l'agent exécute la requête "SELECT 1"
+      Alors la requête réussit
+      Quand l'agent exécute la requête "SELECT count(*) FROM big_numbers a, big_numbers b" avec timeout_ms à 100
+      Alors l'outil est refusé avec le code "statement_timeout"
+      Et l'erreur peut être retentée
+      Quand l'agent exécute la requête "SELECT 2"
+      Alors la première cellule de la réponse vaut 2
+
   Règle: MongoDB : la lecture est bornée avant de partir vers le serveur
     Chaque pipeline reçoit un $limit de max_rows + 1 documents et un find lit au plus max_rows + 1 documents : le document de plus dit si la réponse est coupée.
     Une limite de find au-dessus de max_rows est ramenée à max_rows avec un avertissement,
