@@ -26,7 +26,7 @@ pub const SERVER_NAME: &str = "scarif";
 pub const INSTRUCTIONS: &str = "\
 scarif gives read-only access to the PostgreSQL and MongoDB databases of the developer's own connection file, and to the PostgreSQL databases of DBeaver as a fallback.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query for PostgreSQL or find and aggregate for MongoDB.
-A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, search_schema, list_tables and describe_table selects another one.
+A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, find, aggregate, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
 A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived, policy).
 When a query or describe_table result carries column_policy_hints, those columns were pseudonymized by default or taken for names by the dictionary, possibly wrongly, and no column policy classifies them: propose to the developer to classify each one as clear or personal, in their local file ~/.config/scarif/columns.toml for immediate use, and in the team's shared list through the team's own process.
@@ -64,7 +64,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "List the PostgreSQL connections of the developer's connection file and, as a fallback, of the DBeaver workspace, with source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
+        description = "List the PostgreSQL and MongoDB connections of the developer's connection file and, as a fallback, the PostgreSQL connections of the DBeaver workspace, with engine (postgresql or mongodb), source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_connections(&self) -> CallToolResult {
@@ -76,7 +76,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+        description = "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, find, aggregate, search_schema, list_tables or describe_table to use it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_databases(
@@ -87,7 +87,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "Find tables and columns whose name matches a pattern (case-insensitive) in one connection. Use it to locate where data lives before writing SQL.",
+        description = "Find tables and columns whose name matches a pattern (case-insensitive) in one connection; on a MongoDB connection, collections and field paths sampled from documents. Use it to locate where data lives before writing a query.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_schema(
@@ -98,7 +98,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "List tables and views of a connection, one compact line each with kind, estimated rows and column count. Paginated with limit.",
+        description = "List tables and views of a connection, one compact line each with kind, estimated rows and column count; on a MongoDB connection, collections and views with kind and estimated documents. Paginated with limit.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_tables(&self, Parameters(args): Parameters<ListTablesArgs>) -> CallToolResult {
@@ -106,7 +106,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "Describe one table: columns and types, primary key, foreign keys in both directions, indexes, estimated rows, and which columns will be pseudonymized and as which kind.",
+        description = "Describe one table: columns and types, primary key, foreign keys in both directions, indexes, estimated rows, and which columns will be pseudonymized and as which kind. On a MongoDB connection, describe one collection: field paths sampled from documents with their types and presence (never values), indexes, estimated documents, and which fields will be pseudonymized.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn describe_table(

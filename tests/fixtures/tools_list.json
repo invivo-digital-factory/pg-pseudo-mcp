@@ -83,7 +83,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Describe one table: columns and types, primary key, foreign keys in both directions, indexes, estimated rows, and which columns will be pseudonymized and as which kind.",
+      "description": "Describe one table: columns and types, primary key, foreign keys in both directions, indexes, estimated rows, and which columns will be pseudonymized and as which kind. On a MongoDB connection, describe one collection: field paths sampled from documents with their types and presence (never values), indexes, estimated documents, and which fields will be pseudonymized.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -251,7 +251,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the PostgreSQL connections of the developer's connection file and, as a fallback, of the DBeaver workspace, with source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
+      "description": "List the PostgreSQL and MongoDB connections of the developer's connection file and, as a fallback, the PostgreSQL connections of the DBeaver workspace, with engine (postgresql or mongodb), source (file or dbeaver), status (available, unavailable, unsupported), reason and connection type (dev, test, prod). Never returns hosts or credentials.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -263,7 +263,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, search_schema, list_tables or describe_table to use it.",
+      "description": "List the databases of the server behind one connection, with the connection's default database (the one the connection points at). Pass a name as the database argument of query, explain, find, aggregate, search_schema, list_tables or describe_table to use it.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -284,7 +284,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List tables and views of a connection, one compact line each with kind, estimated rows and column count. Paginated with limit.",
+      "description": "List tables and views of a connection, one compact line each with kind, estimated rows and column count; on a MongoDB connection, collections and views with kind and estimated documents. Paginated with limit.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -413,7 +413,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Find tables and columns whose name matches a pattern (case-insensitive) in one connection. Use it to locate where data lives before writing SQL.",
+      "description": "Find tables and columns whose name matches a pattern (case-insensitive) in one connection; on a MongoDB connection, collections and field paths sampled from documents. Use it to locate where data lives before writing a query.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
