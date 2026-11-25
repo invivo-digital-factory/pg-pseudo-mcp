@@ -1,8 +1,8 @@
 # scarif-database-mcp
 
-A local MCP server that lets an AI coding agent investigate your PostgreSQL databases on its own, without any real personal value reaching the model provider through the server.
+A local MCP server that lets an AI coding agent investigate your PostgreSQL and MongoDB databases on its own, without any real personal value reaching the model provider through the server.
 
-It reads the connections of its own secret-free file (or the ones you already have in DBeaver), runs only read-only SQL, and replaces every personal value in results, errors and query plans by a stable, realistic pseudonym. When the agent reuses a pseudonym in a later query, the server translates it back to the real value locally, so the agent can follow a customer across tables without ever seeing who they are.
+It reads the connections of its own secret-free file (or the ones you already have in DBeaver), runs only read-only SQL and [MongoDB](#mongodb) queries, and replaces every personal value in results, errors and query plans by a stable, realistic pseudonym. When the agent reuses a pseudonym in a later query, the server translates it back to the real value locally, so the agent can follow a customer across tables without ever seeing who they are.
 
 ```text
 agent: SELECT email FROM customers WHERE id = 1
@@ -90,6 +90,7 @@ ssh_alias = "corp-jump-ledger"
 | Key | Meaning |
 |---|---|
 | `name` | Unique name shown by `list_connections` and passed to the tools |
+| `engine` | `postgresql` (default) or `mongodb`, see [MongoDB](#mongodb) for the keys of a MongoDB entry |
 | `host`, `port` (5432), `database` (`postgres`), `user` | The database, as seen from the SSH host when `ssh_alias` is set; `database` is the connection's default database |
 | `sslmode` | `disable`, `allow`, `prefer` (default), `require`, `verify-ca` or `verify-full` |
 | `type` | `dev`, `test` or `prod` |
@@ -138,14 +139,18 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 
 | Tool | What it does |
 |---|---|
-| `list_connections` | PostgreSQL connections of the connection file and of DBeaver, with source (`file` or `dbeaver`), status (available, unavailable, unsupported), reason and type (dev, test, prod). Never hosts or credentials. |
+| `list_connections` | Connections of the connection file and of DBeaver (whose other engines are listed as unsupported), with engine (`postgresql` or `mongodb`), source (`file` or `dbeaver`), status (available, unavailable, unsupported), reason and type (dev, test, prod). Never hosts or credentials. |
 | `list_databases` | The databases of the server behind a connection, ordered by name (connectable, not templates), and the connection's default database, the one the connection points at. The fixed query is run by the server itself; `SELECT ... FROM pg_database` sent through `query` stays refused. |
 | `search_schema` | Tables and columns whose name matches a pattern. |
 | `list_tables` | Tables and views with kind, estimated rows and column count. |
 | `describe_table` | Columns, keys in both directions, indexes, estimates, and which columns will be pseudonymized. |
 | `query` | One read-only statement; rows with pseudonymized values, the list of pseudonymized columns and why, translated literals, warnings, structured truncation. |
 | `explain` | The plan of one statement, without executing it; literals in the plan are pseudonymized. |
-| `server_info` | Live limits, reversible and non-reversible kinds, known limitations. |
+| `find` | One `find` on a MongoDB collection; documents with pseudonymized values, the pseudonymized field paths and why, translated literals, warnings, structured truncation. |
+| `aggregate` | One read-only aggregation pipeline on a MongoDB collection, with the same result shape as `find`. |
+| `server_info` | Live limits, reversible and non-reversible kinds, known limitations, and the MongoDB allowlist. |
+
+`query` and `explain` read PostgreSQL connections only, `find` and `aggregate` MongoDB connections only; each refuses the other engine with a reason naming the right tool. `list_databases`, `search_schema`, `list_tables` and `describe_table` work on both, see [Tools on a MongoDB connection](#tools-on-a-mongodb-connection).
 
 ### Choosing the database
 
@@ -162,6 +167,117 @@ For a connection declared with `auth = "azure"` in the connection file, or that 
 
 The script that wrote an access token into `~/.pgpass` before each session is no longer needed for the MCP server; DBeaver itself still reads `~/.pgpass`.
 
+## MongoDB
+
+An entry with `engine = "mongodb"` reaches a MongoDB replica set, a MongoDB Atlas cluster for example, read with the `find` and `aggregate` tools. Documents come back with every personal value pseudonymized per field path, as rows do for PostgreSQL. MongoDB connections come from the connection file only; DBeaver lists its own as unsupported.
+
+```toml
+[[connection]]
+name = "orders-test"
+engine = "mongodb"
+host = "cluster0.example.mongodb.net"
+database = "shop"
+user = "alice"
+type = "test"
+auth = "command"
+password_command = ["security", "find-generic-password", "-s", "scarif-mongodb-test", "-a", "alice", "-w"]
+ssh_alias = "corp-bastion"
+```
+
+| Key | Meaning |
+|---|---|
+| `host` | With `srv = true`, the SRV name of the cluster (`cluster0.example.mongodb.net`); with `srv = false`, the host name of one member |
+| `srv` | `true` (default): resolve the SRV and TXT records of `host`, as a `mongodb+srv://` URI does; `false`: connect to `host` and `port` |
+| `port` | Only with `srv = false` (default 27017) |
+| `tls` | `true` (default); `false` only with `srv = false`, for local or test sets |
+| `replica_set` | Name of the replica set, optional |
+| `database` | Optional default database; without it, the tools need the `database` argument |
+| `auth` | Must be `command`; the user authenticates with its password against the `admin` database |
+| `name`, `user`, `type`, `ssh_alias` | As for PostgreSQL |
+
+`sslmode` (use `tls`), `auth = "pgpass"` or `"azure"`, a `port` with `srv = true` and `tls = false` with `srv = true` make a MongoDB entry unavailable with a reason that names the key; `srv`, `tls` and `replica_set` do the same on a PostgreSQL entry. Listing never runs the password command nor opens the tunnel, so a connection listed `available` can still fail at its first call (wrong password, unreachable cluster).
+
+### Password in the macOS Keychain
+
+The password only ever comes from `password_command`, never from the file or an environment variable the agent's shell could print. Store it once, typing this yourself in a terminal: `-w` given last makes `security` prompt for the password, so it never lands on a command line or in the shell history.
+
+```bash
+security add-generic-password -s scarif-mongodb-<env> -a <user> -w
+```
+
+Then read it with `password_command = ["security", "find-generic-password", "-s", "scarif-mongodb-<env>", "-a", "<user>", "-w"]`. The command behaves as described in [Authentication modes](#authentication-modes): it runs when a session opens, its output stays in memory, and it runs once more after an authentication failure.
+
+### Atlas private link through an SSH bastion
+
+The members of a private-link cluster have host names that only resolve inside its network. With `srv = true` and an `ssh_alias`, the server resolves the public SRV and TXT records locally, then opens every member connection through a SOCKS5 front that it runs itself, which forwards each one through the SSH tunnel by host name, so the bastion resolves the private address, as `ssh -L` would. TLS keeps the cluster's host names, so certificates are checked against public roots; the driver discovers every member and fails over between them, and no `/etc/hosts` entry or fixed local port is needed.
+
+- The front listens on `127.0.0.1`, on a random port, for one session, and requires a user name and password generated at random for that session.
+- It forwards only to host names under the parent domain of the SRV name (for `cluster0.example.mongodb.net`, any `<member>.example.mongodb.net`), or of `host` with `srv = false`; addresses and other names are refused. An SRV name needs at least three labels.
+- The bastion must allow TCP forwarding to the members, as `ssh -L` needs. Host keys and jump hosts work as described in [SSH tunnels](#ssh-tunnels).
+- Without `ssh_alias`, the driver connects to the members directly.
+- Driver errors reach the agent without host names, the user name or the front's credentials.
+
+### Tools on a MongoDB connection
+
+- `list_connections` shows `"engine": "mongodb"`.
+- `list_databases` returns the databases the user is authorized on, plus the connection's default database, minus `admin`, `local` and `config`.
+- `list_tables` lists the collections and views of a database (`kind` `collection`, `view` or `timeseries`) with their estimated document count; system collections are not listed and the `schema` argument is refused.
+- `describe_table` returns the field paths seen in a random sample of up to 100 documents with their BSON types and presence ratio, the indexes (keys only), the estimated count, the fields of a `$jsonSchema` validator, which paths will be pseudonymized and as which kind, the policy classification and the hints. It never returns a sampled value; field names that are themselves personal values (a map keyed by emails) are pseudonymized.
+- `search_schema` matches collection names and sampled field paths, in at most 50 collections of the database.
+- `find` takes `filter`, `projection`, `sort`, `skip`, `limit`, `hint` and `collation`; `aggregate` takes a `pipeline` and its `let` variables. Both take `connection`, `database`, `collection` and the limits of `query` (`max_rows`, `max_bytes`, `timeout_ms`, `cell_offset`), in Extended JSON.
+
+Documents are returned as relaxed Extended JSON (`{"$oid": ...}`, `{"$date": ...}`, `{"$numberDecimal": ...}`), which the agent can copy back into a filter; `pseudonymized` maps each field path to its kind and reason.
+
+### Read-only guard
+
+Agent requests only ever run as `find` or `aggregate`; the server's own listing, sampling, index and count commands take no agent text. Every stage, query operator and expression operator must be on an allowlist, listed by `server_info`; anything else is refused with its name and position before anything reaches the server.
+
+- **Stages**: `$match`, `$project`, `$addFields`, `$set`, `$unset`, `$group`, `$sort`, `$limit`, `$skip`, `$count`, `$unwind`, `$lookup`, `$graphLookup`, `$unionWith`, `$facet`, `$bucket`, `$bucketAuto`, `$sortByCount`, `$replaceRoot`, `$replaceWith`, `$sample`, `$densify`, `$fill`, `$setWindowFields`, `$documents`, and `$geoNear` as the first stage. Refused, among others: `$out`, `$merge`, `$where`, `$function`, `$accumulator` and any server-side JavaScript, `$currentOp`, `$collStats`, `$indexStats`, `$changeStream`, and the Atlas Search stages `$search`, `$searchMeta` and `$vectorSearch`.
+- **Constant arguments**: the target type of `$convert`, the unit, timezone and format of the date operators, and the pattern and options of `$regexMatch`, `$regexFind` and `$regexFindAll` must be constants, not field paths or expressions.
+- **Namespaces**: the `admin`, `local` and `config` databases and the `system.*` collections are refused, also as a connection's default database; `$lookup`, `$graphLookup` and `$unionWith` may only name a collection of the same database, as a string.
+- **Size**: a request holds at most 64 KB of JSON, 50 stages in all (sub-pipelines of `$lookup`, `$unionWith` and `$facet` included), 32 levels of nesting and 1,000 elements per array.
+- **Execution**: `maxTimeMS` is `timeout_ms`, `allowDiskUse` is off, reads prefer secondaries, and at most `max_rows + 1` documents are read: a larger `find` limit is lowered with a `limit_clamped` warning, and a `$limit` is appended to every pipeline.
+
+A refusal names the rule that blocked it and never echoes a value from the request.
+
+### Pseudonyms in filters
+
+A pseudonym of a kind that `server_info` lists as reversible (the same as for PostgreSQL) is translated back to the real value where it is compared with a field: `{field: value}`, `$eq`, `$ne`, `$in`, `$nin`, `$all`, `$elemMatch` and `$not` in a filter (`find`'s filter and every `$match`, sub-pipelines included, `$graphLookup`'s `restrictSearchWithMatch` and `$geoNear`'s `query`), and `$eq`, `$ne` or `$in` inside `$expr` between a field path and a value. A pseudonym written as a JSON number becomes a number again when the real value is all digits. `translated_literals` counts the translations, and the real values are scrubbed from results and errors.
+
+Anywhere else (ranges, `$regex`, `$text`, projections, `$concat`...) a pseudonym stays as written and the result carries `pseudonym_not_translated`; a value shaped like a pseudonym but unknown on this machine gets `unresolved_pseudonym`.
+
+### How documents are pseudonymized
+
+Each value is judged by its field path in dot notation without array indices (`items.customer.email`), with the PostgreSQL precedence: policy `personal`, policy `clear` (with the structural safety net), the dictionary on the last segment (`firstName` and `first_name` alike), the BSON type, then the heuristics. ObjectIds, booleans, null, timestamps and UUIDs stay in clear; numbers too, unless the dictionary or the policy marks the field (a phone stored as a number under `telephone` is pseudonymized); dates are shifted only for birth dates; other binary values and BSON types without a JSON form become `<type len=N>`. Object keys are scanned like JSON keys, so a map keyed by emails gets pseudonymized keys.
+
+### Derived fields and lineage
+
+In `aggregate` results, and for a `find` projection, a field that passes through or is renamed (`{"a": 1}`, `{"b": "$a"}`, `$group` keys, `$first`, `$last`, `$push` and `$addToSet` of a path, `$unwind`, `$lookup` results, `$replaceRoot` on a path) keeps the classification of its source path in its source collection: policy, dictionary on the source name, hints.
+
+A computed field stays in clear only when every field it reads is declared `clear` in the field policy and all its operators are on the clear-lineage list: `$concat`, `$toLower`, `$toUpper`, `$toString`, `$trim`, `$ltrim`, `$rtrim`, `$strLenCP`, `$strLenBytes`, `$cond`, `$ifNull`, `$switch`, arithmetic, comparisons, `$dateToString`, `$dateTrunc`, date parts, `$sum`, `$count`, `$avg`, `$min` and `$max`. Any other computed field is derived from personal data, reported with the reason `derived`: its text is scanned and pseudonymized or replaced by an opaque token, its integers are pseudonymized when they keep a known shape (phone, SIREN...), its dates are shifted like birth dates. `$$ROOT` and other variables, `$objectToArray` and the operators on field names, computed field names, `$facet` and unknown stages always give a derived field.
+
+### Field policy
+
+The [column policy](#column-policy) files hold MongoDB fields in a `[mongodb]` section, read from the same files in the same order:
+
+```toml
+[mongodb.clear]
+"shop.orders" = ["status", "items.label"]
+"*.products" = ["name"]
+
+[mongodb.personal."shop.customers"]
+"contact.mobile" = "phone"
+```
+
+- **Keys** are `"<database>.<collection>"`, split at the first dot since collection names may contain dots: `"shop.orders.archive"` is the collection `orders.archive` of `shop`. `*` stands for any database or any collection. Database and collection names are case-sensitive.
+- **Values** are field paths in dot notation without array indices, matched exactly (a `clear` on `contact` does not cover `contact.email`) and without regard to case (a `clear` on `name` also covers `NAME`). Object keys that contain a dot are never matched; their values are judged derived.
+- **Precedence**: `database.collection`, then `*.collection`, then `database.*`, then `*.*`. `clear`, `personal`, the kinds, the safety net and the invalid-file rule work as for PostgreSQL: a path both `clear` and `personal` for the same key, an unknown kind or a malformed `[mongodb]` section makes the whole file ignored with `column_policy_ignored`.
+- **Hints** read `{ "collection": "shop.products", "field": "name", "reason": "dictionary" | "default", "hint": "classify it in the column policy: clear or personal" }` under `column_policy_hints`, with the PostgreSQL rules; `describe_table` shows them and `"policy": "clear" | "personal"` for classified fields.
+
+### Limits
+
+Same defaults and maxima as `query`: 50 documents, 16 KB, 10 s by default; 500 documents, 64 KB, 60 s at most. Text values are cut at 500 characters (read the rest with `cell_offset`), arrays at 100 items with a truncation naming the path, and the response at `max_bytes`; when documents are cut, the hint gives keyset pagination (`{"_id": {"$gt": last_id}}` sorted by `{"_id": 1}`). `pseudonymized` lists at most 200 paths. Not supported: writes, `explain`, change streams, Atlas Search, authentication other than user and password, servers with a certificate from a private CA; sharded clusters behind `mongos` are untested.
+
 ## How values are pseudonymized
 
 - **Detection is automatic.** Column names are matched against the [PostgreSQL Anonymizer](https://gitlab.com/dalibo/postgresql_anonymizer) identifier dictionary; values are scanned for emails, French phone numbers, IBAN (mod 97), SIREN and SIRET (Luhn), NIR (key), card numbers, IP addresses, person names (French name lists and civility markers such as `M.` or `Mme`) and street addresses.
@@ -176,7 +292,7 @@ Sorting, `MIN`/`MAX`, ranges, `LIKE`, regular expressions, length, substrings, h
 
 ## Column policy
 
-The heuristics make mistakes in both directions: the dictionary maps the bare token `name` to a last name, so `product_name` or `table_name` are pseudonymized, and a text column of codes can look like names. A column policy fixes this by configuration.
+The heuristics make mistakes in both directions: the dictionary maps the bare token `name` to a last name, so `product_name` or `table_name` are pseudonymized, and a text column of codes can look like names. A column policy fixes this by configuration. MongoDB fields go in a `[mongodb]` section of the same files, see [Field policy](#field-policy).
 
 Two optional TOML files are read, in this order, on every call (no restart needed); the later one wins on the same key:
 
@@ -201,14 +317,14 @@ clear = ["*.product_name", "public.payment.carrier_name", "orders.reference"]
 
 ## Read-only guarantee
 
-Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLAIN` without `ANALYZE`. Writable CTEs, `SELECT INTO`, row locks, session changes, server functions (`pg_terminate_backend`, `set_config`, `nextval`, `pg_sleep`, `dblink`, large objects, file access...) and catalog relations other than structural ones are refused with the rule that blocked them. Each call runs in a `READ ONLY` transaction with a statement timeout, then rolls back. For defence in depth, point DBeaver at a role that can only `SELECT`.
+Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLAIN` without `ANALYZE`. Writable CTEs, `SELECT INTO`, row locks, session changes, server functions (`pg_terminate_backend`, `set_config`, `nextval`, `pg_sleep`, `dblink`, large objects, file access...) and catalog relations other than structural ones are refused with the rule that blocked them. Each call runs in a `READ ONLY` transaction with a statement timeout, then rolls back. For defence in depth, point DBeaver at a role that can only `SELECT`. MongoDB requests go through their own [read-only guard](#read-only-guard).
 
 ## Threat model and known limits
 
 scarif-database-mcp protects against **accidental disclosure by a cooperative agent**. It is not a security boundary against an agent that tries to recover real values on purpose:
 
 - **Character-level probing.** SQL predicates run on real values, so `WHERE email LIKE 'a%'`, `ascii(substr(email, 1, 1))` or counts can rebuild a value one character at a time. Text read from the database can also carry instructions aimed at the agent (prompt injection).
-- **Same-account file access.** The agent runs as your user. With its own shell or file tools it can read DBeaver's credentials (DBeaver's encryption key is public), the pseudonym secret and the mapping, or connect with `psql`. Deny those paths, see below.
+- **Same-account file access.** The agent runs as your user. With its own shell or file tools it can read DBeaver's credentials (DBeaver's encryption key is public), the pseudonym secret and the mapping, or connect with `psql` or `mongosh`. Deny those paths and clients, see below.
 - **Backups.** The mapping stores real values encrypted with a key derived from the secret, but both sit in the same directory; a backup (Time Machine, for example) that copies the directory copies everything needed to decrypt it.
 - **Cut free text.** SQL string functions such as `left(body, 30)` cut free text on real values, so a phone number or an email split at the cut can come back as fragments no detector recognises. Read long values with `cell_offset` instead.
 - **Detection misses.** Names absent from the built-in lists, inside long free text and without a civility marker, can pass through. Unusual identifiers without a checksum are not recognised.
@@ -218,6 +334,13 @@ scarif-database-mcp protects against **accidental disclosure by a cooperative ag
 - **Computed timestamps.** Computed `date` values are shifted like birth dates, but computed timestamps are kept so that `date_trunc` and time-series analysis stay exact; a birth date explicitly cast to `timestamp` therefore passes in clear. Intervals computed from birth dates (`age()`, date differences) are exact and reveal the real birth date.
 - **Every database of the server.** The `database` argument reaches any database the connection's role may connect to, not only the connection's own. This is deliberate; restrict the role's `CONNECT` privileges on the server if some databases must stay out of reach.
 - **The connection file is trusted configuration.** Like `ProxyCommand` in `~/.ssh/config`, it can run a program (`password_command`) and decide where credentials go (`host`, `ssh_alias`, and the Azure token for an `azure` entry). It holds no secret, but a file kept in a shared repository gives its committers command execution on your machine: review its changes like code. The agent must not be able to edit it, see the deny rules below.
+- **MongoDB writes.** When the MongoDB user holds `readWrite` or more, the [read-only guard](#read-only-guard) is the only protection against writes: an operator it wrongly accepted would run with that role. Ask for a user with the `read` role only wherever you can, so that the guard is defence in depth.
+- **Probing MongoDB values.** `$regex`, `$substrCP`, `$strLenCP`, `$indexOfCP`, ranges (`$gt`, `$lt`...), sorts, `$group` keys and counts run on real values, as `LIKE` and `ORDER BY` do in SQL, so a regular expression, its options included, or a range can rebuild a value one character at a time.
+- **Arithmetic on personal numbers.** A computed integer derived from a personal number (`{"$add": ["$telephone", 1]}`) is pseudonymized only when the result still has a known shape (phone, SIREN, SIRET, card number...), as in SQL; otherwise it is returned as computed.
+- **Sampled documents.** `describe_table` and `search_schema` read a random sample of up to 100 documents per collection. Their values never reach the response, but their field names do, judged by the detectors like JSON keys: a personal value used as a key and missed by them passes through.
+- **Views and the field policy.** A view is matched by its own name: entries declared on its base collection do not apply to it. Declare them for the view too, or with `*`.
+- **Decoded before the byte budget.** `max_bytes` bounds the response, not what is read: up to `max_rows + 1` whole documents are read and decoded in memory before the budget applies.
+- **The SOCKS5 front.** It listens on `127.0.0.1` only and requires per-session credentials, but a process running as your user could read those credentials from the server's memory, as it could read the Keychain. A local process that floods the front with connections can also evict the driver's pending handshake (32 pending at most, 2 s each) and make the call fail.
 - **Unsupported connections.** In DBeaver connections, SSH jump servers, proxies, authentication models other than native and pgpass, and credentials protected by a DBeaver master password or secure storage are listed as unsupported or unavailable; jump servers are supported for file connections. Servers with certificates from a private CA are not supported yet.
 - **SSH tunnels.** Connections of the connection file use the SSH tunnels described [above](#ssh-tunnels). Connections that go through DBeaver's SSH tunnel are usable with public key, password or agent authentication. The SSH user and the password or key passphrase are read from DBeaver's saved credentials; a key without a saved passphrase is accepted and fails at connect time if it is encrypted. A key file that does not exist marks the connection unavailable. For them, the SSH host key is checked against `~/.ssh/known_hosts` (or `SCARIF_SSH_KNOWN_HOSTS`), plain or hashed, with the `[host]:port` form for ports other than 22; an unknown, changed or `@revoked` key refuses the connection with the fingerprint to check, as does a key whose type differs from the one already recorded for the host. `@cert-authority` lines and host certificates are not supported. Add a bastion once with `ssh -p <port> <user>@<host>` or, after checking the fingerprint with its administrator, `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`. Verification is skipped only when "bypass host verification" is checked in DBeaver; `list_connections` then shows `"ssh_host_key_check": "bypassed"` for that connection and each connect logs a warning. SSH jump servers are not supported for DBeaver connections. With pgpass authentication, the database password comes from `PGPASSFILE` or `~/.pgpass` (`%APPDATA%\postgresql\pgpass.conf` on Windows), matched on the database host as written in DBeaver, not the tunnel host. As with libpq, a pgpass file readable by group or others is ignored and the connection is unavailable until it is `chmod 600`.
 
@@ -241,7 +364,11 @@ These rules prevent accidental access; they are not a security boundary, since a
       "Edit(~/.config/pg-pseudo/**)",
       "Bash(psql:*)",
       "Bash(pg_dump:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(mongosh:*)",
+      "Bash(mongo:*)",
+      "Bash(mongodump:*)",
+      "Bash(mongoexport:*)"
     ]
   }
 }

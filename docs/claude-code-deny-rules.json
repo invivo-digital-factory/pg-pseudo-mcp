@@ -11,7 +11,11 @@
       "Edit(~/.config/pg-pseudo/**)",
       "Bash(psql:*)",
       "Bash(pg_dump:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(mongosh:*)",
+      "Bash(mongo:*)",
+      "Bash(mongodump:*)",
+      "Bash(mongoexport:*)"
     ]
   }
 }
