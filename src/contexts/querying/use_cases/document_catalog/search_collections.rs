@@ -61,6 +61,7 @@ impl<S: ReadOnlyDocumentStore> SearchCollections<S> {
                 .sample_fields(&request.connection, &database, &collection.name)
                 .await
             else {
+                truncated = true;
                 continue;
             };
             for field in fields {

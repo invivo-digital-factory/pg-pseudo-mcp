@@ -11,6 +11,10 @@ async fn is_mongodb(contexts: &Contexts, connection: &str) -> bool {
     contexts.querying.engine_of(connection).await == Some(Engine::MongoDb)
 }
 
+async fn is_postgresql(contexts: &Contexts, connection: &str) -> bool {
+    contexts.querying.engine_of(connection).await == Some(Engine::PostgreSql)
+}
+
 pub async fn query(contexts: &Contexts, args: QueryArgs) -> CallToolResult {
     if is_mongodb(contexts, &args.connection).await {
         return querying::use_document_tools();
@@ -26,14 +30,14 @@ pub async fn explain(contexts: &Contexts, args: ExplainArgs) -> CallToolResult {
 }
 
 pub async fn find(contexts: &Contexts, args: FindArgs) -> CallToolResult {
-    if !is_mongodb(contexts, &args.connection).await {
+    if is_postgresql(contexts, &args.connection).await {
         return querying::use_sql_tools();
     }
     querying::find(&contexts.querying.documents.run_find, args).await
 }
 
 pub async fn aggregate(contexts: &Contexts, args: AggregateArgs) -> CallToolResult {
-    if !is_mongodb(contexts, &args.connection).await {
+    if is_postgresql(contexts, &args.connection).await {
         return querying::use_sql_tools();
     }
     querying::aggregate(&contexts.querying.documents.run_aggregate, args).await

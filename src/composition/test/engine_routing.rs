@@ -127,6 +127,22 @@ mod unit {
     }
 
     #[tokio::test]
+    async fn find_sur_une_connexion_inconnue_rend_connexion_inconnue() {
+        let dir = TempDir::new().unwrap();
+        let contexts = contexts(&dir);
+        let result = tools::find(
+            &contexts,
+            FindArgs {
+                connection: "absent".into(),
+                collection: "customers".into(),
+                ..FindArgs::default()
+            },
+        )
+        .await;
+        assert_eq!(error_of(&result)["code"], "unknown_connection");
+    }
+
+    #[tokio::test]
     async fn une_liste_de_collections_mongodb_refuse_un_schema() {
         let dir = TempDir::new().unwrap();
         let contexts = contexts(&dir);
