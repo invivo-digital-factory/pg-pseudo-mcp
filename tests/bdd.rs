@@ -1,5 +1,7 @@
 mod bdd_support;
 
+#[path = "../src/contexts/anonymization/test/steps/mod.rs"]
+mod anonymization_steps;
 #[path = "../src/contexts/anonymization/test/steps/anonymization_world.rs"]
 mod anonymization_world;
 #[path = "../src/contexts/connections/test/steps/connections_world.rs"]
