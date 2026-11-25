@@ -377,6 +377,34 @@ mod integration {
 
     #[tokio::test]
     #[ignore]
+    async fn un_delai_plus_court_que_la_planification_est_signale_et_la_session_reste_utilisable() {
+        let mut session = session().await;
+        for timeout in [1, 10, 20] {
+            let timed_out = session
+                .run_read_only(
+                    "SELECT count(*) FROM big_numbers a, big_numbers b",
+                    10,
+                    timeout,
+                )
+                .await
+                .map(|output| output.rows);
+            let next = session
+                .run_read_only("SELECT 2", 10, TIMEOUT_MS)
+                .await
+                .map(|output| output.rows);
+            assert_eq!(
+                (timeout, timed_out, next),
+                (
+                    timeout,
+                    Err(SessionError::Timeout),
+                    Ok(vec![vec![Cell::Int(2)]])
+                )
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn la_limite_de_lignes_s_arrete_et_signale_des_lignes_en_plus() {
         let mut session = session().await;
         let output = session
