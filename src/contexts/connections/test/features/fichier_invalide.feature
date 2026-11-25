@@ -42,7 +42,7 @@ Fonctionnalité: Fichier de connexions invalide
       Alors l'indice cite la ligne 2
       Et l'indice ne contient pas "run `scarif-database-mcp connections import-dbeaver`"
 
-  Règle: Un réglage de premier niveau invalide ou inconnu est signalé et bloque DBeaver
+  Règle: Un réglage de premier niveau invalide ou inconnu, ou une clé connection mal typée, est signalé et bloque DBeaver
 
     Plan du Scénario: La ligne « <ligne> » bloque DBeaver
       Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
@@ -57,15 +57,24 @@ Fonctionnalité: Fichier de connexions invalide
         | read_dbeaver = "no"   | `read_dbeaver` must be true or false      |
         | read_dbeaver = 0      | `read_dbeaver` must be true or false      |
         | colour = "blue"       | unknown top-level key `colour`            |
+        | connection = "app"    | `connection` must be an array of tables, written [[connection]] |
+        | connection = 3        | `connection` must be an array of tables, written [[connection]] |
+        | connection = [1]      | each `connection` must be a table         |
 
-  Règle: Les connexions se déclarent en tableau de tables [[connection]]
+  Règle: Une entrée invalide d'un tableau [[connection]] bien formé ne bloque pas DBeaver
 
-    Plan du Scénario: La ligne « <ligne> » est signalée dans l'indice
-      Étant donné le fichier de connexions qui contient seulement la ligne « <ligne> »
+    Scénario: Une entrée invalide est indisponible avec sa raison et DBeaver suit read_dbeaver
+      Étant donné un espace de travail DBeaver où la connexion "canary-local" a son mot de passe enregistré
+      Et le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "broken"
+        host = "db.example.com"
+        user = "alice"
+        type = "dev"
+        colour = "blue"
+        """
       Quand l'agent liste les connexions
-      Alors l'indice contient "<indice>"
-
-      Exemples:
-        | ligne              | indice                                                         |
-        | connection = "app" | `connection` must be an array of tables, written [[connection]] |
-        | connection = [1]   | each `connection` must be a table                              |
+      Alors la connexion "broken" est listée comme indisponible
+      Et la raison de la connexion "broken" contient "colour"
+      Et la connexion "canary-local" est listée comme disponible
