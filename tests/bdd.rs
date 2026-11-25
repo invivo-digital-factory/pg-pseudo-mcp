@@ -4,6 +4,8 @@ mod bdd_support;
 mod anonymization_steps;
 #[path = "../src/contexts/anonymization/test/steps/anonymization_world.rs"]
 mod anonymization_world;
+#[path = "../src/contexts/connections/test/steps/mod.rs"]
+mod connections_steps;
 #[path = "../src/contexts/connections/test/steps/connections_world.rs"]
 mod connections_world;
 #[path = "../src/contexts/querying/test/steps/querying_world.rs"]
