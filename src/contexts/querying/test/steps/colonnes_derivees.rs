@@ -42,7 +42,7 @@ async fn column_not_flagged(world: &mut QueryingWorld, position: usize) {
     assert!(column.get("pseudonymized").is_none(), "{}", answer.text);
 }
 
-#[then(regex = r"^la sortie (\d+) est de filiation (personnelle|propre|inconnue)$")]
+#[then(regex = r"^la sortie (\d+) est de lignée (personnelle|propre|inconnue)$")]
 async fn output_lineage(world: &mut QueryingWorld, position: usize, expected: String) {
     let guarded = world
         .sql

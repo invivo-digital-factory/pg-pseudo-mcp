@@ -30,6 +30,10 @@ include!(concat!(
 
 pub const MONGO_CONNECTION: &str = "atlas-test";
 
+pub fn refusal_text(code: String, message: String, hint: Option<String>) -> String {
+    format!("{code} {message} {}", hint.unwrap_or_default())
+}
+
 pub struct MongoUser {
     pub name: &'static str,
     pub password: &'static str,
@@ -84,6 +88,11 @@ pub struct Answer {
 impl Answer {
     pub fn body(&self) -> Value {
         serde_json::from_str(&self.text).expect("json body")
+    }
+
+    pub fn checked_body(&self) -> Value {
+        assert!(!self.refused, "{}", self.text);
+        self.body()
     }
 
     pub fn rows(&self) -> Vec<Vec<Value>> {
@@ -262,10 +271,24 @@ impl QueryingWorld {
     }
 
     pub fn record(&mut self, result: &rmcp::model::CallToolResult) {
+        self.sql = None;
+        self.mongo = None;
         self.answer = Some(Answer {
             refused: is_error(result),
             text: text_of(result),
         });
+    }
+
+    pub fn record_sql_guard(&mut self, outcome: Result<Guarded, String>) {
+        self.answer = None;
+        self.mongo = None;
+        self.sql = Some(outcome);
+    }
+
+    pub fn record_mongo_guard(&mut self, outcome: MongoAnswer) {
+        self.answer = None;
+        self.sql = None;
+        self.mongo = Some(outcome);
     }
 
     pub fn load_column_policy(&mut self) {
@@ -298,10 +321,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn ask_in(&mut self, sql: &str, database: Option<&str>) {
@@ -319,10 +339,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn describe(&mut self, table: &str) {
@@ -339,10 +356,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn list_connections(&mut self) {
@@ -355,10 +369,7 @@ impl QueryingWorld {
             &contexts.column_policy_warnings(),
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn ask_with(&mut self, args: QueryArgs) {

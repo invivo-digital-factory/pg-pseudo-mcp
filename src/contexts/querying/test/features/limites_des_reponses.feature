@@ -69,7 +69,8 @@ Fonctionnalité: Limites des réponses
       Et la réponse ne contient aucune valeur canari
 
   Règle: MongoDB : la lecture est bornée avant de partir vers le serveur
-    Chaque pipeline reçoit un $limit de max_rows + 1 documents, la limite d'un find est ramenée à max_rows,
+    Chaque pipeline reçoit un $limit de max_rows + 1 documents et un find lit au plus max_rows + 1 documents : le document de plus dit si la réponse est coupée.
+    Une limite de find au-dessus de max_rows est ramenée à max_rows avec un avertissement,
     et l'exécution a un délai, n'écrit pas sur disque et lit de préférence un secondaire.
 
     Contexte:
@@ -100,7 +101,7 @@ Fonctionnalité: Limites des réponses
   @integration
   Règle: MongoDB : un document trop long est coupé et se lit par tranches
 
-    Scénario: R15, un texte long se lit par tranches et un tableau long est coupé à 100 éléments
+    Scénario: Un texte long se lit par tranches et un tableau long est coupé à 100 éléments
       Étant donné la connexion MongoDB de test à travers le bastion
       Quand l'agent lit dans "customers" un texte de 2000 caractères et un tableau de 300 éléments
       Alors le champ "note" du premier document compte 500 caractères suivis de "…[+1500 chars]"
@@ -110,7 +111,7 @@ Fonctionnalité: Limites des réponses
       Quand l'agent relit le même texte avec cell_offset à 503
       Alors le champ "note" du premier document commence par "defghijabc"
 
-    Scénario: R15, le budget d'octets coupe la réponse et propose une pagination sur _id
+    Scénario: Le budget d'octets coupe la réponse et propose une pagination sur _id
       Étant donné la connexion MongoDB de test à travers le bastion
       Quand l'agent cherche dans "customers" tous les documents avec max_bytes à 1024
       Alors la réponse est coupée par "bytes" à 1024

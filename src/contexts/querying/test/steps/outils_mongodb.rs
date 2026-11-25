@@ -1,8 +1,7 @@
 use cucumber::{given, then, when};
 use scarif_database_mcp::composition::tools;
 use scarif_database_mcp::contexts::querying::presentation::{
-    AggregateArgs, DescribeTableArgs, FindArgs, ListDatabasesArgs, ListTablesArgs, QueryArgs,
-    SearchSchemaArgs,
+    AggregateArgs, DescribeTableArgs, FindArgs, ListDatabasesArgs, ListTablesArgs, SearchSchemaArgs,
 };
 use serde_json::{Value, json};
 
@@ -28,20 +27,6 @@ async fn mongo_connection_without_database(world: &mut QueryingWorld) {
         default_database: false,
         ..MONGO_READER
     });
-}
-
-#[when(regex = r#"^l'agent exécute la requête SQL "(.+)" sur la connexion MongoDB$"#)]
-async fn sql_on_mongo(world: &mut QueryingWorld, sql: String) {
-    let result = tools::query(
-        world.contexts(),
-        QueryArgs {
-            connection: MONGO_CONNECTION.into(),
-            sql,
-            ..QueryArgs::default()
-        },
-    )
-    .await;
-    world.record(&result);
 }
 
 async fn find(world: &mut QueryingWorld, args: FindArgs) {
@@ -250,9 +235,7 @@ async fn search_collections(world: &mut QueryingWorld, pattern: String) {
 }
 
 fn checked(world: &QueryingWorld) -> Value {
-    let answer = world.answer();
-    assert!(!answer.refused, "{}", answer.text);
-    answer.body()
+    world.answer().checked_body()
 }
 
 fn first_document_field(world: &QueryingWorld, field: &str) -> Value {

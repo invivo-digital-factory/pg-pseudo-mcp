@@ -4,6 +4,7 @@ Fonctionnalité: Politique de champs MongoDB
   Le développeur corrige un faux positif des heuristiques sur un champ MongoDB, ou force la pseudonymisation d'un champ, en le déclarant
   dans la section [mongodb] des mêmes fichiers que la politique de colonnes. Une clé est "base.collection", où * remplace la base ou la collection ;
   une valeur est un chemin en notation pointée, où * remplace exactement un segment pour les documents qui utilisent des données comme clés.
+  Les règles propres à PostgreSQL sont dans la politique de colonnes ; ce fichier tient à part parce que clés, chemins et jokers n'y ont pas d'équivalent.
 
   Règle: Une clé désigne une base et une collection, coupées au premier point
     Les noms de base et de collection se comparent exactement ; le chemin se compare entier et sans égard à la casse.
@@ -190,3 +191,4 @@ Fonctionnalité: Politique de champs MongoDB
         | un type personnel est inconnu           | contact.mobile            | shop.customers  | [mongodb.personal."shop.customers"]\n"contact.mobile" = "telephone_portable"     |
         | un joker est mêlé à d'autres caractères | select_options.opt1.label | shop.attributes | [mongodb.personal."shop.attributes"]\n"select_options.opt*.label" = "last_name" |
         | un double joker est utilisé             | data.red.label            | shop.attributes | [mongodb.personal."shop.attributes"]\n"data.**" = "person_name"                  |
+        | un joker mêlé est déclaré en clair      | select_options.opt1.label | shop.attributes | [mongodb.clear]\n"shop.attributes" = ["select_options.opt*.label"]              |

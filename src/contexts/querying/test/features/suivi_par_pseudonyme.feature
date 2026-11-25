@@ -158,7 +158,7 @@ Fonctionnalité: Suivi d'un client par son pseudonyme
       Étant donné l'agent connecté à une base MongoDB
       Et le pseudonyme "noemie.vasseur@example.net" désigne la valeur réelle "ylwenna.kervadec@canary-mail.fr"
 
-    Plan du Scénario: AE6, un pseudonyme comparé à un champ est traduit avant l'envoi
+    Plan du Scénario: Un pseudonyme comparé à un champ est traduit avant l'envoi
       Quand l'agent cherche avec le filtre suivant :
         """
         <filtre>
@@ -185,7 +185,7 @@ Fonctionnalité: Suivi d'un client par son pseudonyme
       Alors la demande est acceptée
       Et 1 valeur a été traduite
 
-    Scénario: R18, un pseudonyme numérique redevient un nombre quand la valeur réelle est en chiffres
+    Scénario: Un pseudonyme numérique redevient un nombre quand la valeur réelle est en chiffres
       Étant donné le pseudonyme "734918265" désigne la valeur réelle "418273652"
       Quand l'agent cherche avec le filtre suivant :
         """
@@ -212,7 +212,7 @@ Fonctionnalité: Suivi d'un client par son pseudonyme
       Étant donné l'agent connecté à une base MongoDB
       Et le pseudonyme "noemie.vasseur@example.net" désigne la valeur réelle "ylwenna.kervadec@canary-mail.fr"
 
-    Plan du Scénario: AE7, un pseudonyme hors comparaison reste tel quel avec un avertissement
+    Plan du Scénario: Un pseudonyme hors comparaison reste tel quel avec un avertissement
       Quand l'agent cherche avec le filtre suivant :
         """
         <filtre>
@@ -226,6 +226,11 @@ Fonctionnalité: Suivi d'un client par son pseudonyme
         | {"contact.email": {"$regex": "^noemie.vasseur@example.net"}}                    |
         | {"contact.email": {"$gt": "noemie.vasseur@example.net"}}                        |
         | {"$expr": {"$eq": [{"$concat": ["$a", "noemie.vasseur@example.net"]}, "x"]}}    |
+
+  Règle: MongoDB : un pseudonyme inconnu sur ce poste part tel quel et le signale
+
+    Contexte:
+      Étant donné l'agent connecté à une base MongoDB
 
     Scénario: Un pseudonyme inconnu sur ce poste est comparé tel quel
       Quand l'agent cherche avec le filtre suivant :

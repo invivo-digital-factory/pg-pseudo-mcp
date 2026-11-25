@@ -6,6 +6,8 @@ Fonctionnalité: Valeurs calculées et lignée
   si chaque source lue est en clair et chaque opération est sur une liste qui préserve le clair. Sinon elle est dérivée et pseudonymisée.
   En PostgreSQL une colonne est une source en clair par son type (enum, nombre, date, booléen, uuid) ou par la politique de colonnes ;
   en MongoDB, qui n'a pas de schéma, seul un champ déclaré clear dans la politique de champs l'est.
+  Vocabulaire : une sortie de lignée personnelle lit au moins une donnée personnelle ; une sortie propre n'en lit aucune ;
+  une sortie de lignée inconnue n'a pas pu être suivie. Un champ dérivé « teinté » est pseudonymisé, un champ dérivé « prouvé en clair » est rendu tel quel.
 
   Règle: PostgreSQL : un calcul sur une donnée personnelle est dérivé et pseudonymisé
 
@@ -97,12 +99,12 @@ Fonctionnalité: Valeurs calculées et lignée
   Règle: PostgreSQL : la lignée suit chaque colonne de sortie jusqu'à ses sources
     Elle traverse alias, CTE, sous-requêtes et branches d'UNION ; une étoile ou une ligne entière ne prouvent rien.
 
-    Plan du Scénario: La sortie <position> de la requête est de filiation <filiation>
+    Plan du Scénario: La sortie <position> de la requête est de lignée <lignée>
       Quand la garde SQL examine la requête "<requête>"
-      Alors la sortie <position> est de filiation <filiation>
+      Alors la sortie <position> est de lignée <lignée>
 
       Exemples:
-        | requête                                                                                       | position | filiation  |
+        | requête                                                                                       | position | lignée      |
         | SELECT upper(email) AS v, id + 1 AS n FROM customers                                          | 1        | personnelle |
         | SELECT upper(email) AS v, id + 1 AS n FROM customers                                          | 2        | propre     |
         | WITH c AS (SELECT email AS e FROM customers) SELECT lower(e) FROM c                           | 1        | personnelle |
@@ -150,7 +152,9 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$sortByCount": "$status"}]                                                                                  | _id          | status        | shop.customers |
 
   Règle: MongoDB : un champ calculé n'est en clair que si tout ce qu'il lit est déclaré clear et chaque opérateur préserve le clair
-    Ici status et amount sont déclarés clear pour shop.customers ; un littéral, un comptage ou un index de tableau sont des constantes en clair.
+    Ici status et amount sont déclarés clear pour shop.customers. Préservent le clair : $concat, $toLower, $toUpper, $toString, $trim, $cond, $ifNull,
+    $switch, l'arithmétique, les comparaisons, les opérateurs de dates, $sum, $count, $avg, $min et $max ; $substrCP n'en fait pas partie.
+    Un littéral, un comptage ou un index de tableau sont des constantes en clair.
 
     Contexte:
       Étant donné la politique de colonnes partagée suivante :

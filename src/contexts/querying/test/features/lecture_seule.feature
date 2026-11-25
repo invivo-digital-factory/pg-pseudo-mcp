@@ -8,7 +8,7 @@ Fonctionnalité: Lecture seule
   Règle: PostgreSQL : une seule instruction de lecture est acceptée par appel
     Sont acceptés SELECT, WITH ... SELECT, VALUES et EXPLAIN sans ANALYZE ; tout le reste est refusé avec sa règle.
 
-    Plan du Scénario: Une lecture passe la garde telle quelle
+    Plan du Scénario: Une lecture passe la garde
       Quand la garde SQL examine la requête "<requête>"
       Alors la demande est acceptée
       Et 0 valeur a été traduite
@@ -90,6 +90,8 @@ Fonctionnalité: Lecture seule
         | SELECT * FROM LATERAL pg_read_file('/etc/passwd') f             | pg_read_file         |
         | SELECT * FROM dblink('host=x', 'select 1') AS t(a int)          | dblink               |
         | SELECT * FROM crosstab('select 1, 1, 1') AS t(a int, b int)     | crosstab             |
+        | SELECT * FROM crosstab3('select 1, 1, 1')                       | crosstab3            |
+        | SELECT * FROM connectby('t', 'id', 'parent', '1', 0) AS t(id text, parent text, level int) | connectby |
         | SELECT query_to_xml('select 1', true, true, '')                 | query_to_xml         |
         | SELECT pg_backup_start('x')                                     | pg_backup_start      |
         | SELECT gin_clean_pending_list('orders_gin')                     | gin_clean_pending_list |
@@ -185,7 +187,7 @@ Fonctionnalité: Lecture seule
         | $mapReduce         |
         | $fooBar            |
 
-    Scénario: AE2, un $out en deuxième étape est refusé en nommant l'étape et sa position
+    Scénario: Un $out en deuxième étape est refusé en nommant l'étape et sa position
       Quand l'agent lance l'agrégation suivante :
         """
         [{"$match": {}}, {"$out": "copy"}]
@@ -222,7 +224,7 @@ Fonctionnalité: Lecture seule
     Contexte:
       Étant donné l'agent connecté à une base MongoDB
 
-    Plan du Scénario: AE3, le filtre <nom> est refusé en nommant l'opérateur
+    Plan du Scénario: Le filtre <nom> est refusé en nommant l'opérateur
       Quand l'agent cherche avec le filtre suivant :
         """
         <filtre>
@@ -277,6 +279,8 @@ Fonctionnalité: Lecture seule
         | {"$dateToString": {"date": "$birthDate", "timezone": "$lastName"}}           |
         | {"$hour": {"date": "$birthDate", "timezone": "$lastName"}}                   |
         | {"$regexFind": {"input": "x", "regex": "$lastName"}}                         |
+        | {"$regexMatch": {"input": "x", "regex": "a", "options": "$lastName"}}       |
+        | {"$dateToString": {"date": "$birthDate", "format": "$lastName"}}           |
 
     Plan du Scénario: Le même argument écrit en constante est accepté
       Quand l'agent lance l'agrégation suivante :
@@ -333,7 +337,7 @@ Fonctionnalité: Lecture seule
         | [{"$lookup": {"from": {"db": "admin", "coll": "system.users"}, "localField": "a", "foreignField": "b", "as": "c"}}] | mongo_cross_database   |
         | [{"$unionWith": {"db": "other", "coll": "c"}}]                                                                     | mongo_cross_database   |
 
-    Scénario: AE4, le refus d'une jointure vers une autre base nomme l'argument fautif
+    Scénario: Le refus d'une jointure vers une autre base nomme l'argument fautif
       Quand l'agent lance l'agrégation suivante :
         """
         [{"$lookup": {"from": {"db": "admin", "coll": "system.users"}, "localField": "a", "foreignField": "b", "as": "c"}}]

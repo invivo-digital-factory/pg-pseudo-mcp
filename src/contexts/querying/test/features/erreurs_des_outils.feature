@@ -84,7 +84,7 @@ Fonctionnalité: Erreurs des outils
   @integration
   Règle: MongoDB : une erreur du serveur est pseudonymisée et garde son code MongoDB
 
-    Scénario: AE9, l'erreur de conversion du serveur ne cite jamais le nom réel
+    Scénario: L'erreur de conversion du serveur ne cite jamais le nom réel
       Étant donné la connexion MongoDB de test à travers le bastion
       Quand l'agent agrège "customers" avec [{"$project": {"n": {"$toInt": "$lastName"}}}]
       Alors l'outil est refusé avec le code "mongodb_error"

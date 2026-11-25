@@ -6,7 +6,7 @@ Fonctionnalité: Politique de colonnes
   Une clé est schema.table.colonne, table.colonne ou *.colonne ; la plus précise l'emporte. Les champs MongoDB ont leur propre section, voir la politique de champs.
 
   Règle: Une colonne déclarée en clair rend sa valeur en clair, sauf ce que les détecteurs structurels reconnaissent
-    Un clear saute le dictionnaire et les heuristiques de noms, mais une adresse e-mail, un téléphone, un IBAN ou un SIRET restent remplacés.
+    Un clear saute le dictionnaire et les heuristiques de noms, mais ce que les détecteurs structurels reconnaissent reste remplacé ; ici une adresse e-mail.
 
     @integration
     Scénario: Une colonne déclarée en clair rend sa valeur en clair

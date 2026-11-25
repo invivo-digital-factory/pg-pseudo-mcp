@@ -7,21 +7,18 @@ use scarif_database_mcp::contexts::querying::domain::types::{
 };
 use serde_json::json;
 
-use crate::querying_world::{CANARY_VALUES, PseudonymBook, QueryingWorld};
-
-fn refusal(code: String, message: String, hint: Option<String>) -> String {
-    format!("{code} {message} {}", hint.unwrap_or_default())
-}
+use crate::querying_world::{CANARY_VALUES, PseudonymBook, QueryingWorld, refusal_text};
 
 fn guard_sql(sql: &str, store: &PseudonymBook) -> Result<Guarded, String> {
-    let inspected = inspect(sql).map_err(|error| refusal(error.code, error.message, error.hint))?;
+    let inspected =
+        inspect(sql).map_err(|error| refusal_text(error.code, error.message, error.hint))?;
     let mut translations = Translations::default();
     for literal in inspected.literals() {
         translations.record(literal, store.lookup(literal));
     }
     let rewritten = inspected
         .rewrite(&translations)
-        .map_err(|error| refusal(error.code, error.message, error.hint))?;
+        .map_err(|error| refusal_text(error.code, error.message, error.hint))?;
     let mut personal = PersonalNames::default();
     for name in rewritten.lineage_names() {
         if DictionaryKind.execute(&name).is_some() {
@@ -49,7 +46,7 @@ async fn agent_runs_query(world: &mut QueryingWorld, sql: String) {
 #[when(regex = r#"^la garde SQL examine la requête "(.+)"$"#)]
 async fn sql_guard_examines(world: &mut QueryingWorld, sql: String) {
     let store = PseudonymBook::new(&world.pseudonyms);
-    world.sql = Some(guard_sql(&sql, &store));
+    world.record_sql_guard(guard_sql(&sql, &store));
 }
 
 #[then(regex = r"^la requête réussit$")]

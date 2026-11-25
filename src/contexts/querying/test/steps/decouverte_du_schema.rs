@@ -7,9 +7,7 @@ use crate::bdd_support::CONNECTION;
 use crate::querying_world::QueryingWorld;
 
 fn checked(world: &QueryingWorld) -> Value {
-    let answer = world.answer();
-    assert!(!answer.refused, "{}", answer.text);
-    answer.body()
+    world.answer().checked_body()
 }
 
 fn quoted(text: &str) -> Vec<String> {

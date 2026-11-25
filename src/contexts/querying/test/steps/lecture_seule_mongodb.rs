@@ -9,7 +9,7 @@ use scarif_database_mcp::contexts::querying::domain::types::{
 };
 use serde_json::{Value, json};
 
-use crate::querying_world::{MongoAnswer, PseudonymBook, QueryingWorld};
+use crate::querying_world::{MongoAnswer, PseudonymBook, QueryingWorld, refusal_text};
 
 fn docstring_json(step: &Step) -> Value {
     let text = step.docstring.as_deref().expect("a docstring");
@@ -30,15 +30,11 @@ fn guard(
         }
         inspected.finish(&translations, &limits)
     });
-    world.mongo = Some(MongoAnswer {
+    world.record_mongo_guard(MongoAnswer {
         outcome,
         lookups: store.lookups(),
         clamps,
     });
-}
-
-fn refusal(code: String, message: String, hint: Option<String>) -> String {
-    format!("{code} {message} {hint:?}")
 }
 
 fn find_request(filter: Value) -> FindRequest {
@@ -64,14 +60,14 @@ fn aggregate_request(pipeline: Value) -> AggregateRequest {
 pub fn run_find(world: &mut QueryingWorld, request: FindRequest) {
     let requested = (request.max_rows, request.max_bytes, request.timeout_ms);
     let inspected =
-        inspect_find(&request).map_err(|error| refusal(error.code, error.message, error.hint));
+        inspect_find(&request).map_err(|error| refusal_text(error.code, error.message, error.hint));
     guard(world, inspected, requested);
 }
 
 pub fn run_aggregate(world: &mut QueryingWorld, request: AggregateRequest) {
     let requested = (request.max_rows, request.max_bytes, request.timeout_ms);
-    let inspected =
-        inspect_aggregate(&request).map_err(|error| refusal(error.code, error.message, error.hint));
+    let inspected = inspect_aggregate(&request)
+        .map_err(|error| refusal_text(error.code, error.message, error.hint));
     guard(world, inspected, requested);
 }
 
