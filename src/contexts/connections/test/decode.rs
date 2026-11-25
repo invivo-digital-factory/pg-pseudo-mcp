@@ -356,7 +356,23 @@ mod integration {
     }
 
     #[tokio::test]
-    #[ignore]
+    async fn diag_fresh_session() {
+        let mut session = session().await;
+        let timed_out = session
+            .run_read_only("SELECT count(*) FROM big_numbers a, big_numbers b", 10, 100)
+            .await
+            .map(|output| output.rows);
+        let next = session
+            .run_read_only("SELECT 2", 10, TIMEOUT_MS)
+            .await
+            .map(|output| output.rows);
+        assert_eq!(
+            (timed_out, next),
+            (Err(SessionError::Timeout), Ok(vec![vec![Cell::Int(2)]]))
+        );
+    }
+
+    #[tokio::test]
     async fn un_delai_depasse_sur_une_session_reutilisee_est_signale_et_la_laisse_utilisable() {
         let mut session = session().await;
         let row = single(&mut session, "SELECT 1").await;
