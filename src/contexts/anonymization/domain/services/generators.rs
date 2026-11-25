@@ -265,14 +265,18 @@ fn case_of(text: &str) -> Case {
         Case::Upper
     } else if !letters.is_empty() && letters.iter().all(|c| c.is_lowercase()) {
         Case::Lower
-    } else if letters.len() > 1
-        && letters[0].is_uppercase()
-        && letters[1..].iter().all(|c| c.is_lowercase())
-    {
+    } else if letters.len() > 1 && text.split(|c: char| !c.is_alphabetic()).all(is_title_word) {
         Case::Title
     } else {
         Case::AsIs
     }
+}
+
+fn is_title_word(word: &str) -> bool {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .is_none_or(|first| first.is_uppercase() && chars.all(char::is_lowercase))
 }
 
 fn apply_case(text: &str, case: Case) -> String {
@@ -843,12 +847,16 @@ mod unit {
 
     #[test]
     fn chaque_prenom_du_catalogue_garde_la_casse_titre_d_une_entree_en_casse_titre() {
-        let offenders: Vec<&str> = <FR_FR as Data>::NAME_FIRST_NAME
+        let offenders: Vec<String> = ["Jean", "Jean-Baptiste", "Marie-Ève", "Anne Sophie"]
             .iter()
-            .copied()
-            .filter(|name| {
-                let rendered = apply_case(name, case_of("Jean"));
-                rendered == rendered.to_uppercase() || rendered == rendered.to_lowercase()
+            .flat_map(|input| {
+                <FR_FR as Data>::NAME_FIRST_NAME
+                    .iter()
+                    .filter_map(move |name| {
+                        let rendered = apply_case(name, case_of(input));
+                        (rendered == rendered.to_uppercase())
+                            .then(|| format!("{input} -> {rendered}"))
+                    })
             })
             .collect();
         assert!(offenders.is_empty(), "{offenders:?}");
