@@ -1,3 +1,4 @@
+use crate::contexts::querying::domain::constants::column_policy::ANY_FIELD_SEGMENT;
 use crate::contexts::querying::domain::types::{ColumnPattern, MongoFieldPattern};
 
 const ANY_TABLE: &str = "*";
@@ -51,6 +52,14 @@ pub fn parse_field_pattern(key: &str, path: &str) -> Result<MongoFieldPattern, S
     let path = path.trim().to_lowercase();
     if path.split('.').any(str::is_empty) {
         return Err(format!("invalid field path `{path}` for `{key}`"));
+    }
+    if path
+        .split('.')
+        .any(|segment| segment.contains(ANY_FIELD_SEGMENT) && segment != ANY_FIELD_SEGMENT)
+    {
+        return Err(format!(
+            "invalid field path `{path}` for `{key}`: a wildcard segment must be exactly `*`"
+        ));
     }
     Ok(MongoFieldPattern {
         database: scope(database, &invalid_key)?,

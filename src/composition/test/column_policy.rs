@@ -223,4 +223,32 @@ mod unit {
         assert_eq!(hints, ["shop.products:name:Dictionary"]);
         assert!(flagged);
     }
+
+    #[test]
+    fn un_joker_mal_forme_fait_ignorer_le_fichier_qui_le_porte_avec_un_avertissement() {
+        let dir = TempDir::new().unwrap();
+        let contexts = contexts(
+            dir.path(),
+            "[mongodb.clear]\n\"shop.attributes\" = [\"select_options.*.label\", \"data.opt*.label\"]",
+            Some("[mongodb.clear]\n\"*.products\" = [\"name\"]"),
+        );
+        let warnings = contexts.column_policy_warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("team-columns.toml"), "{warnings:?}");
+        assert!(warnings[0].contains("wildcard"), "{warnings:?}");
+        let policy = contexts.querying.read_column_policy.execute().policy;
+        let field = |collection: &str, path: &str| FieldSource {
+            database: "shop".into(),
+            collection: collection.into(),
+            path: path.into(),
+        };
+        assert_eq!(
+            policy.decide_field(&field("attributes", "select_options.red.label")),
+            None
+        );
+        assert_eq!(
+            policy.decide_field(&field("products", "name")),
+            Some(&PolicyDecision::Clear)
+        );
+    }
 }

@@ -18,6 +18,14 @@ pub const MONGO: &str = "atlas-local";
 pub const DATABASE: &str = "shop";
 pub const READER: (&str, &str) = ("atlas-reader", "atlas-reader-test-pw");
 pub const WRITER: (&str, &str) = ("atlas-writer", "atlas-writer-test-pw");
+pub const WILDCARD_POLICY: &str = r#"
+[mongodb.clear]
+"shop.attributes" = ["Select_Options.*.Label", "*.red.owner", "reference_entity_options.*"]
+
+[mongodb.personal."shop.attributes"]
+"select_options.*.owner" = "person_name"
+"select_options.vip.label" = "last_name"
+"#;
 const BASTION_ALIAS: &str = "bastion-test";
 const BASTION_HOST: &str = "localhost";
 const BASTION_USER: &str = "tunnel";

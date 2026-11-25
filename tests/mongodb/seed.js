@@ -136,3 +136,21 @@ shop.events.insertMany([
     missing: null,
   },
 ]);
+
+shop.attributes.insertMany([
+  {
+    _id: 1,
+    code: "color",
+    select_options: {
+      red: { label: "Garance Bleue", owner: "Ylwenna Kervadec" },
+      BLUE: { label: "Bleu Nuit", owner: "Odrigan Hazvekmor" },
+      vip: { label: "Kervadec" },
+    },
+    reference_entity_options: { a1b2: { holder: "Maëlouz Brizolier" } },
+  },
+  {
+    _id: 2,
+    code: "size",
+    select_options: { green: { label: "Brizolier" } },
+  },
+]);
