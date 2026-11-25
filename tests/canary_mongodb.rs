@@ -327,6 +327,19 @@ mod e2e {
                 "{tainted}"
             );
         }
-        assert_eq!(transcript.responses, 6);
+        let top_level =
+            MongoHarness::with_policy("[mongodb.clear]\n\"shop.attributes\" = [\"*\"]\n");
+        let twin = json!({"$lookup": {"from": "attributes", "localField": "_id", "foreignField": "_id", "as": "twin"}});
+        for projected in [
+            json!({"$project": {"copy": {"$ifNull": ["$twin", 0]}}}),
+            json!({"$project": {"twin": 1}}),
+        ] {
+            transcript.reached(
+                &top_level
+                    .aggregate("attributes", json!([twin.clone(), projected]))
+                    .await,
+            );
+        }
+        assert_eq!(transcript.responses, 8);
     }
 }

@@ -33,15 +33,17 @@ impl MongoFieldPattern {
 
     pub fn matches(&self, source: &FieldSource) -> bool {
         let path = source.path.to_lowercase();
-        self.segments().count() == path.split('.').count()
-            && self.covers_prefix(&path)
+        let fields = field_segments(&path);
+        self.segments().count() == fields.len()
+            && self.covers_prefix(&fields)
             && self.covers_collection(source)
     }
 
     pub fn lies_below(&self, source: &FieldSource) -> bool {
         let path = source.path.to_lowercase();
-        self.segments().count() > path.split('.').count()
-            && self.covers_prefix(&path)
+        let fields = field_segments(&path);
+        self.segments().count() > fields.len()
+            && self.covers_prefix(&fields)
             && self.covers_collection(source)
     }
 
@@ -59,9 +61,17 @@ impl MongoFieldPattern {
         self.path.split('.')
     }
 
-    fn covers_prefix(&self, path: &str) -> bool {
+    fn covers_prefix(&self, fields: &[&str]) -> bool {
         self.segments()
-            .zip(path.split('.'))
-            .all(|(pattern, field)| pattern == ANY_FIELD_SEGMENT || pattern == field)
+            .zip(fields)
+            .all(|(pattern, field)| pattern == ANY_FIELD_SEGMENT || pattern == *field)
+    }
+}
+
+fn field_segments(path: &str) -> Vec<&str> {
+    if path.is_empty() {
+        Vec::new()
+    } else {
+        path.split('.').collect()
     }
 }

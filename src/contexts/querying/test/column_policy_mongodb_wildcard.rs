@@ -1,6 +1,16 @@
+use serde_json::json;
+
 use super::column_policy_mongodb::{document, known_kind, merged, source};
 use crate::contexts::querying::domain::services::column_policy::{field_hint, merge_policy};
-use crate::contexts::querying::domain::types::{ColumnPolicy, PolicyDecision, Reason};
+use crate::contexts::querying::domain::services::document_clearances::{
+    DocumentCommand, document_clearances,
+};
+use crate::contexts::querying::domain::services::mongo_guard::inspect_aggregate;
+use crate::contexts::querying::domain::services::mongo_lineage::document_lineage;
+use crate::contexts::querying::domain::types::{
+    AggregateRequest, ColumnPolicy, DocumentClearance, PolicyDecision, QueryLimits, Reason,
+    Translations,
+};
 
 fn personal(kind: &str) -> Option<PolicyDecision> {
     Some(PolicyDecision::Personal(kind.into()))
@@ -354,5 +364,62 @@ mod unit {
         assert!(!below("select_options.red.owner"));
         assert!(below("status"));
         assert!(!policy.has_personal_field_below(&source("shop", "orders", "contact")));
+    }
+
+    #[test]
+    fn un_joker_seul_ne_couvre_jamais_la_racine_d_un_document() {
+        let policy = merged(&[document("columns.toml", &[("*.*", "*")], &[])]);
+        assert_eq!(decided(&policy, ""), None);
+        assert_eq!(decided(&policy, "status"), Some(PolicyDecision::Clear));
+    }
+
+    #[test]
+    fn un_document_joint_entier_n_est_pas_prouve_en_clair_par_un_joker_seul() {
+        let policy = merged(&[document("columns.toml", &[("*.*", "*")], &[])]);
+        let guarded = inspect_aggregate(&AggregateRequest {
+            database: Some("shop".into()),
+            collection: "orders".into(),
+            pipeline: vec![
+                json!({"$lookup": {"from": "customers", "localField": "buyer", "foreignField": "_id", "as": "buyer"}}),
+                json!({"$project": {"copy": {"$ifNull": ["$buyer", 0]}, "buyer": 1}}),
+            ],
+            ..AggregateRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        let lineage = document_lineage(&guarded, "shop");
+        let observed = [vec!["copy".to_string()], vec!["buyer".to_string()]]
+            .into_iter()
+            .collect();
+        let clearances = document_clearances(
+            &observed,
+            &lineage,
+            &policy,
+            ("shop", "orders"),
+            DocumentCommand::Aggregate,
+        );
+        assert!(
+            clearances.contains(&(
+                vec!["copy".to_string()],
+                DocumentClearance::Derived {
+                    proven_clear: false
+                }
+            )),
+            "{clearances:?}"
+        );
+        assert!(
+            !clearances.contains(&(vec!["buyer".to_string()], DocumentClearance::Clear)),
+            "{clearances:?}"
+        );
+    }
+
+    #[test]
+    fn un_personnel_de_la_collection_est_toujours_sous_la_racine() {
+        let policy = merged(&[document(
+            "columns.toml",
+            &[],
+            &[("shop.products", "contact.email", "email")],
+        )]);
+        assert!(policy.has_personal_field_below(&source("shop", "products", "")));
     }
 }
