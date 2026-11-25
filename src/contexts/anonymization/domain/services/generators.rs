@@ -255,6 +255,7 @@ fn random_digits<R: Rng + ?Sized>(rng: &mut R, count: usize) -> String {
 enum Case {
     Upper,
     Lower,
+    Title,
     AsIs,
 }
 
@@ -264,6 +265,11 @@ fn case_of(text: &str) -> Case {
         Case::Upper
     } else if !letters.is_empty() && letters.iter().all(|c| c.is_lowercase()) {
         Case::Lower
+    } else if letters.len() > 1
+        && letters[0].is_uppercase()
+        && letters[1..].iter().all(|c| c.is_lowercase())
+    {
+        Case::Title
     } else {
         Case::AsIs
     }
@@ -273,8 +279,33 @@ fn apply_case(text: &str, case: Case) -> String {
     match case {
         Case::Upper => text.to_uppercase(),
         Case::Lower => text.to_lowercase(),
+        Case::Title => title_shout(text),
         Case::AsIs => text.to_string(),
     }
+}
+
+fn title_shout(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        let letters = word.chars().filter(|c| c.is_alphabetic()).count();
+        if letters > 1 && word.chars().all(|c| !c.is_alphabetic() || c.is_uppercase()) {
+            out.push_str(&capitalize(&word.to_lowercase()));
+        } else {
+            out.push_str(word);
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_alphabetic() {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
 }
 
 fn capitalize(word: &str) -> String {
@@ -808,6 +839,37 @@ mod unit {
 
     fn rng(seed: u8) -> ChaCha20Rng {
         ChaCha20Rng::from_seed([seed; 32])
+    }
+
+    #[test]
+    fn chaque_prenom_du_catalogue_garde_la_casse_titre_d_une_entree_en_casse_titre() {
+        let offenders: Vec<&str> = <FR_FR as Data>::NAME_FIRST_NAME
+            .iter()
+            .copied()
+            .filter(|name| {
+                let rendered = apply_case(name, case_of("Jean"));
+                rendered == rendered.to_uppercase() || rendered == rendered.to_lowercase()
+            })
+            .collect();
+        assert!(offenders.is_empty(), "{offenders:?}");
+    }
+
+    #[test]
+    fn prenoms_et_noms_generes_suivent_la_casse_de_chaque_mot_de_l_entree() {
+        for seed in 0..=255 {
+            let mixed = person_name("Jean DUPONT", &mut rng(seed));
+            let (first, last) = mixed.split_once(' ').unwrap();
+            assert_ne!(first, first.to_uppercase(), "{mixed}");
+            assert_eq!(last, last.to_uppercase(), "{mixed}");
+            let lower = person_name("jean dupont", &mut rng(seed));
+            assert_eq!(lower, lower.to_lowercase());
+            let title = person_name("Jean Dupont", &mut rng(seed));
+            let (first, last) = title.split_once(' ').unwrap();
+            assert_ne!(first, first.to_uppercase(), "{title}");
+            assert_ne!(last, last.to_uppercase(), "{title}");
+        }
+        assert_eq!(title_shout("LÉNA"), "Léna");
+        assert_eq!(title_shout("JEAN-PIERRE"), "Jean-Pierre");
     }
 
     #[test]
