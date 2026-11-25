@@ -359,7 +359,7 @@ mod integration {
     async fn diag_fresh_session() {
         let mut session = session().await;
         let timed_out = session
-            .run_read_only("SELECT count(*) FROM big_numbers a, big_numbers b", 10, 100)
+            .run_read_only("SELECT md5(repeat('x', 100000000))", 10, 100)
             .await
             .map(|output| output.rows);
         let next = session

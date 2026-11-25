@@ -221,7 +221,9 @@ async fn run_statement(
         })
         .collect();
     eprintln!("diag sql={sql:?} step=bind");
+    let bind_started = Instant::now();
     let portal = transaction.bind(&statement, &[]).await.map_err(pg)?;
+    eprintln!("diag sql={sql:?} bind took {:?}", bind_started.elapsed());
     let fetch = i32::try_from(max_rows.saturating_add(1)).unwrap_or(i32::MAX);
     eprintln!("diag sql={sql:?} step=query_portal");
     let rows = transaction.query_portal(&portal, fetch).await.map_err(pg)?;
