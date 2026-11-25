@@ -17,16 +17,26 @@ mod choix_de_la_base;
 mod colonnes_derivees;
 #[path = "../src/contexts/connections/test/steps/decouverte_des_connexions.rs"]
 mod decouverte_des_connexions;
+#[path = "../src/contexts/querying/test/steps/decouverte_du_schema.rs"]
+mod decouverte_du_schema;
+#[path = "../src/contexts/querying/test/steps/erreurs_des_outils.rs"]
+mod erreurs_des_outils;
 #[path = "../src/contexts/connections/test/steps/fichier_de_connexions.rs"]
 mod fichier_de_connexions;
 #[path = "../src/contexts/connections/test/steps/import_dbeaver.rs"]
 mod import_dbeaver;
+#[path = "../src/contexts/querying/test/steps/informations_du_serveur.rs"]
+mod informations_du_serveur;
 #[path = "../src/contexts/querying/test/steps/lecture_seule.rs"]
 mod lecture_seule;
 #[path = "../src/contexts/querying/test/steps/lecture_seule_mongodb.rs"]
 mod lecture_seule_mongodb;
+#[path = "../src/contexts/querying/test/steps/limites_des_reponses.rs"]
+mod limites_des_reponses;
 #[path = "../src/contexts/querying/test/steps/outils_mongodb.rs"]
 mod outils_mongodb;
+#[path = "../src/contexts/querying/test/steps/plan_d_execution.rs"]
+mod plan_d_execution;
 #[path = "../src/contexts/querying/test/steps/politique_de_champs_mongodb.rs"]
 mod politique_de_champs_mongodb;
 #[path = "../src/contexts/querying/test/steps/politique_de_colonnes.rs"]

@@ -1,13 +1,17 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cucumber::World;
 use scarif_database_mcp::common::AppConfig;
 use scarif_database_mcp::composition::contexts::Contexts;
 use scarif_database_mcp::contexts::anonymization::injector::AnonymizationInjector;
 use scarif_database_mcp::contexts::connections::presentation::list_connections_with_warnings;
+use scarif_database_mcp::contexts::querying::domain::repositories::PseudonymTranslator;
 use scarif_database_mcp::contexts::querying::domain::services::mongo_lineage::DocumentLineage;
 use scarif_database_mcp::contexts::querying::domain::types::{
-    ColumnPolicy, FieldPolicyHint, GuardedMongo,
+    ClampWarning, ColumnPolicy, FieldPolicyHint, Guarded, GuardedMongo, MongoCommand,
+    PseudonymLookup, Warning,
 };
 use scarif_database_mcp::contexts::querying::presentation::{
     DescribeTableArgs, ListDatabasesArgs, QueryArgs, describe_table, list_databases, query,
@@ -16,10 +20,65 @@ use serde_json::Value;
 
 use crate::bdd_support::{
     BASTION_HOST, BASTION_USER, CONNECTION, bastion_port, database_target, is_error,
-    known_hosts_pattern, public_key_fields, ssh_asset, text_of, write_workspace,
+    known_hosts_pattern, offline_target, public_key_fields, ssh_asset, text_of, write_workspace,
 };
 
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/common/canary_values.rs"
+));
+
 pub const MONGO_CONNECTION: &str = "atlas-test";
+
+pub fn refusal_text(code: String, message: String, hint: Option<String>) -> String {
+    format!("{code} {message} {}", hint.unwrap_or_default())
+}
+
+pub struct MongoUser {
+    pub name: &'static str,
+    pub password: &'static str,
+    pub default_database: bool,
+}
+
+pub const MONGO_READER: MongoUser = MongoUser {
+    name: "atlas-reader",
+    password: "atlas-reader-test-pw",
+    default_database: true,
+};
+
+#[derive(Default)]
+pub struct PseudonymBook {
+    pseudonyms: HashMap<String, String>,
+    lookups: AtomicUsize,
+}
+
+impl PseudonymBook {
+    pub fn new(pseudonyms: &[(String, String)]) -> Self {
+        Self {
+            pseudonyms: pseudonyms.iter().cloned().collect(),
+            lookups: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn lookups(&self) -> usize {
+        self.lookups.load(Ordering::SeqCst)
+    }
+}
+
+impl PseudonymTranslator for PseudonymBook {
+    fn lookup(&self, text: &str) -> PseudonymLookup {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        if let Some(real) = self.pseudonyms.get(text) {
+            return PseudonymLookup::Known { real: real.clone() };
+        }
+        let domain = text.rsplit_once('@').map(|(_, domain)| domain);
+        if matches!(domain, Some("example.com" | "example.net" | "example.org")) {
+            PseudonymLookup::Unknown
+        } else {
+            PseudonymLookup::NotAPseudonym
+        }
+    }
+}
 
 pub struct Answer {
     pub refused: bool,
@@ -29,6 +88,11 @@ pub struct Answer {
 impl Answer {
     pub fn body(&self) -> Value {
         serde_json::from_str(&self.text).expect("json body")
+    }
+
+    pub fn checked_body(&self) -> Value {
+        assert!(!self.refused, "{}", self.text);
+        self.body()
     }
 
     pub fn rows(&self) -> Vec<Vec<Value>> {
@@ -44,6 +108,7 @@ impl Answer {
 pub struct MongoAnswer {
     pub outcome: Result<GuardedMongo, String>,
     pub lookups: usize,
+    pub clamps: Vec<ClampWarning>,
 }
 
 #[derive(World)]
@@ -59,8 +124,10 @@ pub struct QueryingWorld {
     pub policy: ColumnPolicy,
     pub policy_warnings: Vec<String>,
     pub hint: Option<FieldPolicyHint>,
-    pub mongo_pseudonyms: Vec<(String, String)>,
+    pub pseudonyms: Vec<(String, String)>,
     pub mongo: Option<MongoAnswer>,
+    pub sql: Option<Result<Guarded, String>>,
+    pub pipeline: Option<Vec<Value>>,
     pub lineage: Option<DocumentLineage>,
 }
 
@@ -86,8 +153,10 @@ impl QueryingWorld {
             policy: ColumnPolicy::default(),
             policy_warnings: Vec::new(),
             hint: None,
-            mongo_pseudonyms: Vec::new(),
+            pseudonyms: Vec::new(),
             mongo: None,
+            sql: None,
+            pipeline: None,
             lineage: None,
         }
     }
@@ -133,7 +202,26 @@ impl QueryingWorld {
         self.open_contexts(&config);
     }
 
+    pub fn connect_to_unreachable_database(&mut self) {
+        write_workspace(self._dbeaver.path(), &offline_target(), true, None);
+        let config = self.config();
+        self.open_contexts(&config);
+    }
+
+    pub fn connect_without_pseudonym_store(&mut self) {
+        write_workspace(self._dbeaver.path(), &offline_target(), true, None);
+        let config = self.config();
+        self.contexts = Some(Arc::new(Contexts::with_anonymization(
+            &config,
+            Err("the pseudonym secret cannot be read".to_string()),
+        )));
+    }
+
     pub fn connect_to_test_mongodb(&mut self) {
+        self.connect_to_test_mongodb_as(&MONGO_READER);
+    }
+
+    pub fn connect_to_test_mongodb_as(&mut self, user: &MongoUser) {
         let root = self._data.path();
         let ssh_config = root.join("ssh_config_mongodb");
         std::fs::write(
@@ -156,10 +244,16 @@ impl QueryingWorld {
         )
         .expect("known hosts");
         let connections = root.join("connections.toml");
+        let database = if user.default_database {
+            "database = \"shop\"\n"
+        } else {
+            ""
+        };
         std::fs::write(
             &connections,
             format!(
-                "[[connection]]\nname = \"{MONGO_CONNECTION}\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\ndatabase = \"shop\"\nuser = \"atlas-reader\"\ntype = \"test\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"atlas-reader-test-pw\"]\nssh_alias = \"bastion-test\"\n"
+                "[[connection]]\nname = \"{MONGO_CONNECTION}\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\n{database}user = \"{}\"\ntype = \"test\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"{}\"]\nssh_alias = \"bastion-test\"\n",
+                user.name, user.password
             ),
         )
         .expect("connection file");
@@ -177,10 +271,24 @@ impl QueryingWorld {
     }
 
     pub fn record(&mut self, result: &rmcp::model::CallToolResult) {
+        self.sql = None;
+        self.mongo = None;
         self.answer = Some(Answer {
             refused: is_error(result),
             text: text_of(result),
         });
+    }
+
+    pub fn record_sql_guard(&mut self, outcome: Result<Guarded, String>) {
+        self.answer = None;
+        self.mongo = None;
+        self.sql = Some(outcome);
+    }
+
+    pub fn record_mongo_guard(&mut self, outcome: MongoAnswer) {
+        self.answer = None;
+        self.sql = None;
+        self.mongo = Some(outcome);
     }
 
     pub fn load_column_policy(&mut self) {
@@ -213,10 +321,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn ask_in(&mut self, sql: &str, database: Option<&str>) {
@@ -234,10 +339,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn describe(&mut self, table: &str) {
@@ -254,10 +356,7 @@ impl QueryingWorld {
             },
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
     }
 
     pub async fn list_connections(&mut self) {
@@ -270,14 +369,67 @@ impl QueryingWorld {
             &contexts.column_policy_warnings(),
         )
         .await;
-        self.answer = Some(Answer {
-            refused: is_error(&result),
-            text: text_of(&result),
-        });
+        self.record(&result);
+    }
+
+    pub async fn ask_with(&mut self, args: QueryArgs) {
+        let contexts = self.contexts.as_ref().expect("contexts opened");
+        let result = query(
+            &contexts.querying.run_query,
+            QueryArgs {
+                connection: CONNECTION.to_string(),
+                ..args
+            },
+        )
+        .await;
+        self.record(&result);
     }
 
     pub fn mongo_answer(&self) -> &MongoAnswer {
         self.mongo.as_ref().expect("a MongoDB request was guarded")
+    }
+
+    pub fn refusal_text(&self) -> String {
+        if let Some(mongo) = &self.mongo {
+            return mongo.outcome.clone().expect_err("a refusal");
+        }
+        if let Some(sql) = &self.sql {
+            return sql.clone().expect_err("a refusal");
+        }
+        let answer = self.answer();
+        assert!(answer.refused, "{}", answer.text);
+        let error = &answer.body()["error"];
+        format!(
+            "{} {} {}",
+            error["code"].as_str().unwrap_or_default(),
+            error["message"].as_str().unwrap_or_default(),
+            error["hint"].as_str().unwrap_or_default()
+        )
+    }
+
+    pub fn accepted_translations(&self) -> (usize, Vec<Warning>, String) {
+        if let Some(sql) = &self.sql {
+            let guarded = sql
+                .as_ref()
+                .unwrap_or_else(|refusal| panic!("refused: {refusal}"));
+            return (
+                guarded.translated_literals,
+                guarded.warnings.clone(),
+                guarded.sql.clone(),
+            );
+        }
+        let guarded = self
+            .mongo_answer()
+            .outcome
+            .clone()
+            .unwrap_or_else(|refusal| panic!("refused: {refusal}"));
+        let sent = match guarded.command {
+            MongoCommand::Find(command) => command.filter.to_string(),
+            MongoCommand::Aggregate(command) => {
+                serde_json::Value::Array(command.pipeline).to_string()
+            }
+        };
+        (guarded.translated_literals, guarded.warnings, sent)
     }
 
     pub fn answer(&self) -> &Answer {

@@ -22,30 +22,48 @@ fn sent_filter(world: &QueryingWorld) -> Value {
 
 #[given(regex = r#"^le pseudonyme "([^"]+)" désigne la valeur réelle "([^"]+)"$"#)]
 async fn pseudonym_maps_to(world: &mut QueryingWorld, pseudonym: String, real: String) {
-    world.mongo_pseudonyms.push((pseudonym, real));
+    world.pseudonyms.push((pseudonym, real));
 }
 
-#[then(regex = r"^(\d+) valeur a été traduite$")]
+#[then(regex = r"^(\d+) valeurs? (?:a|ont) été traduites?$")]
 async fn values_translated(world: &mut QueryingWorld, count: usize) {
-    assert_eq!(accepted(world).translated_literals, count);
+    assert_eq!(world.accepted_translations().0, count);
 }
 
-#[then(regex = r"^le filtre envoyé ne contient plus le pseudonyme$")]
+#[then(regex = r"^(?:le filtre|la requête) envoyée? ne contient plus le pseudonyme$")]
 async fn filter_has_no_pseudonym(world: &mut QueryingWorld) {
-    let text = sent_filter(world).to_string();
-    for (pseudonym, real) in &world.mongo_pseudonyms {
+    let (_, _, text) = world.accepted_translations();
+    for (pseudonym, real) in &world.pseudonyms {
         assert!(!text.contains(pseudonym.as_str()), "{text}");
         assert!(text.contains(real.as_str()), "{text}");
     }
 }
 
+#[then(regex = r#"^(?:le filtre|la requête) envoyée? contient "(.+)"$"#)]
+async fn sent_text_contains(world: &mut QueryingWorld, expected: String) {
+    let (_, _, text) = world.accepted_translations();
+    assert!(text.contains(&expected), "{text}");
+}
+
+#[then(regex = r#"^(?:le filtre|la requête) envoyée? ne contient pas "(.+)"$"#)]
+async fn sent_text_omits(world: &mut QueryingWorld, unexpected: String) {
+    let (_, _, text) = world.accepted_translations();
+    assert!(!text.contains(&unexpected), "{text}");
+}
+
 #[then(regex = r#"^la demande porte l'avertissement "([^"]+)"$"#)]
 async fn request_carries_warning(world: &mut QueryingWorld, code: String) {
-    let warnings = accepted(world).warnings;
+    let (_, warnings, _) = world.accepted_translations();
     assert!(
         warnings.iter().any(|warning| warning.code == code),
         "{warnings:?}"
     );
+}
+
+#[then(regex = r"^la demande ne porte aucun avertissement$")]
+async fn request_has_no_warning(world: &mut QueryingWorld) {
+    let (_, warnings, _) = world.accepted_translations();
+    assert!(warnings.is_empty(), "{warnings:?}");
 }
 
 #[then(regex = r"^le filtre envoyé vaut :$")]

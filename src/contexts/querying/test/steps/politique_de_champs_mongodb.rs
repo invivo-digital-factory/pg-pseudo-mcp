@@ -79,6 +79,14 @@ async fn column_is_unclassified(world: &mut QueryingWorld, qualified: String) {
     assert_eq!(world.policy.decide(&column(&qualified)), None);
 }
 
+#[then(regex = r#"^la colonne "([^"]+)" est personnelle de type "([^"]+)"$"#)]
+async fn column_is_personal_by_policy(world: &mut QueryingWorld, qualified: String, kind: String) {
+    assert_eq!(
+        world.policy.decide(&column(&qualified)),
+        Some(&PolicyDecision::Personal(kind))
+    );
+}
+
 #[then(
     regex = r#"^le champ "([^"]+)" de "([^"]+)" pseudonymisé comme "([^"]+)" par le dictionnaire ne reçoit aucun indice$"#
 )]

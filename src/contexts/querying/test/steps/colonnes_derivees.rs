@@ -1,9 +1,71 @@
 use cucumber::{then, when};
+use scarif_database_mcp::contexts::querying::domain::types::Lineage;
 use serde_json::json;
 
-use crate::querying_world::QueryingWorld;
+use crate::querying_world::{CANARY_VALUES, QueryingWorld};
 
 const REAL_FRAGMENTS: [&str; 4] = ["ylwenna", "kervadec", "canary-mail", "canary"];
+
+#[then(regex = r"^la réponse ne contient aucune valeur canari$")]
+async fn answer_has_no_canary(world: &mut QueryingWorld) {
+    let text = world.answer().text.to_lowercase();
+    for value in CANARY_VALUES {
+        assert!(!text.contains(&value.to_lowercase()), "{value} in {text}");
+    }
+    assert!(!text.contains("canary-mail"), "{text}");
+}
+
+#[then(
+    regex = r#"^les colonnes (\d+) et (\d+) sont pseudonymisées comme "([^"]+)" par le dictionnaire$"#
+)]
+async fn columns_flagged_by_dictionary(
+    world: &mut QueryingWorld,
+    first: usize,
+    second: usize,
+    kind: String,
+) {
+    let answer = world.answer();
+    let body = answer.body();
+    for position in [first, second] {
+        let flag = &body["columns"][position - 1]["pseudonymized"];
+        assert_eq!(flag["kind"], kind.as_str(), "{}", answer.text);
+        assert_eq!(flag["why"], "dictionary", "{}", answer.text);
+    }
+}
+
+#[then(regex = r"^la colonne (\d+) n'est pas pseudonymisée$")]
+async fn column_not_flagged(world: &mut QueryingWorld, position: usize) {
+    let answer = world.answer();
+    let body = answer.body();
+    let column = &body["columns"][position - 1];
+    assert!(column.is_object(), "{}", answer.text);
+    assert!(column.get("pseudonymized").is_none(), "{}", answer.text);
+}
+
+#[then(regex = r"^la sortie (\d+) est de lignée (personnelle|propre|inconnue)$")]
+async fn output_lineage(world: &mut QueryingWorld, position: usize, expected: String) {
+    let guarded = world
+        .sql
+        .as_ref()
+        .expect("a statement was guarded")
+        .as_ref()
+        .unwrap_or_else(|refusal| panic!("refused: {refusal}"));
+    let expected = match expected.as_str() {
+        "personnelle" => Lineage::Personal,
+        "propre" => Lineage::Clean,
+        _ => Lineage::Unknown,
+    };
+    let lineage = guarded
+        .derived_lineage
+        .as_ref()
+        .unwrap_or_else(|| panic!("no lineage for {}", guarded.sql));
+    assert_eq!(
+        lineage.get(position - 1),
+        Some(&expected),
+        "{}",
+        guarded.sql
+    );
+}
 
 #[then(regex = r#"^la colonne "([^"]+)" est signalée comme dérivée et pseudonymisée$"#)]
 async fn column_is_flagged_derived(world: &mut QueryingWorld, column: String) {
