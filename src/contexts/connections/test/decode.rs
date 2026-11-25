@@ -357,19 +357,39 @@ mod integration {
 
     #[tokio::test]
     async fn diag_fresh_session() {
-        let mut session = session().await;
-        let timed_out = session
-            .run_read_only("SELECT md5(repeat('x', 100000000))", 10, 100)
-            .await
-            .map(|output| output.rows);
-        let next = session
-            .run_read_only("SELECT 2", 10, TIMEOUT_MS)
-            .await
-            .map(|output| output.rows);
-        assert_eq!(
-            (timed_out, next),
-            (Err(SessionError::Timeout), Ok(vec![vec![Cell::Int(2)]]))
-        );
+        let mut anomalies = Vec::new();
+        for reused in [false, true] {
+            for timeout in 1..=60u64 {
+                let mut session = session().await;
+                if reused {
+                    single(&mut session, "SELECT 1").await;
+                }
+                eprintln!("diag sweep reused={reused} timeout={timeout} begin");
+                let started = Instant::now();
+                let timed_out = session
+                    .run_read_only(
+                        "SELECT count(*) FROM big_numbers a, big_numbers b",
+                        10,
+                        timeout,
+                    )
+                    .await
+                    .map(|output| output.rows);
+                let elapsed = started.elapsed();
+                let next = session
+                    .run_read_only("SELECT 2", 10, TIMEOUT_MS)
+                    .await
+                    .map(|output| output.rows);
+                eprintln!(
+                    "diag sweep reused={reused} timeout={timeout} elapsed={elapsed:?} outcome={timed_out:?} next={next:?}"
+                );
+                if timed_out != Err(SessionError::Timeout) || next != Ok(vec![vec![Cell::Int(2)]]) {
+                    anomalies.push(format!(
+                        "reused={reused} timeout={timeout} outcome={timed_out:?} next={next:?}"
+                    ));
+                }
+            }
+        }
+        assert!(anomalies.is_empty(), "{anomalies:#?}");
     }
 
     #[tokio::test]
