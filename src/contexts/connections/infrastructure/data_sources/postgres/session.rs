@@ -154,6 +154,7 @@ async fn execute(
     let transaction = match client.build_transaction().read_only(true).start().await {
         Ok(transaction) => transaction,
         Err(error) => {
+            eprintln!("diag sql={sql:?} start={error:?}");
             let error = session_error_from_postgres(&error);
             return Execution {
                 healthy: !error.breaks_connection(),
@@ -163,6 +164,7 @@ async fn execute(
     };
     let result = run_statement(&transaction, sources, sql, max_rows, timeout_ms).await;
     let rollback = transaction.rollback().await;
+    eprintln!("diag sql={sql:?} rollback={rollback:?}");
     let healthy = rollback.is_ok() && !result.as_ref().is_err_and(SessionError::breaks_connection);
     let result = match (result, rollback) {
         (Err(error), _) => Err(error),
@@ -179,14 +181,20 @@ async fn run_statement(
     max_rows: usize,
     timeout_ms: u64,
 ) -> Result<QueryOutput, SessionError> {
-    let pg = |error: tokio_postgres::Error| session_error_from_postgres(&error);
+    let pg = |error: tokio_postgres::Error| {
+        eprintln!("diag sql={sql:?} error={error:?}");
+        session_error_from_postgres(&error)
+    };
+    eprintln!("diag sql={sql:?} step=set_local");
     transaction
         .batch_execute(&format!(
             "SET LOCAL statement_timeout = {timeout_ms}; SET LOCAL lock_timeout = {LOCK_TIMEOUT_MS}"
         ))
         .await
         .map_err(pg)?;
+    eprintln!("diag sql={sql:?} step=prepare");
     let statement = transaction.prepare(sql).await.map_err(pg)?;
+    eprintln!("diag sql={sql:?} step=resolve");
     if !statement.params().is_empty() {
         return Err(SessionError::Db(Box::new(DbMessage {
             severity: "ERROR".into(),
@@ -212,9 +220,14 @@ async fn run_statement(
             source,
         })
         .collect();
+    eprintln!("diag sql={sql:?} step=bind");
+    let bind_started = Instant::now();
     let portal = transaction.bind(&statement, &[]).await.map_err(pg)?;
+    eprintln!("diag sql={sql:?} bind took {:?}", bind_started.elapsed());
     let fetch = i32::try_from(max_rows.saturating_add(1)).unwrap_or(i32::MAX);
+    eprintln!("diag sql={sql:?} step=query_portal");
     let rows = transaction.query_portal(&portal, fetch).await.map_err(pg)?;
+    eprintln!("diag sql={sql:?} step=done rows={}", rows.len());
     let more_rows = rows.len() > max_rows;
     let rows = rows
         .iter()
