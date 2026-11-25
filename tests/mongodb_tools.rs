@@ -1,6 +1,6 @@
 mod common;
 
-use common::mongo::{DATABASE, MongoHarness, WRITER, filter};
+use common::mongo::{DATABASE, MongoHarness, WILDCARD_POLICY, WRITER, filter};
 use common::{assert_no_canary, body, is_error, text_of};
 use scarif_database_mcp::contexts::querying::presentation::{AggregateArgs, FindArgs};
 use serde_json::{Value, json};
@@ -395,5 +395,55 @@ mod e2e {
                 .await,
         );
         assert_eq!(answer["document_count"], 1);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn un_joker_du_fichier_de_colonnes_rend_les_libelles_en_clair_et_garde_le_voisin_personnel()
+     {
+        let color = || filter(json!({"_id": 1}));
+        let before = checked(&MongoHarness::new().find("attributes", color()).await);
+        assert_ne!(
+            before["documents"][0]["select_options"]["red"]["label"], "Garance Bleue",
+            "{before}"
+        );
+        assert!(
+            before["column_policy_hints"]
+                .to_string()
+                .contains("select_options.BLUE.label"),
+            "{before}"
+        );
+
+        let harness = MongoHarness::with_policy(WILDCARD_POLICY);
+        let answer = checked(&harness.find("attributes", color()).await);
+        let options = &answer["documents"][0]["select_options"];
+        assert_eq!(options["red"]["label"], "Garance Bleue", "{answer}");
+        assert_eq!(options["BLUE"]["label"], "Bleu Nuit", "{answer}");
+        let pseudonymized = &answer["pseudonymized"];
+        for label in ["select_options.red.label", "select_options.BLUE.label"] {
+            assert!(pseudonymized.get(label).is_none(), "{answer}");
+        }
+        for (path, kind) in [
+            ("select_options.red.owner", "person_name"),
+            ("select_options.BLUE.owner", "person_name"),
+            ("select_options.vip.label", "last_name"),
+        ] {
+            assert_eq!(pseudonymized[path]["why"], "policy", "{path} in {answer}");
+            assert_eq!(pseudonymized[path]["kind"], kind, "{path} in {answer}");
+        }
+        assert!(
+            pseudonymized
+                .get("reference_entity_options.a1b2.holder")
+                .is_some(),
+            "{answer}"
+        );
+        assert!(
+            !answer
+                .get("column_policy_hints")
+                .map(Value::to_string)
+                .unwrap_or_default()
+                .contains("select_options"),
+            "{answer}"
+        );
     }
 }

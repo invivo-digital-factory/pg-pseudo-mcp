@@ -20,16 +20,22 @@ impl MongoFieldPolicy {
         self.entries
             .iter()
             .filter(|(pattern, _)| pattern.matches(source))
-            .max_by_key(|(pattern, _)| pattern.specificity())
+            .max_by(|(pattern, decision), (other, other_decision)| {
+                pattern
+                    .precedence(other)
+                    .then_with(|| is_personal(decision).cmp(&is_personal(other_decision)))
+                    .then_with(|| other.path.cmp(&pattern.path))
+            })
             .map(|(_, decision)| decision)
     }
 
     pub fn has_personal_below(&self, source: &FieldSource) -> bool {
-        let prefix = format!("{}.", source.path.to_lowercase());
-        self.entries.iter().any(|(pattern, decision)| {
-            matches!(decision, PolicyDecision::Personal(_))
-                && pattern.path.starts_with(&prefix)
-                && pattern.covers_collection(source)
-        })
+        self.entries
+            .iter()
+            .any(|(pattern, decision)| is_personal(decision) && pattern.lies_below(source))
     }
+}
+
+fn is_personal(decision: &PolicyDecision) -> bool {
+    matches!(decision, PolicyDecision::Personal(_))
 }

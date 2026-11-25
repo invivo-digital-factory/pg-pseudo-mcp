@@ -4,7 +4,7 @@ use crate::contexts::querying::domain::types::{
     MongoPolicyEntries, PolicyDecision, Reason,
 };
 
-fn source(database: &str, collection: &str, path: &str) -> FieldSource {
+pub(super) fn source(database: &str, collection: &str, path: &str) -> FieldSource {
     FieldSource {
         database: database.into(),
         collection: collection.into(),
@@ -12,7 +12,7 @@ fn source(database: &str, collection: &str, path: &str) -> FieldSource {
     }
 }
 
-fn document(
+pub(super) fn document(
     file: &str,
     clear: &[(&str, &str)],
     personal: &[(&str, &str, &str)],
@@ -35,11 +35,11 @@ fn document(
     }
 }
 
-fn known_kind(kind: &str) -> bool {
+pub(super) fn known_kind(kind: &str) -> bool {
     ["person_name", "last_name", "phone", "email"].contains(&kind)
 }
 
-fn merged(documents: &[ColumnPolicyDocument]) -> ColumnPolicy {
+pub(super) fn merged(documents: &[ColumnPolicyDocument]) -> ColumnPolicy {
     let load = merge_policy(documents, &known_kind);
     assert!(load.warnings.is_empty(), "{:?}", load.warnings);
     load.policy

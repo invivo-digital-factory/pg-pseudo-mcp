@@ -606,6 +606,7 @@ mod integration {
         assert_eq!(
             names,
             vec![
+                "attributes",
                 "customer_contacts",
                 "customers",
                 "events",
@@ -613,11 +614,12 @@ mod integration {
                 "products"
             ]
         );
-        let view = &collections[0];
+        let view = &collections[1];
         assert_eq!(view.kind, CollectionKind::View);
         assert_eq!(view.estimated_count, None);
-        assert_eq!(collections[1].kind, CollectionKind::Collection);
-        assert_eq!(collections[1].estimated_count, Some(3));
+        assert_eq!(collections[2].kind, CollectionKind::Collection);
+        assert_eq!(collections[2].estimated_count, Some(3));
+        assert_eq!(collections[0].kind, CollectionKind::Collection);
 
         let customers = use_case
             .describe(CONNECTION, None, "customers")

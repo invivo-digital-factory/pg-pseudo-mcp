@@ -1,17 +1,18 @@
 mod common;
 
-use common::mongo::{DATABASE, MONGO, MongoHarness, WRITER, filter};
+use common::mongo::{DATABASE, MONGO, MongoHarness, WILDCARD_POLICY, WRITER, filter};
 use common::{assert_no_canary, list_connections, text_of};
 use rmcp::model::CallToolResult;
 use scarif_database_mcp::contexts::querying::presentation::FindArgs;
 use serde_json::{Value, json};
 
-const COLLECTIONS: [&str; 5] = [
+const COLLECTIONS: [&str; 6] = [
     "customers",
     "orders",
     "products",
     "customer_contacts",
     "events",
+    "attributes",
 ];
 
 struct Transcript {
@@ -292,5 +293,53 @@ mod e2e {
         );
 
         assert!(transcript.responses >= 50, "{}", transcript.responses);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn un_joker_en_clair_ne_libere_ni_un_chemin_personnel_ni_un_enfant_de_parent_souille() {
+        let harness = MongoHarness::with_policy(WILDCARD_POLICY);
+        let mut transcript = Transcript { responses: 0 };
+
+        let color =
+            transcript.reached(&harness.find("attributes", filter(json!({"_id": 1}))).await);
+        assert_eq!(
+            color["documents"][0]["select_options"]["red"]["label"], "Garance Bleue",
+            "{color}"
+        );
+        transcript.record(&harness.describe("attributes").await);
+
+        for derived in [
+            json!({"$project": {"select_options": {"$ifNull": ["$select_options", {}]}}}),
+            json!({"$addFields": {"select_options": {"$mergeObjects": ["$select_options"]}}}),
+            json!({"$replaceRoot": {"newRoot": {"$mergeObjects": ["$$ROOT", {}]}}}),
+            json!({"$project": {"whole": "$$ROOT"}}),
+        ] {
+            let tainted = transcript.reached(
+                &harness
+                    .aggregate("attributes", json!([{"$match": {"_id": 2}}, derived]))
+                    .await,
+            );
+            assert!(
+                tainted["pseudonymized"]
+                    .as_object()
+                    .is_some_and(|paths| paths.values().any(|flag| flag["why"] == "derived")),
+                "{tainted}"
+            );
+        }
+        let top_level =
+            MongoHarness::with_policy("[mongodb.clear]\n\"shop.attributes\" = [\"*\"]\n");
+        let twin = json!({"$lookup": {"from": "attributes", "localField": "_id", "foreignField": "_id", "as": "twin"}});
+        for projected in [
+            json!({"$project": {"copy": {"$ifNull": ["$twin", 0]}}}),
+            json!({"$project": {"twin": 1}}),
+        ] {
+            transcript.reached(
+                &top_level
+                    .aggregate("attributes", json!([twin.clone(), projected]))
+                    .await,
+            );
+        }
+        assert_eq!(transcript.responses, 8);
     }
 }

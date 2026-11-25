@@ -1,6 +1,7 @@
 mod clear_lineage;
 mod column_policy;
 mod column_policy_mongodb;
+mod column_policy_mongodb_wildcard;
 mod fakes;
 mod guard;
 mod list_databases;

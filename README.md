@@ -263,7 +263,7 @@ The [column policy](#column-policy) files hold MongoDB fields in a `[mongodb]` s
 ```toml
 [mongodb.clear]
 "shop.orders" = ["status", "items.label"]
-"*.products" = ["name"]
+"*.products" = ["name", "select_options.*.label"]
 
 [mongodb.personal."shop.customers"]
 "contact.mobile" = "phone"
@@ -271,7 +271,8 @@ The [column policy](#column-policy) files hold MongoDB fields in a `[mongodb]` s
 
 - **Keys** are `"<database>.<collection>"`, split at the first dot since collection names may contain dots: `"shop.orders.archive"` is the collection `orders.archive` of `shop`. `*` stands for any database or any collection. Database and collection names are case-sensitive.
 - **Values** are field paths in dot notation without array indices, matched exactly (a `clear` on `contact` does not cover `contact.email`) and without regard to case (a `clear` on `name` also covers `NAME`). Object keys that contain a dot are never matched; their values are judged derived.
-- **Precedence**: `database.collection`, then `*.collection`, then `database.*`, then `*.*`. `clear`, `personal`, the kinds, the safety net and the invalid-file rule work as for PostgreSQL: a path both `clear` and `personal` for the same key, an unknown kind or a malformed `[mongodb]` section makes the whole file ignored with `column_policy_ignored`.
+- **Wildcards**: a path segment written `*` matches exactly one segment of any name, for documents that use data as keys: `select_options.*.label` covers `select_options.red.label` and `select_options.A12.label`, not `select_options.label`, `select_options.red.fr.label` nor anything below `select_options.red.label`. A `*` mixed with other characters (`opt*`, `*_id`) and `**` are invalid. A `*` never matches the document root, so `["*"]` covers the top-level fields only. A `clear` that lands on an object, exact or wildcard, scans that object's own keys with the structural detectors only, while each value below keeps its own path's judgment.
+- **Precedence**: `database.collection`, then `*.collection`, then `database.*`, then `*.*`. Under the same key level, the path with the most named segments wins, so an exact path beats a wildcard path; when a `clear` and a `personal` path match with as many named segments, `personal` wins. A later file only replaces the same key and path, so a local `clear` does not override a shared `personal` matched more precisely. `clear`, `personal`, the kinds, the safety net and the invalid-file rule work as for PostgreSQL: a path both `clear` and `personal` for the same key, an unknown kind or a malformed `[mongodb]` section, invalid wildcards included, makes the whole file ignored with `column_policy_ignored`.
 - **Hints** read `{ "collection": "shop.products", "field": "name", "reason": "dictionary" | "default", "hint": "classify it in the column policy: clear or personal" }` under `column_policy_hints`, with the PostgreSQL rules; `describe_table` shows them and `"policy": "clear" | "personal"` for classified fields.
 
 ### Limits

@@ -106,3 +106,71 @@ Fonctionnalité: Politique de champs MongoDB
     Alors aucun avertissement de politique n'est signalé
     Et la colonne "public.products.product_name" est en clair
     Et le champ "name" de "shop.products" est en clair
+
+  Scénario: Un joker couvre un seul segment de chemin, quel que soit son nom
+    Étant donné la politique de colonnes partagée suivante :
+      """
+      [mongodb.clear]
+      "shop.attributes" = ["select_options.*.label"]
+
+      [mongodb.personal."shop.attributes"]
+      "select_options.*.owner" = "person_name"
+      """
+    Quand la politique de colonnes est chargée
+    Alors le champ "select_options.red.label" de "shop.attributes" est en clair
+    Et le champ "SELECT_OPTIONS.A12.Label" de "shop.attributes" est en clair
+    Et le champ "select_options.red.owner" de "shop.attributes" est personnel de type "person_name"
+    Et le champ "select_options.red" de "shop.attributes" n'est pas classé
+    Et le champ "select_options.red.label.fr" de "shop.attributes" n'est pas classé
+    Et le champ "select_options.label" de "shop.attributes" n'est pas classé
+    Et le champ "select_options.red.label" de "shop.attributes" pseudonymisé comme "last_name" par le dictionnaire ne reçoit aucun indice
+
+  Scénario: Un chemin exact l'emporte sur un joker et le personnel l'emporte à précision égale
+    Étant donné la politique de colonnes partagée suivante :
+      """
+      [mongodb.clear]
+      "shop.attributes" = ["select_options.*.label", "data.*.title"]
+
+      [mongodb.personal."shop.attributes"]
+      "select_options.vip.label" = "last_name"
+      "data.red.*" = "person_name"
+      """
+    Quand la politique de colonnes est chargée
+    Alors le champ "select_options.vip.label" de "shop.attributes" est personnel de type "last_name"
+    Et le champ "select_options.red.label" de "shop.attributes" est en clair
+    Et le champ "data.red.title" de "shop.attributes" est personnel de type "person_name"
+    Et le champ "data.blue.title" de "shop.attributes" est en clair
+
+  Scénario: La clé de collection la plus précise passe avant la précision du chemin
+    Étant donné la politique de colonnes partagée suivante :
+      """
+      [mongodb.clear]
+      "shop.attributes" = ["select_options.*.label"]
+
+      [mongodb.personal."*.attributes"]
+      "select_options.red.label" = "last_name"
+      """
+    Quand la politique de colonnes est chargée
+    Alors le champ "select_options.red.label" de "shop.attributes" est en clair
+    Et le champ "select_options.red.label" de "crm.attributes" est personnel de type "last_name"
+
+  Scénario: Un joker mêlé à d'autres caractères fait ignorer le fichier
+    Étant donné la politique de colonnes partagée suivante :
+      """
+      [mongodb.clear]
+      "*.products" = ["name"]
+      "shop.attributes" = ["select_options.opt*.label"]
+      """
+    Quand la politique de colonnes est chargée
+    Alors un avertissement "column_policy_ignored" nomme le fichier partagé
+    Et le champ "name" de "shop.products" n'est pas classé
+
+  Scénario: Un double joker fait ignorer le fichier
+    Étant donné la politique de colonnes partagée suivante :
+      """
+      [mongodb.personal."shop.attributes"]
+      "data.**" = "person_name"
+      """
+    Quand la politique de colonnes est chargée
+    Alors un avertissement "column_policy_ignored" nomme le fichier partagé
+    Et le champ "data.red.label" de "shop.attributes" n'est pas classé
