@@ -40,6 +40,18 @@ async fn column_pseudonymized_by_policy(world: &mut QueryingWorld, column: Strin
     assert_eq!(flag["why"], "policy", "{}", answer.text);
 }
 
+#[then(regex = r#"^la colonne "([^"]+)" est pseudonymisée comme "([^"]+)" par le dictionnaire$"#)]
+async fn column_pseudonymized_by_dictionary(
+    world: &mut QueryingWorld,
+    column: String,
+    kind: String,
+) {
+    let answer = world.answer();
+    let flag = &answer.body()["pseudonymized"][column.as_str()];
+    assert_eq!(flag["kind"], kind.as_str(), "{}", answer.text);
+    assert_eq!(flag["why"], "dictionary", "{}", answer.text);
+}
+
 #[then(regex = r#"^la colonne "([^"]+)" ne laisse voir aucune adresse e-mail réelle$"#)]
 async fn column_hides_email(world: &mut QueryingWorld, column: String) {
     let answer = world.answer();
