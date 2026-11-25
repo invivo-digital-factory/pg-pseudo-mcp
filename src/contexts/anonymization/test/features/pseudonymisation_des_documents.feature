@@ -1,8 +1,8 @@
 # language: fr
 @anonymization
 Fonctionnalité: Pseudonymisation des documents
-  Un document MongoDB revient avec chaque valeur personnelle pseudonymisée selon le chemin de son champ : le dernier mot
-  connu du chemin donne le type, les tableaux héritent du chemin de leur champ, les détecteurs veillent sous les clés
+  Un document MongoDB revient avec chaque valeur personnelle pseudonymisée selon le chemin de son champ : le segment
+  connu du dictionnaire le plus proche donne le type, les tableaux héritent du chemin de leur champ, les détecteurs veillent sous les clés
   inconnues. La liste des chemins pseudonymisés dit pour chacun le type et la raison, sans indice de tableau.
 
   Contexte:
@@ -10,7 +10,7 @@ Fonctionnalité: Pseudonymisation des documents
 
   Règle: Le nom du champ donne le type de sa valeur
 
-    Scénario: Un client fait de valeurs canari revient pseudonymisé à ses quatre chemins personnels
+    Scénario: Un client revient pseudonymisé à ses quatre chemins personnels, le reste en clair
       Étant donné le document suivant :
         """
         {
@@ -140,6 +140,7 @@ Fonctionnalité: Pseudonymisation des documents
         """
       Quand l'agent lit ce document
       Alors le champ "piece" vaut "<binary len=12>"
+      Et le chemin "piece" est signalé "person_name" pour la raison "default"
 
   Règle: Une date n'est décalée que si c'est une date de naissance
 

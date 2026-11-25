@@ -43,6 +43,22 @@ async fn secret_is_deleted(world: &mut AnonymizationWorld) {
     std::fs::remove_file(world.data_dir.path().join(SECRET)).expect("secret removed");
 }
 
+#[when(regex = r"^le secret du répertoire de données passe aux droits (\d+)$")]
+async fn secret_mode_widened(world: &mut AnonymizationWorld, mode: String) {
+    let mode = u32::from_str_radix(&mode, 8).expect("an octal mode");
+    std::fs::set_permissions(
+        world.data_dir.path().join(SECRET),
+        std::fs::Permissions::from_mode(mode),
+    )
+    .expect("secret mode changed");
+}
+
+#[when(regex = r"^le secret du répertoire de données est remplacé par (\d+) octets$")]
+async fn secret_is_corrupted(world: &mut AnonymizationWorld, length: usize) {
+    std::fs::write(world.data_dir.path().join(SECRET), vec![7u8; length])
+        .expect("secret overwritten");
+}
+
 #[when(regex = r"^le secret du second poste remplace celui du répertoire de données$")]
 async fn foreign_secret_replaces(world: &mut AnonymizationWorld) {
     let other = world.other_data_dir.as_ref().expect("a second workstation");

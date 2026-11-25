@@ -67,6 +67,17 @@ async fn agent_reads_typed_column(
     read_column(world, &column, true, &type_name, cell, clear);
 }
 
+#[when(regex = r#"^l'agent lit "([^"]*)" dans la colonne calculée "([^"]+)" de type "([^"]+)"$"#)]
+async fn agent_reads_typed_derived_column(
+    world: &mut AnonymizationWorld,
+    value: String,
+    column: String,
+    type_name: String,
+) {
+    let (cell, clear) = typed_cell(&type_name, &value);
+    read_column(world, &column, false, &type_name, cell, clear);
+}
+
 #[then(
     regex = r"^la valeur rendue est la même date décalée d'un nombre entier de semaines, de 1 à 52$"
 )]

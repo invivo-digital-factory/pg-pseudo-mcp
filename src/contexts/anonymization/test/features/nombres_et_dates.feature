@@ -1,14 +1,15 @@
 # language: fr
 @anonymization
 Fonctionnalité: Nombres et dates
-  Un nombre ou une date n'est personnel que si sa colonne le dit : un montant, un identifiant ou une date de création
-  restent en clair, un téléphone stocké en entier ou une date de naissance sont pseudonymisés. Une date de naissance
-  est décalée d'un nombre entier de semaines, pour garder un âge plausible sans révéler le jour réel.
+  Un nombre ou une date lu dans une colonne de la table n'est personnel que si le nom de la colonne le dit : un montant,
+  un identifiant ou une date de création restent en clair, un téléphone stocké en entier ou une date de naissance sont
+  pseudonymisés. Une colonne calculée, sans nom fiable, est jugée sur la forme de sa valeur. Une date de naissance est
+  décalée de 1 à 52 semaines, dans un sens ou dans l'autre : l'âge reste plausible et le jour de la semaine est conservé.
 
   Contexte:
     Étant donné un répertoire de données neuf
 
-  Règle: Un nombre n'est pseudonymisé que si le nom de sa colonne le désigne comme personnel
+  Règle: Un nombre lu dans la table n'est pseudonymisé que si le nom de sa colonne le désigne comme personnel
 
     Plan du Scénario: Le nombre <valeur> de la colonne "<colonne>" est pseudonymisé comme <type> et reste un nombre
       Quand l'agent lit "<valeur>" dans la colonne "<colonne>" de type "<type sql>"
@@ -37,6 +38,17 @@ Fonctionnalité: Nombres et dates
       Quand l'agent lit "33641278395.0000" dans la colonne "telephone_secours" de type "numeric"
       Alors la valeur est pseudonymisée
       Et la colonne est signalée "phone" pour la raison "dictionary"
+
+  Règle: Un nombre calculé est pseudonymisé quand il a la forme d'un identifiant
+
+    Plan du Scénario: Le nombre calculé <valeur> <verdict>
+      Quand l'agent lit "<valeur>" dans la colonne calculée "<colonne>" de type "int8"
+      Alors <vérification>
+
+      Exemples:
+        | colonne  | valeur      | verdict                                      | vérification                                         |
+        | coalesce | 33641278395 | a la forme d'un téléphone et est remplacé    | la colonne est signalée "phone" pour la raison "derived" |
+        | count    | 31          | n'a la forme d'aucun identifiant et reste en clair | la valeur reste en clair                       |
 
   Règle: Les types neutres restent en clair, même sous un nom de colonne personnel
 
@@ -78,6 +90,13 @@ Fonctionnalité: Nombres et dates
       Quand l'agent lit "1985-02-30" dans la colonne "date_naissance" de type "text"
       Alors la valeur rendue est une date ISO entre 1940 et 2005
 
-    Scénario: Une date de création n'est jamais décalée
+    Scénario: Une date de création lue dans la table n'est jamais décalée
       Quand l'agent lit "1985-03-12" dans la colonne "created_at" de type "date"
       Alors la valeur reste en clair
+
+  Règle: Une date calculée par la requête est traitée comme une date de naissance
+
+    Scénario: Une date calculée est décalée, avec la raison "derived"
+      Quand l'agent lit "1985-03-12" dans la colonne calculée "jour" de type "date"
+      Alors la valeur rendue est la même date décalée d'un nombre entier de semaines, de 1 à 52
+      Et la colonne est signalée "birth_date" pour la raison "derived"

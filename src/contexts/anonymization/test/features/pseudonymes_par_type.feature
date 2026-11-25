@@ -1,14 +1,15 @@
 # language: fr
 @anonymization
 Fonctionnalité: Un pseudonyme réaliste pour chaque type de valeur personnelle
-  Chaque type de valeur personnelle a son générateur : le pseudonyme a l'allure d'une vraie valeur du même type,
-  passe les mêmes contrôles (clé de Luhn, modulo 97, clé du NIR) et vit dans un espace réservé ou fictif,
-  pour qu'il ne désigne jamais une vraie personne et qu'une requête de l'agent reste plausible.
+  Chaque type de valeur personnelle a son générateur : le pseudonyme a l'allure d'une vraie valeur du même type et
+  passe les mêmes contrôles (clé de Luhn, modulo 97, clé du NIR), pour qu'une requête de l'agent reste plausible.
+  Les e-mails, téléphones, IBAN, cartes et adresses IP sont tirés dans des espaces réservés à la documentation ou fictifs ;
+  un SIREN, un SIRET ou un NIR pseudonyme est seulement un numéro valide tiré au hasard.
 
   Contexte:
     Étant donné un répertoire de données neuf
 
-  Règle: Les identifiants reçoivent un pseudonyme valide, tiré dans un espace qui n'appartient à personne
+  Règle: Les identifiants reçoivent un pseudonyme valide, tiré dans un espace réservé quand il en existe un
 
     Plan du Scénario: Une valeur de type <type> reçoit un pseudonyme qui <propriété>
       Quand l'agent obtient le pseudonyme de type "<type>" de "<valeur>"
@@ -40,8 +41,8 @@ Fonctionnalité: Un pseudonyme réaliste pour chaque type de valeur personnelle
         | person_name | Ylwenna Kervadec | est un prénom du catalogue suivi d'un nom de famille |
         | last_name   | Kervadec         | est un seul nom de famille                          |
         | first_name  | Ylwenna          | est un prénom du catalogue                          |
-        | address     | 12 rue des Lilas | commence par un numéro suivi du même type de voie   |
-        | postal_code | 29280            | a 5 chiffres                                        |
+        | address     | 212 rue des Lilas | commence par un numéro suivi du même type de voie  |
+        | postal_code | 20200            | a 5 chiffres                                        |
 
   Règle: La civilité et le genre restent dans le vocabulaire de l'original
 
@@ -63,7 +64,7 @@ Fonctionnalité: Un pseudonyme réaliste pour chaque type de valeur personnelle
 
   Règle: Quand l'espace des pseudonymes est épuisé, un jeton opaque remplace la valeur
 
-    Scénario: Avec un seul numéro fictif disponible, le deuxième téléphone reçoit un jeton opaque stable
+    Scénario: Quand aucun numéro fictif n'est libre, le téléphone reçoit un jeton opaque stable et non traduisible
       Étant donné que l'espace des téléphones fictifs est limité à 1 numéro
       Quand l'agent obtient le pseudonyme de type "phone" de "06 41 27 83 95"
       Et l'agent obtient le pseudonyme de type "phone" de "06 52 18 74 30"

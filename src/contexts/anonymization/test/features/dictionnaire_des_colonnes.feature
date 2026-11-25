@@ -3,7 +3,8 @@
 Fonctionnalité: Dictionnaire des noms de colonnes et de champs
   Le nom d'une colonne ou d'un champ suffit souvent à dire ce qu'il contient : un dictionnaire de noms personnels,
   en français et en anglais, associe un type à chaque nom reconnu. Une colonne reconnue voit sa valeur entière
-  remplacée, sans dépendre de la forme de la valeur ; une colonne technique n'est jamais prise pour une donnée personnelle.
+  remplacée, sans dépendre de la forme de la valeur. Un nom technique n'est pas un indice : ses valeurs passent alors
+  par les détecteurs, comme toute colonne au nom inconnu.
 
   Règle: Un nom de colonne personnel désigne le type de son contenu, quelle que soit son écriture
 
@@ -52,23 +53,26 @@ Fonctionnalité: Dictionnaire des noms de colonnes et de champs
         | nom_famille   | last_name  |
         | adresse_ip    | ip_address |
 
-  Règle: Un nom technique n'est pas une donnée personnelle, même s'il contient un mot personnel
+  Règle: Un nom de colonne technique n'est pas un indice de donnée personnelle, même s'il contient un mot personnel
 
-    Plan du Scénario: La colonne "<colonne>" n'est pas reconnue comme personnelle
+    Plan du Scénario: Le nom de colonne "<colonne>" ne désigne aucun type
       Quand le dictionnaire lit le nom de colonne "<colonne>"
       Alors le dictionnaire n'y reconnaît aucun type
 
-      Exemples:
+      Exemples: des noms sans mot personnel, même quand ils commencent comme un mot personnel
+        | colonne      |
+        | id           |
+        | customer_id  |
+        | status       |
+        | created_at   |
+        | amount       |
+        | titulaire    |
+        | nombre       |
+        | connaissance |
+        | capacity     |
+
+      Exemples: des expressions techniques qui contiennent un mot personnel
         | colonne         |
-        | id              |
-        | customer_id     |
-        | status          |
-        | created_at      |
-        | amount          |
-        | titulaire       |
-        | nombre          |
-        | connaissance    |
-        | capacity        |
         | adresse_mac     |
         | mac_address     |
         | nom_utilisateur |

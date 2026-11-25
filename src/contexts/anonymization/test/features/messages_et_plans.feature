@@ -3,12 +3,13 @@
 Fonctionnalité: Messages d'erreur et plans de requête
   Une erreur de la base ou un plan d'exécution peut citer une valeur réelle : un message d'erreur sur une donnée
   invalide, une clé en double, un filtre recopié dans le plan. Ces textes passent par les mêmes détecteurs que les
-  résultats, et toute valeur citée entre guillemets dans une erreur de donnée devient un jeton opaque, sauf un pseudonyme.
+  résultats. Dans une erreur de donnée (SQLSTATE des classes 22 et 23), toute valeur citée entre guillemets ou dans
+  une clé `(colonne)=(valeur)` devient un jeton opaque, sauf un pseudonyme ; MongoDB masque aussi les apostrophes.
 
   Contexte:
     Étant donné un répertoire de données neuf
 
-  Règle: Une erreur de donnée de PostgreSQL ne cite jamais la valeur fautive
+  Règle: Une erreur de donnée de PostgreSQL ne cite jamais la valeur fautive entre guillemets ni dans une clé
 
     Scénario: Une valeur invalide citée dans le message devient un jeton opaque
       Quand la base répond l'erreur "22P02" "invalid input syntax for type integer: \"Brizolier\""
@@ -58,7 +59,7 @@ Fonctionnalité: Messages d'erreur et plans de requête
         | Failed to parse number 'O' Zivrelle' in $convert            |
         | Failed to parse number 'Zivrelle in $convert with no value  |
 
-  Règle: Un plan d'exécution garde sa structure et perd ses valeurs réelles
+  Règle: Un plan d'exécution garde sa structure et chacun de ses textes passe par les détecteurs
 
     Scénario: Le filtre recopié dans un plan d'exécution est pseudonymisé
       Quand l'agent lit le plan suivant :

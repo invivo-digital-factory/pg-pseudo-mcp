@@ -1,15 +1,17 @@
 # language: fr
 @anonymization
 Fonctionnalité: Colonnes calculées et politique de colonnes
-  Une colonne calculée par la requête (concaténation, extraction, empreinte) n'a pas de nom fiable : quand elle lit
-  une colonne personnelle, sa valeur devient un jeton opaque, sauf si un détecteur sait la pseudonymiser. L'équipe peut
-  aussi déclarer une colonne en clair ou personnelle ; une colonne déclarée en clair garde toujours le filet des détecteurs
-  structurels (e-mail, téléphone, IBAN), et une colonne déclarée personnelle prend le type donné par la politique.
+  Une colonne calculée par la requête (concaténation, extraction, empreinte) n'a pas de nom fiable. Quand elle lit une
+  colonne personnelle, sa valeur devient un jeton opaque dès qu'il y reste un mot de trois lettres ou plus hors des
+  fragments détectés. L'analyse de la requête peut aussi prouver qu'une colonne calculée ne lit que des données en clair.
+  L'équipe peut enfin déclarer une colonne en clair ou personnelle : une colonne déclarée en clair garde le filet des
+  détecteurs de numéros (e-mail, téléphone, IBAN, SIREN, SIRET, NIR, carte, adresse IP), une colonne déclarée
+  personnelle prend le type donné par la politique.
 
   Contexte:
     Étant donné un répertoire de données neuf
 
-  Règle: Une colonne calculée à partir d'une colonne personnelle devient opaque si aucun détecteur ne la reconnaît
+  Règle: Une colonne calculée à partir d'une colonne personnelle devient opaque dès qu'il y reste un mot hors des fragments détectés
 
     Plan du Scénario: La colonne calculée "<colonne>" qui vaut "<valeur>" <résultat>
       Étant donné que la colonne calculée lit une colonne personnelle
@@ -19,16 +21,16 @@ Fonctionnalité: Colonnes calculées et politique de colonnes
       Exemples:
         | colonne    | valeur                              | résultat                              | vérification                                                   |
         | split_part | ylwenna.kervadec                    | devient un jeton opaque               | la valeur rendue est un jeton opaque "derived"                 |
-        | line       | ylwenna.kervadec au 06 41 27 83 95  | devient un jeton opaque en entier     | la valeur rendue est un jeton opaque "derived"                 |
+        | line       | ylwenna.kervadec au 06 41 27 83 95  | devient opaque malgré le téléphone détecté | la valeur rendue est un jeton opaque "derived"                 |
         | lower      | ylwenna.kervadec@canary-mail.fr     | reçoit un pseudonyme d'adresse e-mail | le pseudonyme est une adresse sur example.com, example.net ou example.org |
-        | initials   | YK                                  | reste en clair, trop courte           | la valeur reste en clair                                       |
+        | initials   | YK                                  | reste en clair, sans mot de trois lettres | la valeur reste en clair                                       |
 
     Scénario: La colonne opaque est signalée avec la raison "derived"
       Étant donné que la colonne calculée lit une colonne personnelle
       Quand l'agent lit la valeur "ylwenna.kervadec" dans la colonne calculée "split_part"
       Alors la colonne est signalée "derived_personal" pour la raison "derived"
 
-    Scénario: Une colonne calculée qui ne lit que des colonnes en clair garde ses valeurs
+    Scénario: Une colonne calculée qui ne lit que des colonnes en clair n'est pas rendue opaque
       Étant donné que la colonne calculée ne lit que des colonnes en clair
       Quand l'agent lit la valeur "PAID en_cours" dans la colonne calculée "label"
       Alors la valeur reste en clair
@@ -45,7 +47,7 @@ Fonctionnalité: Colonnes calculées et politique de colonnes
       Quand l'agent lit la valeur "5d41402abc4b2a76b9719d911017c592" dans la colonne "checksum"
       Alors la valeur reste en clair
 
-  Règle: Une colonne calculée prouvée en clair garde ses valeurs, sauf si son nom est personnel
+  Règle: Une colonne calculée prouvée en clair par l'analyse de la requête garde ses valeurs, sauf si son nom est personnel
 
     Scénario: Une concaténation prouvée en clair garde un nom de produit
       Étant donné que la colonne calculée est prouvée en clair
@@ -58,7 +60,7 @@ Fonctionnalité: Colonnes calculées et politique de colonnes
       Quand l'agent lit la valeur "Kervadec" dans la colonne calculée "nom"
       Alors la valeur est pseudonymisée
 
-  Règle: Une colonne déclarée en clair garde ses noms mais jamais une adresse e-mail, un téléphone ou un IBAN
+  Règle: Une colonne déclarée en clair garde ses noms mais jamais un e-mail ni un numéro détectable
 
     Scénario: Sans politique, un nom de produit est pris pour un nom de personne
       Quand l'agent lit la valeur "Garance Bleue" dans la colonne "libelle"

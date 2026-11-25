@@ -8,7 +8,7 @@ Fonctionnalité: Casse et forme des pseudonymes
   Contexte:
     Étant donné un répertoire de données neuf
 
-  Règle: Un nom garde la casse de chaque mot de l'original
+  Règle: Un nom garde la casse de l'original, mot par mot ; un nom de personne devient toujours un prénom et un nom
 
     Plan du Scénario: "<valeur>" de type <type> devient <forme>
       Quand l'agent obtient le pseudonyme de type "<type>" de "<valeur>"
@@ -83,7 +83,7 @@ Fonctionnalité: Casse et forme des pseudonymes
         | siren      | 418273652 Kervadec                         | xxxxxxxxx                         |
         | birth_date | 1985-11-02 Ylwenna                         | xxxx-xx-xx                        |
 
-  Règle: Seul un suffixe technique valide est gardé
+  Règle: Seul un suffixe technique valide est gardé : l'heure et le fuseau d'une date, la longueur de préfixe d'une adresse IP
 
     Plan du Scénario: Le <type> "<valeur>" garde le suffixe "<suffixe>"
       Quand l'agent obtient le pseudonyme de type "<type>" de "<valeur>"
@@ -96,7 +96,7 @@ Fonctionnalité: Casse et forme des pseudonymes
         | birth_date | 1985-03-12 00:00:00  | 00:00:00   |
         | ip_address | 192.168.10.4/24      | /24        |
 
-    Scénario: Une longueur de préfixe qui n'est pas un nombre est retirée d'une adresse IP
+    Scénario: Un texte collé derrière une adresse IP n'est pas pris pour une longueur de préfixe
       Quand l'agent obtient le pseudonyme de type "ip_address" de "192.168.10.4/Ylwenna"
       Alors le pseudonyme ne contient aucun mot de l'original
       Et le pseudonyme est une adresse des plages IPv4 de documentation

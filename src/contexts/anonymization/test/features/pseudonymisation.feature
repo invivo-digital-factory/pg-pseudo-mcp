@@ -1,9 +1,11 @@
 # language: fr
 @anonymization
 Fonctionnalité: Cohérence des pseudonymes et traduction en retour
-  Une valeur personnelle reçoit toujours le même pseudonyme sur un poste, et deux valeurs différentes jamais le même.
-  Seul ce poste sait traduire un pseudonyme en retour vers la valeur réelle, et seulement pour les types assez
-  variés pour qu'un pseudonyme désigne une seule valeur : c'est ce qui permet à l'agent de filtrer sur un pseudonyme.
+  L'agent est le client (un assistant de code) qui interroge la base à travers le serveur ; le poste est la machine du
+  développeur, qui garde un secret. Sur un poste, une valeur personnelle, écrite à l'identique et du même type, reçoit
+  toujours le même pseudonyme jusqu'à la purge. Pour une liste fixe de types, le poste sait traduire un pseudonyme en
+  retour vers la valeur réelle : c'est ce qui permet à l'agent de filtrer sur un pseudonyme qu'il a lu.
+  Les valeurs « canari » des exemples sont inventées pour ne désigner personne.
 
   Contexte:
     Étant donné un répertoire de données neuf
@@ -29,7 +31,19 @@ Fonctionnalité: Cohérence des pseudonymes et traduction en retour
         | city        | Plouzané                          |
         | birth_date  | 1985-03-12                        |
 
-  Règle: Deux valeurs différentes ne partagent jamais un pseudonyme
+  Règle: Une valeur est reconnue à son écriture exacte et à son type
+
+    Plan du Scénario: "<première>" et "<seconde>" de type <type> reçoivent deux pseudonymes différents
+      Quand l'agent obtient le pseudonyme de type "<type>" de "<première>"
+      Et l'agent obtient le pseudonyme de type "<type>" de "<seconde>"
+      Alors le pseudonyme 2 diffère du pseudonyme 1
+
+      Exemples:
+        | type      | première       | seconde    |
+        | last_name | Kervadec       | KERVADEC   |
+        | phone     | 06 41 27 83 95 | 0641278395 |
+
+  Règle: Deux valeurs différentes d'un type traduisible ne partagent jamais un pseudonyme
 
     Scénario: Cent adresses e-mail différentes reçoivent cent pseudonymes différents
       Quand l'agent obtient le pseudonyme de 100 adresses e-mail canari différentes
@@ -48,7 +62,7 @@ Fonctionnalité: Cohérence des pseudonymes et traduction en retour
         | person_name | Ylwenna Kervadec                |
         | iban        | FR76 3000 4000 0312 3456 7890 143 |
 
-  Règle: Seuls les types assez variés se traduisent en retour, et seulement sur le poste qui les a émis
+  Règle: Seule une liste fixe de types se traduit en retour, et seulement sur le poste qui a émis le pseudonyme
 
     Scénario: Un pseudonyme se traduit en retour vers la valeur réelle, en local
       Quand l'agent obtient le pseudonyme de l'adresse "ylwenna.kervadec@canary-mail.fr"
@@ -60,7 +74,7 @@ Fonctionnalité: Cohérence des pseudonymes et traduction en retour
       Et l'agent traduit ce pseudonyme
       Alors le pseudonyme se traduit en retour : <traduit>
 
-      Exemples: les types à grand espace de valeurs, que l'agent peut réutiliser dans un filtre
+      Exemples: les types traduits en retour, que l'agent peut réutiliser dans un filtre
         | type        | valeur                            | traduit |
         | email       | ylwenna.kervadec@canary-mail.fr   | oui     |
         | phone       | 06 41 27 83 95                    | oui     |
@@ -73,7 +87,7 @@ Fonctionnalité: Cohérence des pseudonymes et traduction en retour
         | person_name | Ylwenna Kervadec                  | oui     |
         | last_name   | Hazvekmor                         | oui     |
 
-      Exemples: les types à petit espace de valeurs, où un pseudonyme désignerait plusieurs personnes
+      Exemples: les types jamais traduits en retour, que l'agent ne doit pas utiliser comme filtre
         | type        | valeur           | traduit |
         | first_name  | Ylwenna          | non     |
         | address     | 12 rue des Lilas | non     |
@@ -98,7 +112,7 @@ Fonctionnalité: Cohérence des pseudonymes et traduction en retour
       Et l'agent traduit ce pseudonyme
       Alors la traduction ne rend aucune valeur réelle
 
-  Règle: Un pseudonyme se reconnaît à sa forme, même quand ce poste ne l'a pas émis
+  Règle: Un pseudonyme se reconnaît à sa forme, même quand ce poste ne l'a pas émis, pour avertir l'agent qui le réutilise
 
     Plan du Scénario: "<texte>" <verdict>
       Quand l'agent traduit "<texte>"

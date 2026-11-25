@@ -3,7 +3,8 @@
 Fonctionnalité: Dictionnaire des prénoms et des noms de famille
   Dans un texte libre, un prénom ou un nom de famille connu du dictionnaire français est reconnu sans civilité,
   sans tenir compte de la casse ni des accents. Les mots courants qui sont aussi des noms ne sont pris pour des noms
-  que lorsqu'ils portent une majuscule, et un nom inconnu du dictionnaire se trahit encore par la civilité qui le précède.
+  que lorsqu'ils commencent par une majuscule (une liste fixe : petit, grand, rose, marie…), et un nom inconnu du
+  dictionnaire se trahit encore par la civilité qui le précède.
 
   Contexte:
     Étant donné un répertoire de données neuf
@@ -24,7 +25,7 @@ Fonctionnalité: Dictionnaire des prénoms et des noms de famille
         | colis remis à Zoé ce matin     | Zoé     | first_name |
         | colis remis à zoe ce matin     | zoe     | first_name |
 
-  Règle: Un mot courant qui est aussi un nom n'est pris pour un nom qu'avec une majuscule
+  Règle: Un mot courant de la liste des mots ambigus n'est pris pour un nom qu'avec une majuscule initiale
 
     Plan du Scénario: "<mot>" en minuscules reste un mot, "<Mot>" avec une majuscule est un nom
       Quand l'agent lit la valeur "un <mot> colis pour la maison" dans la colonne "commentaire"
@@ -45,7 +46,7 @@ Fonctionnalité: Dictionnaire des prénoms et des noms de famille
       Alors la valeur rendue ne contient plus "Jean-Luc"
       Et la valeur rendue contient "colis remis à"
 
-  Règle: Un prénom suivi de mots en majuscule forme un nom complet, jusqu'à trois mots
+  Règle: Un prénom suivi de mots à majuscule initiale forme un nom complet, jusqu'à trois mots
 
     Scénario: Un prénom connu entraîne les deux mots capitalisés qui le suivent
       Quand l'agent lit la valeur "colis remis à Marie Ylwenna Kervadec ce matin" dans la colonne "commentaire"

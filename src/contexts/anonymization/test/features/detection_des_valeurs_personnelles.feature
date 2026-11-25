@@ -1,9 +1,12 @@
 # language: fr
 @anonymization
 Fonctionnalité: Détection des valeurs personnelles dans une colonne inconnue
-  Quand le nom d'une colonne ne dit rien de son contenu, chaque valeur est lue par des détecteurs : formes d'adresse
-  e-mail, de téléphone, d'IBAN, de SIREN, de SIRET, de NIR, de carte, d'adresse IP et d'adresse postale, noms précédés
-  d'une civilité ou connus du dictionnaire des noms. Seul le fragment détecté est remplacé, le reste du texte reste lisible.
+  Quand le nom d'une colonne ne dit rien de son contenu, chaque valeur est lue par des détecteurs : adresse e-mail,
+  téléphone français, IBAN, SIREN, SIRET, NIR, carte, adresse IP, adresse postale française (numéro et type de voie),
+  nom précédé d'une civilité ou connu du dictionnaire des noms. Dans un texte, seul le fragment détecté est remplacé ;
+  une valeur courte qui a la forme d'un nom est remplacée en entier. La réponse signale chaque colonne pseudonymisée avec
+  son type et sa raison : detected (un détecteur), dictionary (le nom de la colonne), default (la forme d'un nom),
+  derived (une colonne calculée), policy (la politique de colonnes).
 
   Contexte:
     Étant donné un répertoire de données neuf
@@ -33,7 +36,7 @@ Fonctionnalité: Détection des valeurs personnelles dans une colonne inconnue
         | last_name   | appel de M. Brizolier pour le colis                     | Brizolier                         | appel de M.     |
         | person_name | voir avec Mme Ylwenna Kervadec pour le colis            | Ylwenna Kervadec                  | voir avec Mme   |
 
-  Règle: Un numéro à clé de contrôle n'est détecté qu'avec une clé valide
+  Règle: Un numéro n'est détecté que s'il est valide : clé de contrôle juste, octets d'adresse IP possibles
 
     Plan du Scénario: "<texte>" reste en clair car <raison>
       Quand l'agent lit la valeur "<texte>" dans la colonne "commentaire"
@@ -57,7 +60,7 @@ Fonctionnalité: Détection des valeurs personnelles dans une colonne inconnue
 
   Règle: Une valeur courte qui a la forme d'un nom est pseudonymisée par défaut
 
-    Plan du Scénario: "<valeur>" dans une colonne inconnue est pris pour un <type>, raison <raison>
+    Plan du Scénario: "<valeur>" dans une colonne inconnue est remplacé en entier comme <type>
       Quand l'agent lit la valeur "<valeur>" dans la colonne "titulaire"
       Alors la valeur est pseudonymisée
       Et la colonne est signalée "<type>" pour la raison "<raison>"
@@ -88,7 +91,7 @@ Fonctionnalité: Détection des valeurs personnelles dans une colonne inconnue
         | 2026-11-19                |
         | Un Deux Trois Quatre Cinq |
 
-  Règle: Un libellé d'énumération connu de la base n'est jamais pris pour un nom
+  Règle: Une valeur égale à un libellé d'énumération de la base n'est pas prise pour un nom
 
     Scénario: "Sepa" est pris pour un nom sans libellé d'énumération
       Quand l'agent lit la valeur "Sepa" dans la colonne "moyen"
