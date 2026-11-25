@@ -6,4 +6,8 @@ mod magasin_de_pseudonymes_et_purge;
 mod messages_et_plans;
 mod nombres_et_dates;
 mod pseudonymes_par_type;
+mod pseudonymisation;
+mod pseudonymisation_des_documents;
 mod repertoire_de_donnees;
+mod shared;
+pub mod support;

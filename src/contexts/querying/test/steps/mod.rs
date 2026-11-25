@@ -1,0 +1,13 @@
+mod choix_de_la_base;
+mod decouverte_du_schema;
+mod erreurs_des_outils;
+mod informations_du_serveur;
+mod lecture_seule;
+mod limites_des_reponses;
+mod plan_d_execution;
+mod politique_de_champs_mongodb;
+mod politique_de_colonnes;
+mod shared;
+mod suivi_par_pseudonyme;
+pub mod support;
+mod valeurs_calculees;

@@ -1,15 +1,13 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv6Addr;
 
 use cucumber::{given, then};
 use fake::locales::{Data, FR_FR};
 
 use crate::anonymization_world::{AnonymizationWorld, digits, layout, listed};
 
-const RESERVED_DOMAINS: [&str; 3] = ["example.com", "example.net", "example.org"];
 const FICTIONAL_PHONE_BLOCKS: [&str; 7] = [
     "019900", "026191", "035373", "046571", "053649", "063998", "073998",
 ];
-const DOCUMENTATION_IPV4_PREFIXES: [&str; 3] = ["192.0.2.", "198.51.100.", "203.0.113."];
 
 fn luhn_valid(number: &str) -> bool {
     let sum: u32 = number
@@ -72,24 +70,6 @@ async fn phone_pool_is_limited(world: &mut AnonymizationWorld, limit: usize) {
     world.generator.phone_pool_limit = Some(limit);
 }
 
-#[then(regex = r"^le pseudonyme diffère de la valeur$")]
-async fn pseudonym_differs(world: &mut AnonymizationWorld) {
-    assert_ne!(world.last_pseudonym(), world.input());
-}
-
-#[then(regex = r"^le pseudonyme est une adresse sur example\.com, example\.net ou example\.org$")]
-async fn pseudonym_is_reserved_email(world: &mut AnonymizationWorld) {
-    let pseudonym = world.last_pseudonym();
-    let (local, domain) = pseudonym.split_once('@').expect("an email");
-    assert!(RESERVED_DOMAINS.contains(&domain), "{pseudonym}");
-    assert!(
-        local
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-'),
-        "{pseudonym}"
-    );
-}
-
 #[then(regex = r"^le pseudonyme est un numéro des blocs fictifs, présenté comme l'original$")]
 async fn pseudonym_is_fictional_phone_like_input(world: &mut AnonymizationWorld) {
     let pseudonym = world.last_pseudonym();
@@ -141,18 +121,6 @@ async fn pseudonym_is_card(world: &mut AnonymizationWorld) {
     let card = digits(pseudonym);
     assert!(card.starts_with("400000"), "{pseudonym}");
     assert!(luhn_valid(&card), "{pseudonym}");
-}
-
-#[then(regex = r"^le pseudonyme est une adresse des plages IPv4 de documentation$")]
-async fn pseudonym_is_documentation_ipv4(world: &mut AnonymizationWorld) {
-    let pseudonym = world.last_pseudonym();
-    assert!(pseudonym.parse::<Ipv4Addr>().is_ok(), "{pseudonym}");
-    assert!(
-        DOCUMENTATION_IPV4_PREFIXES
-            .iter()
-            .any(|prefix| pseudonym.starts_with(prefix)),
-        "{pseudonym}"
-    );
 }
 
 #[then(regex = r"^le pseudonyme est une adresse du préfixe IPv6 de documentation 2001:db8$")]
@@ -230,22 +198,6 @@ async fn nth_pseudonym_is_token(world: &mut AnonymizationWorld, position: usize,
 #[then(regex = r"^le pseudonyme (\d+) est identique au pseudonyme (\d+)$")]
 async fn nth_pseudonyms_are_identical(world: &mut AnonymizationWorld, left: usize, right: usize) {
     assert_eq!(world.nth_pseudonym(left), world.nth_pseudonym(right));
-}
-
-#[then(regex = r"^le pseudonyme (\d+) diffère du pseudonyme (\d+)$")]
-async fn nth_pseudonyms_differ(world: &mut AnonymizationWorld, left: usize, right: usize) {
-    assert_ne!(world.nth_pseudonym(left), world.nth_pseudonym(right));
-}
-
-#[then(regex = r"^le pseudonyme (\d+) se traduit en retour$")]
-async fn nth_pseudonym_translates(world: &mut AnonymizationWorld, position: usize) {
-    let pseudonym = world.nth_pseudonym(position).to_string();
-    let translation = world.use_cases().translate_pseudonym.execute(&pseudonym);
-    assert_eq!(
-        translation.real.map(|(_, real)| real).as_deref(),
-        Some(world.input()),
-        "{pseudonym}"
-    );
 }
 
 #[then(regex = r"^le pseudonyme (\d+) ne se traduit pas en retour$")]

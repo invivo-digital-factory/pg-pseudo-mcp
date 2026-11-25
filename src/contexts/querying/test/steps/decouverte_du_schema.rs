@@ -1,14 +1,13 @@
 use cucumber::{then, when};
 use scarif_database_mcp::composition::tools;
-use scarif_database_mcp::contexts::querying::presentation::{ListTablesArgs, SearchSchemaArgs};
+use scarif_database_mcp::contexts::querying::presentation::{
+    DescribeTableArgs, ListTablesArgs, SearchSchemaArgs,
+};
 use serde_json::{Value, json};
 
 use crate::bdd_support::CONNECTION;
-use crate::querying_world::QueryingWorld;
-
-fn checked(world: &QueryingWorld) -> Value {
-    world.answer().checked_body()
-}
+use crate::querying_steps::support::{checked, list_tables};
+use crate::querying_world::{MONGO_CONNECTION, QueryingWorld};
 
 fn quoted(text: &str) -> Vec<String> {
     text.split('"')
@@ -25,19 +24,6 @@ fn table_names(world: &QueryingWorld) -> Vec<String> {
         .iter()
         .map(|table| table["name"].as_str().unwrap_or_default().to_string())
         .collect()
-}
-
-async fn list_tables(world: &mut QueryingWorld, args: ListTablesArgs) {
-    let result = tools::list_tables(
-        world.contexts(),
-        ListTablesArgs {
-            connection: CONNECTION.into(),
-            schema: Some("public".into()),
-            ..args
-        },
-    )
-    .await;
-    world.record(&result);
 }
 
 #[when(regex = r"^l'agent liste les tables$")]
@@ -230,4 +216,130 @@ async fn search_finds_table(world: &mut QueryingWorld, schema: String, table: St
 #[then(regex = r"^la recherche ne trouve rien$")]
 async fn search_finds_nothing(world: &mut QueryingWorld) {
     assert!(matches(world).is_empty(), "{}", world.answer().text);
+}
+
+#[when(regex = r"^l'agent liste les collections$")]
+async fn list_collections(world: &mut QueryingWorld) {
+    let result = tools::list_tables(
+        world.contexts(),
+        ListTablesArgs {
+            connection: MONGO_CONNECTION.into(),
+            ..ListTablesArgs::default()
+        },
+    )
+    .await;
+    world.record(&result);
+}
+
+#[when(regex = r#"^l'agent décrit la collection "([^"]+)"$"#)]
+async fn describe_collection(world: &mut QueryingWorld, collection: String) {
+    let result = tools::describe_table(
+        world.contexts(),
+        DescribeTableArgs {
+            connection: MONGO_CONNECTION.into(),
+            table: collection,
+            database: None,
+        },
+    )
+    .await;
+    world.record(&result);
+}
+
+#[when(regex = r#"^l'agent cherche "([^"]+)" dans les collections$"#)]
+async fn search_collections(world: &mut QueryingWorld, pattern: String) {
+    let result = tools::search_schema(
+        world.contexts(),
+        SearchSchemaArgs {
+            connection: MONGO_CONNECTION.into(),
+            pattern,
+            database: None,
+        },
+    )
+    .await;
+    world.record(&result);
+}
+
+fn collections(world: &QueryingWorld) -> Vec<(String, String)> {
+    checked(world)["collections"]
+        .as_array()
+        .expect("collections")
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap_or_default().to_string(),
+                entry["kind"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[then(regex = r#"^la liste contient la collection "([^"]+)" de type "([^"]+)"$"#)]
+async fn list_contains_collection(world: &mut QueryingWorld, name: String, kind: String) {
+    let listed = collections(world);
+    assert!(listed.contains(&(name, kind)), "{listed:?}");
+}
+
+#[then(regex = r"^la liste ne contient aucune collection système$")]
+async fn list_has_no_system_collection(world: &mut QueryingWorld) {
+    let listed = collections(world);
+    assert!(!listed.is_empty());
+    assert!(
+        listed.iter().all(|(name, _)| !name.starts_with("system.")),
+        "{listed:?}"
+    );
+}
+
+fn described_field(world: &QueryingWorld, path: &str) -> Value {
+    let body = checked(world);
+    body["fields"]
+        .as_array()
+        .expect("fields")
+        .iter()
+        .find(|field| field["path"] == path)
+        .cloned()
+        .unwrap_or_else(|| panic!("no field {path} in {body}"))
+}
+
+#[then(regex = r#"^le champ décrit "([^"]+)" est de type "([^"]+)"$"#)]
+async fn described_field_type(world: &mut QueryingWorld, path: String, kind: String) {
+    assert_eq!(described_field(world, &path)["types"], json!([kind]));
+}
+
+#[then(regex = r#"^le champ décrit "([^"]+)" sera pseudonymisé comme "([^"]+)"$"#)]
+async fn described_field_pseudonymized(world: &mut QueryingWorld, path: String, kind: String) {
+    assert_eq!(
+        described_field(world, &path)["pseudonymized"],
+        kind.as_str()
+    );
+}
+
+#[then(
+    regex = r#"^le champ décrit "([^"]+)" est de type "([^"]+)" et sera pseudonymisé comme "([^"]+)"$"#
+)]
+async fn described_field_type_and_kind(
+    world: &mut QueryingWorld,
+    path: String,
+    kind: String,
+    pseudonym: String,
+) {
+    let field = described_field(world, &path);
+    assert_eq!(field["types"], json!([kind]), "{field}");
+    assert_eq!(field["pseudonymized"], pseudonym.as_str(), "{field}");
+}
+
+#[then(regex = r#"^la description donne un index sur "([^"]+)"$"#)]
+async fn described_index(world: &mut QueryingWorld, path: String) {
+    let body = checked(world);
+    assert!(body["indexes"].to_string().contains(&path), "{body}");
+}
+
+#[then(regex = r#"^la recherche trouve le champ "([^"]+)"$"#)]
+async fn search_finds_field(world: &mut QueryingWorld, path: String) {
+    let body = checked(world);
+    let found = body["matches"]
+        .as_array()
+        .expect("matches")
+        .iter()
+        .any(|item| item["column"] == path.as_str());
+    assert!(found, "{body}");
 }

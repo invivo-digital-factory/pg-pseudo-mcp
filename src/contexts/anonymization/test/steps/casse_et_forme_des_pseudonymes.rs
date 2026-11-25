@@ -1,6 +1,6 @@
 use cucumber::then;
 
-use crate::anonymization_world::{AnonymizationWorld, layout, listed};
+use crate::anonymization_world::{AnonymizationWorld, listed};
 
 fn words(text: &str) -> Vec<&str> {
     text.split_whitespace().collect()
@@ -93,12 +93,6 @@ async fn upper_case(world: &mut AnonymizationWorld) {
 async fn title_case(world: &mut AnonymizationWorld) {
     let pseudonym = world.last_pseudonym();
     assert!(is_title(pseudonym), "{pseudonym}");
-}
-
-#[then(regex = r#"^le pseudonyme a la présentation "([^"]+)"$"#)]
-async fn pseudonym_has_layout(world: &mut AnonymizationWorld, expected: String) {
-    let pseudonym = world.last_pseudonym();
-    assert_eq!(layout(pseudonym), expected, "{pseudonym}");
 }
 
 #[then(regex = r#"^le pseudonyme commence par l'un de "([^"]+)"$"#)]

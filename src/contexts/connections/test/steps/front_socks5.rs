@@ -13,14 +13,23 @@ use tokio::net::TcpStream;
 use crate::connections_world::ConnectionsWorld;
 
 const VERSION: u8 = 0x05;
+
 const NO_AUTH: u8 = 0x00;
+
 const PASSWORD_AUTH: u8 = 0x02;
+
 const NO_ACCEPTABLE_METHOD: u8 = 0xff;
+
 const DOMAIN: u8 = 0x03;
+
 const IPV4: u8 = 0x01;
+
 const IPV6: u8 = 0x04;
+
 const MEMBER_PORT: u16 = 27017;
+
 const WAIT: Duration = Duration::from_secs(5);
+
 const CHANNELS_PER_TARGET: usize = 2;
 
 #[derive(Default)]

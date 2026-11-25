@@ -7,6 +7,7 @@ use scarif_database_mcp::contexts::anonymization::infrastructure::data_sources::
 use crate::anonymization_world::{AnonymizationWorld, kind_named, listed};
 
 const SECRET: &str = "secret";
+
 const STORE_FILES: [&str; 4] = [
     "mapping.sqlite",
     "mapping.sqlite-wal",
@@ -125,4 +126,15 @@ async fn data_directory_is_purged(world: &mut AnonymizationWorld) {
     for name in STORE_FILES {
         assert!(!world.data_dir.path().join(name).exists(), "{name}");
     }
+}
+
+#[then(regex = r"^le pseudonyme (\d+) se traduit en retour$")]
+async fn nth_pseudonym_translates(world: &mut AnonymizationWorld, position: usize) {
+    let pseudonym = world.nth_pseudonym(position).to_string();
+    let translation = world.use_cases().translate_pseudonym.execute(&pseudonym);
+    assert_eq!(
+        translation.real.map(|(_, real)| real).as_deref(),
+        Some(world.input()),
+        "{pseudonym}"
+    );
 }

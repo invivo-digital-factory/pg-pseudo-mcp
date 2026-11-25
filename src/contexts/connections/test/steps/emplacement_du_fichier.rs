@@ -1,12 +1,14 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::connection_file::{
     locate, locate_for_write,
 };
 use serde_json::json;
 
+use crate::connections_steps::support::{docstring, hint, list, write_connection_file};
 use crate::connections_world::ConnectionsWorld;
 
 fn optional(value: &str) -> Option<String> {
@@ -100,4 +102,38 @@ async fn written_directory_is(world: &mut ConnectionsWorld, directory: String) {
             .join(directory)
             .join("connections.toml")
     );
+}
+
+#[given(regex = r"^l'agent a déjà listé les connexions$")]
+async fn agent_listed_connections(world: &mut ConnectionsWorld) {
+    list(world).await;
+}
+
+#[then(regex = r"^l'indice cite le chemin du fichier de connexions$")]
+async fn hint_names_file(world: &mut ConnectionsWorld) {
+    let hint = hint(world);
+    let path = world.connections_file().display().to_string();
+    assert!(
+        hint.contains(&format!(
+            "SCARIF_CONNECTIONS_FILE points at {path}, which does not exist"
+        )),
+        "{hint}"
+    );
+}
+
+#[when(regex = r"^le fichier de connexions devient :$")]
+async fn connection_file_becomes(world: &mut ConnectionsWorld, step: &Step) {
+    write_connection_file(world, docstring(step));
+}
+
+#[given(regex = r"^aucun fichier de connexions$")]
+async fn no_connection_file(world: &mut ConnectionsWorld) {
+    std::fs::remove_file(world.connections_file()).expect("remove connection file");
+}
+
+#[given(regex = r"^un fichier de connexions illisible$")]
+async fn unreadable_connection_file(world: &mut ConnectionsWorld) {
+    let file = world.connections_file();
+    std::fs::remove_file(&file).expect("remove connection file");
+    std::fs::create_dir(&file).expect("a directory where the file should be");
 }

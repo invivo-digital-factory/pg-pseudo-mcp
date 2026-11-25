@@ -1,90 +1,9 @@
 use cucumber::{given, then, when};
-use scarif_database_mcp::contexts::anonymization::use_cases::dictionary_kind::DictionaryKind;
-use scarif_database_mcp::contexts::querying::domain::repositories::PseudonymTranslator;
-use scarif_database_mcp::contexts::querying::domain::services::statement_guard::inspect;
-use scarif_database_mcp::contexts::querying::domain::types::{
-    Guarded, PersonalNames, Translations,
-};
-use serde_json::json;
+use scarif_database_mcp::contexts::querying::domain::types::FindRequest;
+use serde_json::{Value, json};
 
-use crate::querying_world::{CANARY_VALUES, PseudonymBook, QueryingWorld, refusal_text};
-
-fn guard_sql(sql: &str, store: &PseudonymBook) -> Result<Guarded, String> {
-    let inspected =
-        inspect(sql).map_err(|error| refusal_text(error.code, error.message, error.hint))?;
-    let mut translations = Translations::default();
-    for literal in inspected.literals() {
-        translations.record(literal, store.lookup(literal));
-    }
-    let rewritten = inspected
-        .rewrite(&translations)
-        .map_err(|error| refusal_text(error.code, error.message, error.hint))?;
-    let mut personal = PersonalNames::default();
-    for name in rewritten.lineage_names() {
-        if DictionaryKind.execute(&name).is_some() {
-            personal.insert(&name);
-        }
-    }
-    Ok(rewritten.finish(&personal))
-}
-
-#[given(regex = r"^l'agent connecté à la base de test$")]
-async fn agent_connected(world: &mut QueryingWorld) {
-    world.connect_to_test_database();
-}
-
-#[given(regex = r"^une connexion PostgreSQL vers une base injoignable$")]
-async fn unreachable_database(world: &mut QueryingWorld) {
-    world.connect_to_unreachable_database();
-}
-
-#[when(regex = r#"^l'agent exécute la requête "(.+)"$"#)]
-async fn agent_runs_query(world: &mut QueryingWorld, sql: String) {
-    world.ask(&sql).await;
-}
-
-#[when(regex = r#"^la garde SQL examine la requête "(.+)"$"#)]
-async fn sql_guard_examines(world: &mut QueryingWorld, sql: String) {
-    let store = PseudonymBook::new(&world.pseudonyms);
-    world.record_sql_guard(guard_sql(&sql, &store));
-}
-
-#[then(regex = r"^la requête réussit$")]
-async fn query_succeeds(world: &mut QueryingWorld) {
-    let answer = world.answer();
-    assert!(!answer.refused, "{}", answer.text);
-}
-
-#[then(regex = r"^la réponse compte (\d+) lignes$")]
-async fn answer_has_rows(world: &mut QueryingWorld, expected: usize) {
-    assert_eq!(
-        world.answer().rows().len(),
-        expected,
-        "{}",
-        world.answer().text
-    );
-}
-
-#[then(regex = r"^la requête est refusée parce qu'elle n'est pas en lecture seule$")]
-async fn query_is_refused_as_read_only(world: &mut QueryingWorld) {
-    let answer = world.answer();
-    assert!(answer.refused, "{}", answer.text);
-    assert_eq!(
-        answer.body()["error"]["category"],
-        "refused_read_only",
-        "{}",
-        answer.text
-    );
-}
-
-#[then(regex = r#"^la requête est refusée par la règle "([^"]+)"$"#)]
-async fn query_is_refused_by_rule(world: &mut QueryingWorld, rule: String) {
-    let answer = world.answer();
-    assert!(answer.refused, "{}", answer.text);
-    let error = &answer.body()["error"];
-    assert_eq!(error["category"], "refused_read_only", "{}", answer.text);
-    assert_eq!(error["code"], rule.as_str(), "{}", answer.text);
-}
+use crate::querying_steps::support::{aggregate_request, find_request, run_aggregate, run_find};
+use crate::querying_world::{CANARY_VALUES, MongoUser, QueryingWorld};
 
 #[then(regex = r#"^le refus renvoie vers "([^"]+)"$"#)]
 async fn refusal_points_to(world: &mut QueryingWorld, tool: String) {
@@ -111,7 +30,87 @@ async fn refusal_has_no_canary(world: &mut QueryingWorld) {
     assert!(!text.contains("canary-mail"), "{text}");
 }
 
-#[then(regex = r"^la première cellule de la réponse vaut (\d+)$")]
-async fn first_cell_equals(world: &mut QueryingWorld, expected: u64) {
-    assert_eq!(world.answer().rows()[0][0], json!(expected));
+fn match_stages(count: usize) -> Value {
+    Value::Array((0..count).map(|_| json!({"$match": {}})).collect())
+}
+
+#[when(regex = r#"^l'agent cherche dans la base "([^"]*)"$"#)]
+async fn agent_finds_in_database(world: &mut QueryingWorld, database: String) {
+    run_find(
+        world,
+        FindRequest {
+            database: Some(database),
+            ..find_request(json!({}))
+        },
+    );
+}
+
+#[when(regex = r#"^l'agent cherche dans la collection "([^"]*)"$"#)]
+async fn agent_finds_in_collection(world: &mut QueryingWorld, collection: String) {
+    run_find(
+        world,
+        FindRequest {
+            collection,
+            ..find_request(json!({}))
+        },
+    );
+}
+
+#[when(regex = r"^l'agent lance une agrégation de (\d+) étapes \$match$")]
+async fn agent_runs_long_pipeline(world: &mut QueryingWorld, count: usize) {
+    run_aggregate(world, aggregate_request(match_stages(count)));
+}
+
+#[when(regex = r"^l'agent lance un \$facet de (\d+) branches de (\d+) étapes \$match$")]
+async fn agent_runs_wide_facet(world: &mut QueryingWorld, branches: usize, count: usize) {
+    let facet: serde_json::Map<String, Value> = (0..branches)
+        .map(|branch| (format!("b{branch}"), match_stages(count)))
+        .collect();
+    run_aggregate(world, aggregate_request(json!([{ "$facet": facet }])));
+}
+
+#[when(regex = r"^l'agent cherche avec un filtre imbriqué sur (\d+) niveaux$")]
+async fn agent_runs_deep_filter(world: &mut QueryingWorld, levels: usize) {
+    let filter = (1..levels).fold(json!({"a": 1}), |inner, _| json!({ "a": inner }));
+    run_find(world, find_request(filter));
+}
+
+#[when(regex = r"^l'agent cherche avec un \$in de (\d+) valeurs$")]
+async fn agent_runs_long_array(world: &mut QueryingWorld, count: u64) {
+    let values: Vec<Value> = (0..count).map(Value::from).collect();
+    run_find(world, find_request(json!({"n": {"$in": values}})));
+}
+
+#[when(regex = r"^l'agent cherche une valeur texte de (\d+) Ko$")]
+async fn agent_runs_large_request(world: &mut QueryingWorld, kilobytes: usize) {
+    run_find(
+        world,
+        find_request(json!({"note": "x".repeat(kilobytes * 1024)})),
+    );
+}
+
+#[then(regex = r#"^la demande est refusée par la règle "([^"]+)"$"#)]
+async fn request_refused_by(world: &mut QueryingWorld, rule: String) {
+    let text = world.refusal_text();
+    assert!(text.starts_with(&format!("{rule} ")), "{text}");
+}
+
+#[then(regex = r#"^le refus nomme "([^"]+)"$"#)]
+async fn refusal_names(world: &mut QueryingWorld, name: String) {
+    let text = world.refusal_text();
+    assert!(text.contains(&name), "{text}");
+}
+
+#[then(regex = r"^rien n'a été demandé au magasin de pseudonymes$")]
+async fn store_untouched(world: &mut QueryingWorld) {
+    assert_eq!(world.mongo_answer().lookups, 0);
+}
+
+#[given(regex = r"^la connexion MongoDB de test avec un utilisateur autorisé à écrire$")]
+async fn mongo_writer_connection(world: &mut QueryingWorld) {
+    world.connect_to_test_mongodb_as(&MongoUser {
+        name: "atlas-writer",
+        password: "atlas-writer-test-pw",
+        default_database: true,
+    });
 }

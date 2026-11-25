@@ -1,31 +1,9 @@
-use cucumber::{then, when};
-use scarif_database_mcp::composition::server_info::server_info;
+use cucumber::then;
 use scarif_database_mcp::contexts::querying::domain::services::column_policy::field_hint;
-use scarif_database_mcp::contexts::querying::domain::types::{
-    ColumnSource, FieldSource, PolicyDecision, Reason,
-};
+use scarif_database_mcp::contexts::querying::domain::types::{PolicyDecision, Reason};
 
+use crate::querying_steps::support::field;
 use crate::querying_world::QueryingWorld;
-
-fn field(collection: &str, path: &str) -> FieldSource {
-    let (database, collection) = collection
-        .split_once('.')
-        .expect("database.collection in the scenario");
-    FieldSource {
-        database: database.to_string(),
-        collection: collection.to_string(),
-        path: path.to_string(),
-    }
-}
-
-fn column(qualified: &str) -> ColumnSource {
-    let parts: Vec<&str> = qualified.split('.').collect();
-    ColumnSource {
-        schema: parts[0].to_string(),
-        table: parts[1].to_string(),
-        column: parts[2].to_string(),
-    }
-}
 
 fn reason(name: &str) -> Reason {
     match name {
@@ -33,19 +11,6 @@ fn reason(name: &str) -> Reason {
         "default" => Reason::Default,
         other => panic!("unknown reason {other}"),
     }
-}
-
-#[when(regex = r"^la politique de colonnes est chargée$")]
-async fn policy_is_loaded(world: &mut QueryingWorld) {
-    world.load_column_policy();
-}
-
-#[then(regex = r#"^le champ "([^"]+)" de "([^"]+)" est en clair$"#)]
-async fn field_is_clear(world: &mut QueryingWorld, path: String, collection: String) {
-    assert_eq!(
-        world.policy.decide_field(&field(&collection, &path)),
-        Some(&PolicyDecision::Clear)
-    );
 }
 
 #[then(regex = r#"^le champ "([^"]+)" de "([^"]+)" est personnel de type "([^"]+)"$"#)]
@@ -64,27 +29,6 @@ async fn field_is_personal(
 #[then(regex = r#"^le champ "([^"]+)" de "([^"]+)" n'est pas classé$"#)]
 async fn field_is_unclassified(world: &mut QueryingWorld, path: String, collection: String) {
     assert_eq!(world.policy.decide_field(&field(&collection, &path)), None);
-}
-
-#[then(regex = r#"^la colonne "([^"]+)" est en clair$"#)]
-async fn column_is_clear_by_policy(world: &mut QueryingWorld, qualified: String) {
-    assert_eq!(
-        world.policy.decide(&column(&qualified)),
-        Some(&PolicyDecision::Clear)
-    );
-}
-
-#[then(regex = r#"^la colonne "([^"]+)" n'est pas classée$"#)]
-async fn column_is_unclassified(world: &mut QueryingWorld, qualified: String) {
-    assert_eq!(world.policy.decide(&column(&qualified)), None);
-}
-
-#[then(regex = r#"^la colonne "([^"]+)" est personnelle de type "([^"]+)"$"#)]
-async fn column_is_personal_by_policy(world: &mut QueryingWorld, qualified: String, kind: String) {
-    assert_eq!(
-        world.policy.decide(&column(&qualified)),
-        Some(&PolicyDecision::Personal(kind))
-    );
 }
 
 #[then(
@@ -127,17 +71,6 @@ async fn dictionary_field_gets_hint(
     assert_eq!(hint.collection, hint_collection);
     assert_eq!(hint.field, hint_field);
     assert_eq!(hint.reason, reason(&hint_reason));
-}
-
-#[then(regex = r#"^un avertissement "([^"]+)" nomme le fichier partagé$"#)]
-async fn warning_names_shared_file(world: &mut QueryingWorld, code: String) {
-    let info = serde_json::to_value(server_info(world.policy_warnings.clone(), Vec::new()))
-        .expect("server info");
-    let warnings = info["warnings"].as_array().expect("warnings array");
-    assert_eq!(warnings.len(), 1, "{info}");
-    assert_eq!(warnings[0]["code"], code.as_str(), "{info}");
-    let message = warnings[0]["message"].as_str().expect("message");
-    assert!(message.contains("team-columns.toml"), "{message}");
 }
 
 #[then(regex = r"^aucun avertissement de politique n'est signalé$")]

@@ -1,31 +1,9 @@
-use cucumber::gherkin::Step;
-use cucumber::{given, then, when};
+use cucumber::{then, when};
+use scarif_database_mcp::contexts::querying::domain::types::PolicyDecision;
 use serde_json::Value;
 
+use crate::querying_steps::support::column;
 use crate::querying_world::QueryingWorld;
-
-fn docstring(step: &Step) -> String {
-    step.docstring
-        .as_deref()
-        .expect("a docstring")
-        .trim_start_matches('\n')
-        .to_string()
-}
-
-#[given(regex = r"^la politique de colonnes partagée suivante :$")]
-async fn shared_policy(world: &mut QueryingWorld, step: &Step) {
-    world.shared_policy = Some(docstring(step));
-}
-
-#[given(regex = r"^la politique de colonnes locale suivante :$")]
-async fn local_policy(world: &mut QueryingWorld, step: &Step) {
-    world.local_policy = Some(docstring(step));
-}
-
-#[when(regex = r#"^l'agent décrit la table "([^"]+)"$"#)]
-async fn agent_describes(world: &mut QueryingWorld, table: String) {
-    world.describe(&table).await;
-}
 
 #[when(regex = r"^l'agent liste les connexions$")]
 async fn agent_lists_connections(world: &mut QueryingWorld) {
@@ -105,5 +83,13 @@ async fn listing_warns_policy(world: &mut QueryingWorld) {
             .contains("team-columns.toml"),
         "{}",
         answer.text
+    );
+}
+
+#[then(regex = r#"^la colonne "([^"]+)" est personnelle de type "([^"]+)"$"#)]
+async fn column_is_personal_by_policy(world: &mut QueryingWorld, qualified: String, kind: String) {
+    assert_eq!(
+        world.policy.decide(&column(&qualified)),
+        Some(&PolicyDecision::Personal(kind))
     );
 }
