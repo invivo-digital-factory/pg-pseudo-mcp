@@ -24,6 +24,10 @@ impl DocumentLineage {
         self.root.at(&segments).lineage()
     }
 
+    pub fn root_is_computed(&self) -> bool {
+        matches!(&self.root, Shape::Value(lineage) if !matches!(lineage, FieldLineage::Source(_)))
+    }
+
     pub fn of_segments(&self, segments: &[String]) -> FieldLineage {
         self.root.at(segments).lineage()
     }

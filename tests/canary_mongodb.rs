@@ -25,6 +25,13 @@ impl Transcript {
         self.responses += 1;
         serde_json::from_str(&text).unwrap_or(Value::Null)
     }
+
+    fn reached(&mut self, result: &CallToolResult) -> Value {
+        let body = self.record(result);
+        assert!(body.get("error").is_none(), "{body}");
+        assert!(body["document_count"].as_u64().unwrap_or(0) > 0, "{body}");
+        body
+    }
 }
 
 mod e2e {
@@ -62,12 +69,12 @@ mod e2e {
                 all["document_count"].as_u64().unwrap() > 0,
                 "{collection}: {all}"
             );
-            transcript.record(
+            transcript.reached(
                 &harness
                     .aggregate(collection, json!([{"$match": {}}, {"$sort": {"_id": 1}}]))
                     .await,
             );
-            transcript.record(
+            transcript.reached(
                 &harness
                     .find(
                         collection,
@@ -135,9 +142,9 @@ mod e2e {
             json!([{"$facet": {"all": [{"$project": {"note": 1, "iban": 1}}]}}]),
             json!([{"$project": {"s": {"$substrCP": ["$contact.email", 0, 12]}, "t": {"$toString": "$telephone"}}}]),
         ] {
-            transcript.record(&harness.aggregate("customers", pipeline).await);
+            transcript.reached(&harness.aggregate("customers", pipeline).await);
         }
-        transcript.record(
+        transcript.reached(
             &harness
                 .aggregate(
                     "orders",
@@ -145,7 +152,7 @@ mod e2e {
                 )
                 .await,
         );
-        transcript.record(
+        transcript.reached(
             &harness
                 .find(
                     "customers",
@@ -156,6 +163,96 @@ mod e2e {
                 )
                 .await,
         );
+
+        transcript.reached(
+            &harness
+                .aggregate(
+                    "customers",
+                    json!([{"$replaceWith": {"$arrayToObject": [[{"k": "$contact.email", "v": {"$ifNull": ["$telephone", 0]}}]]}}]),
+                )
+                .await,
+        );
+        transcript.reached(
+            &harness
+                .aggregate(
+                    "customers",
+                    json!([{"$replaceWith": {"$arrayToObject": [[{"k": "$contact.email", "v": {"name": "$lastName", "first": "$firstName"}}]]}}]),
+                )
+                .await,
+        );
+        for key in [
+            json!({"$concat": ["$firstName", ".", "$lastName"]}),
+            json!({"$concat": ["$firstName", "_", "$lastName"]}),
+        ] {
+            let value = json!({"$ifNull": ["$telephone", 0]});
+            transcript.reached(
+                &harness
+                    .aggregate(
+                        "customers",
+                        json!([{"$replaceWith": {"$arrayToObject": [[{"k": key, "v": value}]]}}]),
+                    )
+                    .await,
+            );
+            transcript.reached(
+                &harness
+                    .aggregate(
+                        "customers",
+                        json!([{"$project": {"m": {"$arrayToObject": [[{"k": key, "v": value}]]}}}]),
+                    )
+                    .await,
+            );
+        }
+        let policed =
+            MongoHarness::with_policy("[mongodb.clear]\n\"shop.orders\" = [\"status\"]\n");
+        for pipeline in [
+            json!([{"$project": {"status": 1, "Status": "$holder"}}]),
+            json!([{"$project": {"Status": "$holder", "status": 1}}]),
+        ] {
+            transcript.reached(&policed.aggregate("orders", pipeline).await);
+        }
+        for field in ["$alias", "$badge"] {
+            let error = transcript.record(
+                &harness
+                    .aggregate(
+                        "customers",
+                        json!([
+                            {"$match": {"_id": {"$oid": "65a000000000000000000003"}}},
+                            {"$project": {"n": {"$toInt": field}}}
+                        ]),
+                    )
+                    .await,
+            );
+            assert_eq!(error["error"]["code"], "mongodb_error", "{error}");
+        }
+
+        for echoed in [
+            json!({"$convert": {"input": 1, "to": "$lastName"}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "$lastName"}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "week", "startOfWeek": "$firstName"}}),
+            json!({"$dateToString": {"date": "$birthDate", "timezone": "$lastName"}}),
+            json!({"$regexMatch": {"input": "x", "regex": "a", "options": "$firstName"}}),
+        ] {
+            let refused = transcript.record(
+                &harness
+                    .aggregate("customers", json!([{"$project": {"n": echoed}}]))
+                    .await,
+            );
+            assert_eq!(
+                refused["error"]["code"], "mongo_argument_not_constant",
+                "{refused}"
+            );
+        }
+        let scaled = transcript.reached(
+            &harness
+                .aggregate(
+                    "customers",
+                    json!([{"$project": {"t": {"$divide": ["$telephone", 100]}, "d": {"$divide": [{"$toDecimal": "$telephone"}, 100]}}}]),
+                )
+                .await,
+        );
+        for digits in ["336412783", "337581492"] {
+            assert!(!scaled.to_string().contains(digits), "{scaled}");
+        }
 
         for failing in [
             json!([{"$project": {"n": {"$toInt": "$lastName"}}}]),

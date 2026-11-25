@@ -4,8 +4,8 @@ use super::super::mongo_filter_walker::LiteralRole;
 use super::Walker;
 use super::extended_json::is_extended_json;
 use crate::contexts::querying::domain::constants::mongo_policy::{
-    EXPRESSION_OPERATORS, EXTENDED_JSON_REFUSED, FIELD_QUERY_OPERATORS, GEOMETRY_OPERATORS,
-    META_KEYWORDS, TEXT_OPERATORS, TOP_LEVEL_QUERY_OPERATORS,
+    CONSTANT_ARGUMENTS, EXPRESSION_OPERATORS, EXTENDED_JSON_REFUSED, FIELD_QUERY_OPERATORS,
+    GEOMETRY_OPERATORS, META_KEYWORDS, TEXT_OPERATORS, TOP_LEVEL_QUERY_OPERATORS,
 };
 use crate::contexts::querying::domain::errors::Refusal;
 
@@ -317,6 +317,7 @@ impl Walker {
         operator: &str,
         argument: &Value,
     ) -> Result<(), Refusal> {
+        self.constant_arguments(operator, argument)?;
         match operator {
             "$literal" => self.literal(argument, Some(LiteralRole::Other)),
             "$meta" => match argument.as_str() {
@@ -343,6 +344,33 @@ impl Walker {
             },
             _ => self.expression(argument),
         }
+    }
+
+    fn constant_arguments(&mut self, operator: &str, argument: &Value) -> Result<(), Refusal> {
+        let (Some((_, keys)), Value::Object(map)) = (
+            CONSTANT_ARGUMENTS
+                .iter()
+                .find(|(name, _)| *name == operator),
+            argument,
+        ) else {
+            return Ok(());
+        };
+        for key in keys.iter() {
+            if let Some(item) = map.get(*key)
+                && !is_constant(item)
+            {
+                return Err(self.enter_key(key, |walker| {
+                    Ok(walker.refuse(
+                        "mongo_argument_not_constant",
+                        &format!(
+                            "{key} of {} must be a constant value, not a field or an expression",
+                            super::echoable(operator)
+                        ),
+                    ))
+                })?);
+            }
+        }
+        Ok(())
     }
 
     fn expression_equality(&mut self, argument: &Value) -> Result<(), Refusal> {
@@ -385,6 +413,17 @@ impl Walker {
                 }),
             _ => self.expression(argument),
         }
+    }
+}
+
+fn is_constant(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.starts_with('$'),
+        Value::Object(map) => map
+            .iter()
+            .all(|(key, item)| !key.starts_with('$') && is_constant(item)),
+        Value::Array(_) => false,
+        _ => true,
     }
 }
 

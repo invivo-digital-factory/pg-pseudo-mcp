@@ -47,17 +47,32 @@ pub fn document_clearances(
     source: (&str, &str),
     command: DocumentCommand,
 ) -> Vec<(Vec<String>, DocumentClearance)> {
-    paths
-        .iter()
-        .filter(|path| path.iter().all(|segment| !segment.contains('.')))
-        .filter_map(|path| {
+    let computed_root = command == DocumentCommand::Aggregate && lineage.root_is_computed();
+    let root = computed_root.then(|| {
+        (
+            Vec::new(),
+            DocumentClearance::Derived {
+                proven_clear: false,
+            },
+        )
+    });
+    root.into_iter()
+        .chain(paths.iter().filter_map(|path| {
+            if path.iter().any(|segment| segment.contains('.')) {
+                return Some((
+                    path.clone(),
+                    DocumentClearance::Derived {
+                        proven_clear: false,
+                    },
+                ));
+            }
             let traced = lineage.of_segments(path);
             let judged = match command {
                 DocumentCommand::Find => find_clearance(path, &traced, policy, source),
                 DocumentCommand::Aggregate => output_clearance(path, &traced, policy),
             };
             judged.map(|clearance| (path.clone(), clearance))
-        })
+        }))
         .collect()
 }
 
@@ -143,4 +158,114 @@ pub fn document_hints(
         }
     }
     hints
+}
+
+#[cfg(test)]
+mod unit {
+    use serde_json::json;
+
+    use super::*;
+    use crate::contexts::querying::domain::services::mongo_guard::{
+        inspect_aggregate, inspect_find,
+    };
+    use crate::contexts::querying::domain::services::mongo_lineage::document_lineage;
+    use crate::contexts::querying::domain::types::{
+        AggregateRequest, FindRequest, QueryLimits, Translations,
+    };
+
+    fn segments(path: &[&str]) -> Vec<String> {
+        path.iter().map(|segment| segment.to_string()).collect()
+    }
+
+    fn judged(
+        lineage: &DocumentLineage,
+        command: DocumentCommand,
+        paths: &[&[&str]],
+    ) -> Vec<(Vec<String>, DocumentClearance)> {
+        let observed = paths.iter().map(|path| segments(path)).collect();
+        document_clearances(
+            &observed,
+            lineage,
+            &ColumnPolicy::default(),
+            ("shop", "customers"),
+            command,
+        )
+    }
+
+    #[test]
+    fn un_chemin_dont_une_cle_contient_un_point_est_toujours_souille() {
+        let guarded = inspect_aggregate(&AggregateRequest {
+            database: Some("shop".into()),
+            collection: "customers".into(),
+            pipeline: vec![json!({"$replaceWith": {"$arrayToObject": [[{"k": "$contact.email", "v": "$telephone"}]]}})],
+            ..AggregateRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        let lineage = document_lineage(&guarded, "shop");
+        let projected = inspect_aggregate(&AggregateRequest {
+            database: Some("shop".into()),
+            collection: "customers".into(),
+            pipeline: vec![
+                json!({"$project": {"status": 1, "who": {"$concat": ["$firstName", "$lastName"]}}}),
+            ],
+            ..AggregateRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        assert!(
+            judged(
+                &document_lineage(&projected, "shop"),
+                DocumentCommand::Aggregate,
+                &[]
+            )
+            .iter()
+            .all(|(path, _)| !path.is_empty())
+        );
+        let dotted: &[&str] = &["jean.dupont@example.org"];
+        let below: &[&str] = &["preferences", "jean.dupont@example.org", "newsletter"];
+        let clearances = judged(&lineage, DocumentCommand::Aggregate, &[dotted, below]);
+        assert!(
+            clearances.contains(&(
+                Vec::new(),
+                DocumentClearance::Derived {
+                    proven_clear: false
+                }
+            )),
+            "{clearances:?}"
+        );
+        for path in [dotted, below] {
+            assert!(
+                clearances.contains(&(
+                    segments(path),
+                    DocumentClearance::Derived {
+                        proven_clear: false
+                    }
+                )),
+                "{path:?} in {clearances:?}"
+            );
+        }
+
+        let found = inspect_find(&FindRequest {
+            database: Some("shop".into()),
+            collection: "customers".into(),
+            ..FindRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        let clearances = judged(
+            &document_lineage(&found, "shop"),
+            DocumentCommand::Find,
+            &[below],
+        );
+        assert_eq!(
+            clearances,
+            vec![(
+                segments(below),
+                DocumentClearance::Derived {
+                    proven_clear: false
+                }
+            )]
+        );
+    }
 }

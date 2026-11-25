@@ -29,7 +29,12 @@ impl AnonymizeDocuments {
         Anonymizer::new(&self.pseudonymizer, &[]).document_key(key)
     }
 
-    pub fn server_message(&self, text: &str, injected: &[(String, String)]) -> String {
-        Anonymizer::new(&self.pseudonymizer, injected).server_message(text)
+    pub fn server_message(
+        &self,
+        text: &str,
+        injected: &[(String, String)],
+        known_names: &[&str],
+    ) -> String {
+        Anonymizer::new(&self.pseudonymizer, injected).server_message(text, known_names)
     }
 }

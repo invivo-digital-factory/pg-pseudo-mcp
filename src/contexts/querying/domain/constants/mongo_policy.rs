@@ -359,3 +359,34 @@ pub const FIELDS_HINT: &str =
     "more pseudonymized fields than listed; project fewer fields to see them all";
 
 pub const SAMPLE_HINT: &str = "fields, types and presence come from a random sample of up to 100 documents; rare fields may be missing";
+
+pub const CONSTANT_ARGUMENTS: &[(&str, &[&str])] = &[
+    ("$convert", &["to"]),
+    (
+        "$dateTrunc",
+        &["unit", "startOfWeek", "timezone", "binSize"],
+    ),
+    ("$dateAdd", &["unit", "timezone"]),
+    ("$dateSubtract", &["unit", "timezone"]),
+    ("$dateDiff", &["unit", "startOfWeek", "timezone"]),
+    ("$dateToString", &["format", "timezone"]),
+    ("$dateFromString", &["format", "timezone"]),
+    ("$dateToParts", &["timezone"]),
+    ("$dateFromParts", &["timezone"]),
+    ("$year", &["timezone"]),
+    ("$month", &["timezone"]),
+    ("$week", &["timezone"]),
+    ("$dayOfMonth", &["timezone"]),
+    ("$dayOfWeek", &["timezone"]),
+    ("$dayOfYear", &["timezone"]),
+    ("$hour", &["timezone"]),
+    ("$minute", &["timezone"]),
+    ("$second", &["timezone"]),
+    ("$millisecond", &["timezone"]),
+    ("$isoWeek", &["timezone"]),
+    ("$isoWeekYear", &["timezone"]),
+    ("$isoDayOfWeek", &["timezone"]),
+    ("$regexMatch", &["regex", "options"]),
+    ("$regexFind", &["regex", "options"]),
+    ("$regexFindAll", &["regex", "options"]),
+];

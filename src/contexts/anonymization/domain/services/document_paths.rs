@@ -11,24 +11,61 @@ const MAX_FLAGGED_PATHS: usize = 200;
 
 const MIN_SINGULAR_CHARS: usize = 2;
 
-pub struct FieldClearances(HashMap<Vec<String>, FieldClearance>);
+pub struct FieldClearances {
+    exact: HashMap<Vec<String>, FieldClearance>,
+    folded: HashMap<Vec<String>, FieldClearance>,
+}
 
 impl FieldClearances {
     pub fn new(clearances: &[(FieldPath, FieldClearance)]) -> Self {
-        Self(
-            clearances
-                .iter()
-                .map(|(path, clearance)| (folded(path), clearance.clone()))
-                .collect(),
-        )
+        let mut exact = HashMap::new();
+        let mut folded = HashMap::new();
+        for (path, clearance) in clearances {
+            keep_strictest(&mut exact, path.segments().to_vec(), clearance);
+            keep_strictest(&mut folded, folded_segments(path), clearance);
+        }
+        Self { exact, folded }
     }
 
     fn get(&self, path: &FieldPath) -> Option<FieldClearance> {
-        self.0.get(&folded(path)).cloned()
+        if let Some(clearance) = self.exact.get(path.segments()) {
+            return Some(clearance.clone());
+        }
+        self.folded
+            .get(&folded_segments(path))
+            .filter(|clearance| strictness(clearance) >= TAINTED)
+            .cloned()
     }
 }
 
-fn folded(path: &FieldPath) -> Vec<String> {
+const TAINTED: u8 = 3;
+
+fn strictness(clearance: &FieldClearance) -> u8 {
+    match clearance {
+        FieldClearance::Personal(_) => 4,
+        FieldClearance::Derived {
+            proven_clear: false,
+        } => TAINTED,
+        FieldClearance::NamedAs(_) => 2,
+        FieldClearance::Derived { proven_clear: true } => 1,
+        FieldClearance::Clear => 0,
+    }
+}
+
+fn keep_strictest(
+    map: &mut HashMap<Vec<String>, FieldClearance>,
+    key: Vec<String>,
+    clearance: &FieldClearance,
+) {
+    match map.get(&key) {
+        Some(known) if strictness(known) >= strictness(clearance) => {}
+        _ => {
+            map.insert(key, clearance.clone());
+        }
+    }
+}
+
+fn folded_segments(path: &FieldPath) -> Vec<String> {
     path.segments()
         .iter()
         .map(|segment| segment.to_lowercase())
@@ -53,6 +90,13 @@ pub struct Place {
 }
 
 impl Place {
+    pub fn root(clearances: &FieldClearances) -> Self {
+        Self {
+            clearance: clearances.get(&FieldPath::default()),
+            ..Self::default()
+        }
+    }
+
     pub fn child(&self, key: &str, shown: &str, clearances: &FieldClearances) -> Self {
         let source = self.source.child(key);
         let inherited = self.clearance.clone().filter(|clearance| {

@@ -1352,4 +1352,44 @@ mod unit {
             .is_ok()
         );
     }
+
+    #[test]
+    fn un_parametre_que_le_serveur_recopie_dans_ses_erreurs_doit_etre_constant() {
+        for expression in [
+            json!({"$convert": {"input": 1, "to": "$lastName"}}),
+            json!({"$convert": {"input": 1, "to": {"type": "$lastName"}}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "$lastName"}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "week", "startOfWeek": "$lastName"}}),
+            json!({"$dateAdd": {"startDate": "$birthDate", "unit": {"$toLower": "$lastName"}, "amount": 1}}),
+            json!({"$dateDiff": {"startDate": "$birthDate", "endDate": "$birthDate", "unit": "$lastName"}}),
+            json!({"$dateToString": {"date": "$birthDate", "timezone": "$lastName"}}),
+            json!({"$hour": {"date": "$birthDate", "timezone": "$lastName"}}),
+            json!({"$regexMatch": {"input": "x", "regex": "a", "options": "$firstName"}}),
+            json!({"$regexFind": {"input": "x", "regex": "$lastName"}}),
+        ] {
+            let refusal = aggregate_refusal(json!([{"$project": {"n": expression.clone()}}]));
+            assert_eq!(
+                refusal.code, "mongo_argument_not_constant",
+                "{expression}: {}",
+                refusal.message
+            );
+            assert!(!refusal.message.contains("lastName"), "{}", refusal.message);
+        }
+        for expression in [
+            json!({"$convert": {"input": "$amount", "to": "int", "onError": 0}}),
+            json!({"$convert": {"input": "$amount", "to": {"type": "binData", "subtype": 4}}}),
+            json!({"$dateTrunc": {"date": "$birthDate", "unit": "week", "startOfWeek": "monday"}}),
+            json!({"$dateToString": {"date": "$birthDate", "format": "%Y", "timezone": "Europe/Paris"}}),
+            json!({"$regexMatch": {"input": "$status", "regex": "^p", "options": "i"}}),
+        ] {
+            assert!(
+                prepare_aggregate(
+                    &aggregate(json!([{"$project": {"n": expression.clone()}}])),
+                    &FakeStore::known()
+                )
+                .is_ok(),
+                "{expression}"
+            );
+        }
+    }
 }

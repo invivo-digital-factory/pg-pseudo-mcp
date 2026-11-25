@@ -33,6 +33,7 @@ shop.customers.insertMany([
     preferences: {
       "kervadec.ylwenna@canary-mail.fr": { newsletter: true },
       "o.hazvekmor@canary-mail.fr": { newsletter: false },
+      "zone.nord": { ref: NumberLong("418273652") },
     },
   },
   {
@@ -55,6 +56,8 @@ shop.customers.insertMany([
     firstName: "Maëlouz",
     lastName: "Brizolier",
     contact: { email: "maelouz.brizolier@canary-mail.fr", phones: [] },
+    alias: "O'Zivrelle",
+    badge: 'Zivrelle "Brizolier"',
     note: "",
     preferences: {},
   },

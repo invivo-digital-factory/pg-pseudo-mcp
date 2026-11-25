@@ -2,10 +2,23 @@ use super::anonymization_mapping::flag;
 use super::document_mapping::{field_clearance, node_in, node_out};
 use crate::contexts::anonymization::domain::types::FieldPath;
 use crate::contexts::anonymization::injector::AnonymizationUseCases;
+use crate::contexts::querying::domain::constants::mongo_policy;
 use crate::contexts::querying::domain::repositories::DocumentAnonymizer;
 use crate::contexts::querying::domain::types::{
     AnonymizedDocuments, DocumentClearance, DocumentNode,
 };
+
+fn known_names() -> Vec<&'static str> {
+    [
+        mongo_policy::STAGES,
+        mongo_policy::TOP_LEVEL_QUERY_OPERATORS,
+        mongo_policy::FIELD_QUERY_OPERATORS,
+        mongo_policy::GEOMETRY_OPERATORS,
+        mongo_policy::TEXT_OPERATORS,
+        mongo_policy::EXPRESSION_OPERATORS,
+    ]
+    .concat()
+}
 
 pub struct DocumentAnonymizerAdapter {
     use_cases: AnonymizationUseCases,
@@ -56,7 +69,7 @@ impl DocumentAnonymizer for DocumentAnonymizerAdapter {
     fn server_message(&self, text: &str, injected: &[(String, String)]) -> String {
         self.use_cases
             .anonymize_documents
-            .server_message(text, injected)
+            .server_message(text, injected, &known_names())
     }
 
     fn free_text(&self, text: &str, injected: &[(String, String)]) -> String {
