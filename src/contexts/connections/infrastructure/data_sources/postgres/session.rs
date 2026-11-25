@@ -182,7 +182,7 @@ async fn run_statement(
     let pg = |error: tokio_postgres::Error| session_error_from_postgres(&error);
     transaction
         .batch_execute(&format!(
-            "SET LOCAL statement_timeout = {timeout_ms}; SET LOCAL lock_timeout = {LOCK_TIMEOUT_MS}"
+            "SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = {LOCK_TIMEOUT_MS}"
         ))
         .await
         .map_err(pg)?;
@@ -213,6 +213,10 @@ async fn run_statement(
         })
         .collect();
     let portal = transaction.bind(&statement, &[]).await.map_err(pg)?;
+    transaction
+        .batch_execute(&format!("SET LOCAL statement_timeout = {timeout_ms}"))
+        .await
+        .map_err(pg)?;
     let fetch = i32::try_from(max_rows.saturating_add(1)).unwrap_or(i32::MAX);
     let rows = transaction.query_portal(&portal, fetch).await.map_err(pg)?;
     let more_rows = rows.len() > max_rows;
