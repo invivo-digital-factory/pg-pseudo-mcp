@@ -63,13 +63,24 @@ Fonctionnalité: Jeton Azure pour Azure Database for PostgreSQL
       Quand l'agent liste les connexions
       Alors la connexion "shop" est listée comme indisponible
       Et la raison de la connexion "shop" contient "<raison>"
-      Et la liste ne montre ni l'hôte "shop.postgres.database.azure.com", ni l'utilisateur "alice@example.com", ni le secret "jeton-illisible"
 
       Exemples:
         | état                                                                          | raison                                                                  |
         | qui demande de se connecter avec le message "alice@example.com must run az login" | no Azure access token available, run az login                       |
         | absent du poste                                                               | the Azure CLI (az) was not found on PATH; install it, then run az login |
         | qui répond "jeton-illisible"                                                  | the Azure CLI answered with an access token that cannot be read        |
+
+    Plan du Scénario: Ce qu'écrit un Azure CLI <état> n'est jamais recopié dans la liste
+      Étant donné un Azure CLI <état>
+      Et une connexion du fichier "shop" en mode azure vers l'hôte "shop.postgres.database.azure.com"
+      Quand l'agent liste les connexions
+      Alors la connexion "shop" est listée comme indisponible
+      Et la liste ne montre ni l'hôte "shop.postgres.database.azure.com", ni l'utilisateur "alice@example.com", ni le secret "<sortie>"
+
+      Exemples:
+        | état                                                                              | sortie            |
+        | qui demande de se connecter avec le message "alice@example.com must run az login" | must run az login |
+        | qui répond "jeton-illisible"                                                      | jeton-illisible   |
 
   Règle: Une connexion qui reçoit le jeton Azure passe au moins en TLS require
 
@@ -88,9 +99,9 @@ Fonctionnalité: Jeton Azure pour Azure Database for PostgreSQL
         | verify-ca   | verify-ca   |
         | verify-full | verify-full |
 
-  Règle: Une seule demande de jeton sert toutes les connexions Azure d'une même liste
+  Règle: Un jeton obtenu sert toutes les connexions Azure tant qu'il reste valide
 
-    Scénario: Deux connexions Azure ne lancent az qu'une fois
+    Scénario: Deux connexions Azure listées deux fois ne lancent az qu'une fois
       Étant donné un Azure CLI connecté qui délivre le jeton "entra-jeton-1"
       Et le fichier de connexions suivant :
         """
@@ -111,6 +122,8 @@ Fonctionnalité: Jeton Azure pour Azure Database for PostgreSQL
       Quand l'agent liste les connexions
       Alors la connexion "shop" est listée comme disponible
       Et la connexion "billing" est listée comme disponible
+      Quand l'agent liste les connexions
+      Alors la connexion "shop" est listée comme disponible
       Et l'Azure CLI a été lancé 1 fois
 
   Règle: Dans DBeaver, l'authentification pgpass sur un hôte Azure prend le jeton, l'authentification native jamais

@@ -2,16 +2,10 @@ use cucumber::gherkin::Step;
 use cucumber::{given, then};
 
 use crate::bdd_support::{BASTION_HOST, BASTION_USER, bastion_port, database_target, ssh_asset};
+use crate::connections_steps::support::{write_connection_file, write_ssh_config};
 use crate::connections_world::ConnectionsWorld;
-use crate::fichier_de_connexions::write_connection_file;
 
 const STRICT_NO: &str = "  StrictHostKeyChecking no\n";
-
-pub fn write_ssh_config(world: &mut ConnectionsWorld, contents: &str) {
-    let path = world.config_dir.path().join("ssh_config");
-    std::fs::write(&path, contents).expect("ssh config");
-    world.ssh_config = Some(path);
-}
 
 fn test_bastion(alias: &str, extra: &str) -> String {
     format!(
@@ -82,8 +76,6 @@ async fn ssh_config_alias_to_endpoint(
 ) {
     let contents = format!("Host {alias}\n  HostName {host}\n  Port {port}\n  User {user}\n");
     write_ssh_config(world, &contents);
-    std::fs::write(world.config_dir.path().join("ssh_config.before"), contents)
-        .expect("ssh config copy");
 }
 
 #[then(regex = r"^le fichier de configuration SSH est inchangé$")]

@@ -1,7 +1,7 @@
 use cucumber::{then, when};
 use scarif_database_mcp::contexts::connections::domain::repositories::ConnectionCatalog;
 use scarif_database_mcp::contexts::connections::domain::types::{
-    ConnectParams, ConnectionEntry, Discovery, MongoConnectParams, MongoTransport,
+    ConnectParams, ConnectionEntry, Discovery, MongoConnectParams, MongoTransport, SshHop,
 };
 
 use crate::connections_world::ConnectionsWorld;
@@ -36,9 +36,16 @@ fn mongo(world: &mut ConnectionsWorld, name: &str) -> MongoConnectParams {
 }
 
 #[when(regex = r#"^le serveur prépare la connexion "([^"]+)" pour la base "([^"]+)"$"#)]
-async fn prepare_for_database(world: &mut ConnectionsWorld, _name: String, database: String) {
+async fn prepare_for_database(world: &mut ConnectionsWorld, name: String, database: String) {
     let catalog = world.context().catalog.clone();
-    world.discovery = Some(catalog.discover_in(Some(&database)));
+    let discovery = catalog.discover_in(Some(&database));
+    let entry = discovery
+        .connections
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap_or_else(|| panic!("{name} is not discovered"));
+    assert_eq!(entry.database.as_deref(), Some(database.as_str()));
+    world.discovery = Some(discovery);
 }
 
 #[then(regex = r#"^la connexion "([^"]+)" vise le port (\d+) avec le mode TLS "([^"]+)"$"#)]
@@ -117,4 +124,31 @@ async fn mongo_seed(
 #[then(regex = r#"^la connexion MongoDB "([^"]+)" déclare le jeu de réplicas "([^"]+)"$"#)]
 async fn mongo_replica_set(world: &mut ConnectionsWorld, name: String, replica_set: String) {
     assert_eq!(mongo(world, &name).replica_set, Some(replica_set));
+}
+
+fn assert_single_hop(hops: &[SshHop], endpoint: &str, user: &str) {
+    let [hop] = hops else {
+        panic!("one SSH hop is expected, got {hops:?}");
+    };
+    assert_eq!(format!("{}:{}", hop.host, hop.port), endpoint);
+    assert_eq!(hop.user, user);
+}
+
+#[then(regex = r#"^la connexion "([^"]+)" passe par le bastion "([^"]+)" en tant que "([^"]+)"$"#)]
+async fn postgres_bastion(
+    world: &mut ConnectionsWorld,
+    name: String,
+    endpoint: String,
+    user: String,
+) {
+    let tunnel = params(world, &name).tunnel.expect("a tunnel");
+    assert_single_hop(&tunnel.hops, &endpoint, &user);
+}
+
+#[then(
+    regex = r#"^la connexion MongoDB "([^"]+)" passe par le bastion "([^"]+)" en tant que "([^"]+)"$"#
+)]
+async fn mongo_bastion(world: &mut ConnectionsWorld, name: String, endpoint: String, user: String) {
+    let hops = mongo(world, &name).ssh_hops.expect("SSH hops");
+    assert_single_hop(&hops, &endpoint, &user);
 }

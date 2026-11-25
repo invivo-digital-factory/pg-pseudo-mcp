@@ -7,8 +7,8 @@ use scarif_database_mcp::contexts::connections::infrastructure::data_sources::pa
 };
 use serde_json::json;
 
+use crate::connections_steps::support::{make_executable, write_connection_file};
 use crate::connections_world::ConnectionsWorld;
-use crate::fichier_de_connexions::{make_executable, write_connection_file};
 
 fn write_pgpass(world: &ConnectionsWorld, contents: &str, mode: u32) {
     let path = world.pgpass_file();
@@ -145,6 +145,27 @@ fn command_line(text: &str) -> Vec<String> {
 #[when(regex = r"^le serveur lance la commande de mot de passe (\[.*\])$")]
 async fn run_password_command(world: &mut ConnectionsWorld, command: String) {
     let outcome = ProcessPasswordCommand::new().run(&command_line(&command));
+    world.probe = Some(match outcome {
+        Ok(secret) => json!({ "password": secret.expose() }),
+        Err(error) => json!({ "error": error.to_string() }),
+    });
+}
+
+#[when(
+    regex = r"^le serveur lance la commande de mot de passe (\[.*\]) avec un délai réduit à (\d+) seconde$"
+)]
+async fn run_password_command_with_deadline(
+    world: &mut ConnectionsWorld,
+    command: String,
+    seconds: u64,
+) {
+    let started = std::time::Instant::now();
+    let outcome = ProcessPasswordCommand::with_deadline(std::time::Duration::from_secs(seconds))
+        .run(&command_line(&command));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(seconds + 3),
+        "the command was not stopped at its deadline"
+    );
     world.probe = Some(match outcome {
         Ok(secret) => json!({ "password": secret.expose() }),
         Err(error) => json!({ "error": error.to_string() }),

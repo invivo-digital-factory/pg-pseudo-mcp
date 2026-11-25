@@ -71,6 +71,7 @@ Fonctionnalité: Import des connexions DBeaver
       Alors la connexion "canary-local" porte l'alias SSH "bastion.corp.example"
       Et le résumé propose un bloc Host avec l'hôte, le port, l'utilisateur et le fichier de clé
       Et le résumé rappelle d'ajouter les clés d'hôte de "bastion.corp.example" à known_hosts
+      Et le fichier de configuration SSH est inchangé
 
     Scénario: Un alias de la configuration SSH qui mène au même bastion est réutilisé sans bloc proposé
       Étant donné un espace de travail DBeaver avec une connexion qui traverse un bastion SSH
@@ -87,12 +88,15 @@ Fonctionnalité: Import des connexions DBeaver
       Alors la connexion "app-a" porte l'alias SSH "bastion.example.com"
       Et la connexion "app-b" porte l'alias SSH "bastion.example.com"
       Et le résumé propose exactement 1 bloc Host
+      Et le fichier de configuration SSH est inchangé
 
     Scénario: L'alias proposé évite un alias déjà défini
       Étant donné un espace de travail DBeaver avec deux connexions "app-a" et "app-b" derrière le bastion "bastion.example.com"
       Et un fichier de configuration SSH dont l'alias "bastion.example.com" mène à "other.example.com" sur le port 22 avec l'utilisateur "alice"
       Quand l'utilisateur lance l'import des connexions DBeaver
       Alors la connexion "app-a" porte l'alias SSH "bastion.example.com-2"
+      Et le résumé propose exactement 1 bloc Host
+      Et le fichier de configuration SSH est inchangé
 
     Plan du Scénario: Un tunnel dont <champ> ne peut pas s'écrire sans risque dans la configuration SSH est écarté
       Étant donné un espace de travail DBeaver avec la connexion "kept" et la connexion "risky" derrière le bastion "<hôte>" avec l'utilisateur SSH "<utilisateur>"

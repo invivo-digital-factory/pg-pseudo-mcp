@@ -40,7 +40,7 @@ Fonctionnalité: Emplacement du fichier de connexions
 
   Règle: Un fichier désigné par SCARIF_CONNECTIONS_FILE mais absent est signalé avec son chemin
 
-    Scénario: Sans fichier ni DBeaver l'indice cite le fichier attendu et propose de le créer ou de lancer l'import
+    Scénario: Sans le fichier désigné ni DBeaver, l'indice cite le chemin désigné et propose de créer le fichier ou de lancer l'import
       Étant donné aucun fichier de connexions
       Quand l'agent liste les connexions
       Alors l'indice cite le chemin du fichier de connexions

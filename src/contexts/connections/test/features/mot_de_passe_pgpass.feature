@@ -9,9 +9,6 @@ Fonctionnalité: Mot de passe lu dans le fichier pgpass
     Plan du Scénario: La ligne pgpass « <ligne> » donne le mot de passe « <mot de passe> »
       Étant donné un fichier pgpass qui contient :
         """
-        # base de la boutique
-
-        db.example.com:5432
         <ligne>
         *:*:*:alice:repli
         """
@@ -41,6 +38,27 @@ Fonctionnalité: Mot de passe lu dans le fichier pgpass
         | db.example.com:6432:shop:alice:s3cret    | repli        |
         | other.example.com:5432:shop:alice:s3cret | repli        |
         | db.example.com:5432:shop:bob:s3cret      | repli        |
+
+    Scénario: Les commentaires, les lignes vides et les lignes incomplètes sont ignorés
+      Étant donné un fichier pgpass qui contient :
+        """
+        # db.example.com:5432:shop:alice:en-commentaire
+
+        db.example.com:5432:shop:alice
+        db.example.com:5432:shop:alice:s3cret
+        """
+      Et le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "shop"
+        host = "db.example.com"
+        database = "shop"
+        user = "alice"
+        type = "dev"
+        auth = "pgpass"
+        """
+      Quand l'agent liste les connexions
+      Alors le mot de passe retenu pour la connexion "shop" est « s3cret »
 
     Scénario: Un deux-points ou une barre oblique inverse échappés font partie du mot de passe
       Étant donné un fichier pgpass qui contient :

@@ -125,6 +125,32 @@ Fonctionnalité: Déclarer une connexion MongoDB dans le fichier
       Et la commande de mot de passe n'a pas été exécutée
       Et la liste ne montre ni l'hôte "cluster0.example.com", ni l'utilisateur "alice", ni le secret "marqueur"
 
+    Scénario: Une connexion MongoDB derrière un alias SSH est listée sans ouvrir le tunnel ni exécuter la commande
+      Étant donné un fichier de configuration SSH qui contient :
+        """
+        Host bastion
+          HostName bastion.example.com
+          Port 2222
+          User jump
+        """
+      Et le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "orders-dev"
+        engine = "mongodb"
+        host = "cluster0.example.com"
+        user = "alice"
+        type = "dev"
+        auth = "command"
+        password_command = ["/bin/sh", "-c", "touch {dossier}/marqueur"]
+        ssh_alias = "bastion"
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion "orders-dev" est listée comme disponible
+      Et la connexion MongoDB "orders-dev" passe par le bastion "bastion.example.com:2222" en tant que "jump"
+      Et la commande de mot de passe n'a pas été exécutée
+      Et la liste ne montre ni l'hôte "bastion.example.com", ni l'utilisateur "jump", ni le secret "marqueur"
+
   Règle: Chaque moteur a ses outils : les outils SQL renvoient vers find ou aggregate, les outils de documents vers query
 
     Scénario: Une requête SQL sur une connexion MongoDB renvoie vers find ou aggregate sans exécuter la commande

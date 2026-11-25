@@ -56,7 +56,7 @@ Fonctionnalité: Rebonds SSH (ProxyJump)
       Alors la connexion "via-bastion" est listée comme disponible
       Et la connexion "via-bastion" traverse les sauts SSH "premier.example.com:2222, second.example.com:22, bastion.example.com:22"
 
-  Règle: Un saut ProxyJump littéral n'a pas besoin de bloc Host, mais l'alias de l'entrée oui
+  Règle: Un rebond écrit en clair dans ProxyJump n'a pas besoin de son propre bloc Host
 
     Scénario: Un rebond écrit en clair dans ProxyJump suffit
       Étant donné un fichier de configuration SSH qui contient :

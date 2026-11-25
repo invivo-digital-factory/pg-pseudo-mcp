@@ -6,8 +6,8 @@ use scarif_database_mcp::contexts::connections::presentation::summary;
 use serde_json::{Value, json};
 
 use crate::bdd_support::{TunnelSpec, offline_target, write_workspace};
+use crate::connections_steps::support::{postgres_connection, write_dbeaver};
 use crate::connections_world::ConnectionsWorld;
-use crate::decouverte_des_connexions::{postgres_connection, write_dbeaver};
 
 const EXISTING_CONTENT: &str = "# hand written, must survive\n";
 const SAVED_SECRET: &str = "dbeaver-saved-canary-7741";
@@ -217,6 +217,12 @@ fn run_import(world: &mut ConnectionsWorld, force: bool) {
     if std::fs::metadata(&file).is_ok_and(|metadata| metadata.len() == 0) {
         std::fs::remove_file(&file).expect("remove the empty placeholder");
     }
+    let ssh_config = world.ssh_config.clone().expect("an ssh config");
+    std::fs::copy(
+        &ssh_config,
+        world.config_dir.path().join("ssh_config.before"),
+    )
+    .expect("ssh config snapshot");
     let use_case = import_dbeaver_use_case(&world.config());
     world.import_outcome = Some(
         use_case

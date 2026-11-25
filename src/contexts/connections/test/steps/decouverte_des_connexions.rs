@@ -1,65 +1,14 @@
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use scarif_database_mcp::contexts::connections::domain::repositories::ConnectionCatalog;
-use scarif_database_mcp::contexts::connections::infrastructure::data_sources::dbeaver::credentials::encrypt_for_tests;
 use scarif_database_mcp::contexts::connections::presentation;
 use serde_json::{Map, Value, json};
 
 use crate::bdd_support::{CONNECTION, offline_target, ssh_asset, text_of, write_workspace};
+use crate::connections_steps::support::{
+    dbeaver_dir, postgres_connection, write_connection_file, write_credentials, write_dbeaver,
+};
 use crate::connections_world::ConnectionsWorld;
-
-pub fn write_dbeaver(
-    world: &ConnectionsWorld,
-    project: &str,
-    suffix: &str,
-    connections: &[(String, Value, Value)],
-) {
-    let dir = world
-        .workspace
-        .path()
-        .join("workspace6")
-        .join(project)
-        .join(".dbeaver");
-    std::fs::create_dir_all(&dir).expect("workspace dir");
-    let mut sources = Map::new();
-    let mut credentials = Map::new();
-    for (id, connection, saved) in connections {
-        sources.insert(id.clone(), connection.clone());
-        if !saved.is_null() {
-            credentials.insert(id.clone(), saved.clone());
-        }
-    }
-    std::fs::write(
-        dir.join(format!("data-sources{suffix}.json")),
-        json!({ "folders": {}, "connections": sources }).to_string(),
-    )
-    .expect("data sources");
-    write_credentials(world, project, suffix, &Value::Object(credentials));
-}
-
-fn write_credentials(world: &ConnectionsWorld, project: &str, suffix: &str, credentials: &Value) {
-    let dir = world
-        .workspace
-        .path()
-        .join("workspace6")
-        .join(project)
-        .join(".dbeaver");
-    std::fs::write(
-        dir.join(format!("credentials-config{suffix}.json")),
-        encrypt_for_tests(&credentials.to_string(), [7u8; 16]),
-    )
-    .expect("credentials");
-}
-
-pub fn postgres_connection(name: &str, configuration: Value) -> Value {
-    json!({
-        "provider": "postgresql",
-        "driver": "postgres-jdbc",
-        "name": name,
-        "save-password": true,
-        "configuration": configuration
-    })
-}
 
 fn saved(user: &str, password: &str) -> Value {
     json!({ "#connection": { "user": user, "password": password } })
@@ -125,12 +74,7 @@ async fn secondary_sources(world: &mut ConnectionsWorld, name: String) {
     regex = r#"^un projet DBeaver "([^"]+)" dont le fichier data-sources.json n'est pas du JSON$"#
 )]
 async fn unreadable_project(world: &mut ConnectionsWorld, project: String) {
-    let dir = world
-        .workspace
-        .path()
-        .join("workspace6")
-        .join(project)
-        .join(".dbeaver");
+    let dir = dbeaver_dir(world, &project);
     std::fs::create_dir_all(&dir).expect("workspace dir");
     std::fs::write(dir.join("data-sources.json"), [0x8a, 0x01, 0xff, 0x00])
         .expect("encrypted data sources");
@@ -313,7 +257,7 @@ async fn file_with_first_suffixed(world: &mut ConnectionsWorld, name: String) {
         .map(|entry| entry.name.clone())
         .find(|listed| listed.starts_with(&format!("{name} (")))
         .expect("a suffixed DBeaver duplicate");
-    crate::fichier_de_connexions::write_connection_file(
+    write_connection_file(
         world,
         &format!(
             "[[connection]]\nname = \"{first}\"\nhost = \"db.example.com\"\nuser = \"alice\"\ntype = \"dev\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"s3cret\"]\n"

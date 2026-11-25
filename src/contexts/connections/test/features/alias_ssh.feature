@@ -70,6 +70,22 @@ Fonctionnalité: Atteindre une base par un alias SSH
       Et la raison de la connexion "via-absent" contient "add a Host block"
       Et la liste ne montre ni l'hôte "db.example.com", ni l'utilisateur "alice", ni le secret "s3cret"
 
+  Règle: L'hôte, le port et l'utilisateur du bastion viennent de la résolution d'OpenSSH, jamais du fichier de connexions
+
+    Scénario: L'alias est résolu avec son hôte, son port et son utilisateur, et la liste n'en montre rien
+      Étant donné un fichier de configuration SSH qui contient :
+        """
+        Host bastion
+          HostName bastion.example.com
+          Port 2222
+          User jump
+        """
+      Et une connexion du fichier "via-bastion" derrière l'alias SSH "bastion"
+      Quand l'agent liste les connexions
+      Alors la connexion "via-bastion" est listée comme disponible
+      Et la connexion "via-bastion" passe par le bastion "bastion.example.com:2222" en tant que "jump"
+      Et la liste ne montre ni l'hôte "bastion.example.com", ni l'utilisateur "jump", ni le secret "s3cret"
+
   Règle: Une directive que le serveur ne sait pas honorer rend la connexion non prise en charge et la nomme
 
     Plan du Scénario: La directive « <directive> » rend la connexion non prise en charge

@@ -55,6 +55,10 @@ Fonctionnalité: Mot de passe donné par une commande
         | n'écrit pas de l'UTF-8        | ["/usr/bin/printf", "\\377"]                                              | the password command output is not valid UTF-8      |
         | est tuée par un signal        | ["/bin/sh", "-c", "kill -9 $$"]                                           | the password command was stopped by a signal        |
 
+    Scénario: Une commande qui dépasse son délai, 30 secondes en service, est interrompue
+      Quand le serveur lance la commande de mot de passe ["/bin/sleep", "5"] avec un délai réduit à 1 seconde
+      Alors la commande échoue avec le motif « the password command did not finish in time »
+
     @ae3
     Scénario: Une commande de mot de passe qui échoue rend un motif fixe avec son statut et sans sa sortie
       Étant donné le fichier de connexions suivant :

@@ -9,8 +9,8 @@ use crate::bdd_support::{
     BASTION_HOST, BASTION_USER, CONNECTION, TunnelSpec, bastion_port, known_hosts_pattern,
     public_key_fields, ssh_asset, write_workspace,
 };
+use crate::connections_steps::support::{database_target_or_offline, dbeaver_dir};
 use crate::connections_world::ConnectionsWorld;
-use crate::fichier_de_connexions::database_target_or_offline;
 
 fn tunneled_workspace(world: &mut ConnectionsWorld) {
     let mut target = database_target_or_offline();
@@ -35,13 +35,7 @@ async fn tunneled_connection(world: &mut ConnectionsWorld) {
 )]
 async fn tunneled_connection_bypassing(world: &mut ConnectionsWorld) {
     tunneled_workspace(world);
-    let sources = world
-        .workspace
-        .path()
-        .join("workspace6")
-        .join("General")
-        .join(".dbeaver")
-        .join("data-sources.json");
+    let sources = dbeaver_dir(world, "General").join("data-sources.json");
     let mut document: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&sources).expect("data sources"))
             .expect("json");

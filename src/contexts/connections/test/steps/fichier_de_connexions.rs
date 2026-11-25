@@ -5,6 +5,7 @@ use scarif_database_mcp::contexts::connections::domain::types::{ExecutionLimits,
 use serde_json::{Value, json};
 
 use crate::bdd_support::{database_target, offline_target};
+use crate::connections_steps::support::{make_executable, write_connection_file, write_dbeaver};
 use crate::connections_world::ConnectionsWorld;
 
 const LIMITS: ExecutionLimits = ExecutionLimits {
@@ -12,36 +13,11 @@ const LIMITS: ExecutionLimits = ExecutionLimits {
     timeout_ms: 10_000,
 };
 
-pub fn expanded(world: &ConnectionsWorld, template: &str) -> String {
-    let target = database_target_or_offline();
-    template
-        .replace("{dossier}", &world.config_dir.path().to_string_lossy())
-        .replace("{base}", &target.database)
-        .replace("{utilisateur}", &target.user)
-        .replace("{mot_de_passe}", &target.password)
-}
-
-pub fn database_target_or_offline() -> crate::bdd_support::DatabaseTarget {
-    if std::env::var(crate::bdd_support::DATABASE_URL_VAR).is_ok() {
-        database_target()
-    } else {
-        offline_target()
-    }
-}
-
 fn docstring(step: &Step) -> &str {
     step.docstring
         .as_deref()
         .expect("a docstring")
         .trim_start_matches('\n')
-}
-
-pub fn write_connection_file(world: &ConnectionsWorld, contents: &str) {
-    let file = world.connections_file();
-    if file.is_dir() {
-        std::fs::remove_dir(&file).expect("remove the directory in place of the file");
-    }
-    std::fs::write(file, expanded(world, contents)).expect("connection file");
 }
 
 fn key_of(line: &str) -> &str {
@@ -134,7 +110,7 @@ async fn workspace_with_two_connections(
             )
         })
         .collect();
-    crate::decouverte_des_connexions::write_dbeaver(world, "General", "", &connections);
+    write_dbeaver(world, "General", "", &connections);
 }
 
 #[given(regex = r#"^une connexion du fichier "([^"]+)" derrière l'alias SSH "([^"]+)"$"#)]
@@ -186,12 +162,6 @@ async fn file_connection_with_scripted_command(
             command = command.display(),
         ),
     );
-}
-
-pub fn make_executable(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .expect("executable script");
 }
 
 fn record(world: &mut ConnectionsWorld, outcome: Result<(), ConnectionError>) {
