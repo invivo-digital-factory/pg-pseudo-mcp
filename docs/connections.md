@@ -53,7 +53,7 @@ ssh_alias = "corp-jump-ledger"
 | `engine` | `postgresql` (default) or `mongodb`, see [MongoDB](mongodb.md) for the keys of a MongoDB entry |
 | `host`, `port` (5432), `database` (`postgres`), `user` | The database, as seen from the SSH host when `ssh_alias` is set; `database` is the connection's default database |
 | `sslmode` | `disable`, `allow`, `prefer` (default), `require`, `verify-ca` or `verify-full` |
-| `type` | `dev`, `test` or `prod` |
+| `type` | `dev`, `test` or `prod`; on `prod`, the server instructions ask the agent to list the queries it plans and wait for your OK before a series of queries (a single lookup you asked for needs none) |
 | `auth` | How the password is obtained, see below |
 | `ssh_alias` | A `Host` alias of `~/.ssh/config` |
 | `read_dbeaver` | Top-level; `false` turns the DBeaver source off entirely (default `true`) |

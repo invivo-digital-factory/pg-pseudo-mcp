@@ -26,6 +26,7 @@ pub const SERVER_NAME: &str = "scarif";
 pub const INSTRUCTIONS: &str = "\
 scarif gives read-only access to the PostgreSQL and MongoDB databases of the developer's own connection file, and to the PostgreSQL databases of DBeaver as a fallback.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query for PostgreSQL or find and aggregate for MongoDB.
+On a connection of type prod, before a series of queries, state the queries you plan to run and wait once for the developer's OK; a single lookup the developer asked for explicitly needs no extra confirmation.
 A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, find, aggregate, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
 A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived, policy).
@@ -185,5 +186,26 @@ pub async fn serve() -> ExitCode {
             tracing::error!(%error, "MCP server stopped with an error");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::INSTRUCTIONS;
+
+    #[test]
+    fn les_instructions_demandent_l_accord_du_developpeur_avant_une_serie_de_requetes_en_prod() {
+        let rule = INSTRUCTIONS
+            .lines()
+            .find(|line| line.starts_with("On a connection of type prod"))
+            .expect("a rule for prod connections");
+        assert!(rule.contains("state the queries you plan to run"), "{rule}");
+        assert!(rule.contains("wait once for the developer's OK"), "{rule}");
+        assert!(
+            rule.contains(
+                "a single lookup the developer asked for explicitly needs no extra confirmation"
+            ),
+            "{rule}"
+        );
     }
 }
