@@ -3,4 +3,5 @@ mod column_policy;
 mod data_directory;
 mod ejson_round_trip;
 mod engine_routing;
+mod projected_documents;
 mod translator_lookup;

@@ -740,3 +740,48 @@ fn a_field_below_a_derived_value_is_judged_on_the_matching_input_field() {
         PROVEN_CLEAR
     );
 }
+
+#[test]
+fn an_inclusion_projection_keeps_its_containers_as_their_source() {
+    let inclusion = json!({"attributes.level.label": 1, "attributes.supplier.attributes.label": 1});
+    for lineage in [
+        find(Some(inclusion.clone())),
+        aggregate(json!([{"$project": inclusion}])),
+    ] {
+        for path in [
+            "attributes",
+            "attributes.level",
+            "attributes.level.label",
+            "attributes.supplier",
+            "attributes.supplier.attributes",
+            "attributes.supplier.attributes.label",
+        ] {
+            assert_eq!(lineage.of(path), source("customers", path), "{path}");
+        }
+    }
+}
+
+#[test]
+fn a_container_holding_moved_or_computed_values_stays_derived() {
+    let lineage = aggregate(json!([
+        {"$project": {"contact": {"email": 1, "label": "$name"}, "card": {"$mergeObjects": ["$contact", "$address"]}}},
+        {"$set": {"card.extra": 1}}
+    ]));
+
+    assert_eq!(
+        lineage.of("contact"),
+        derived(&["contact.email", "name"], &[])
+    );
+    assert_eq!(
+        clearance(&lineage.of("contact"), &clear_on(&["contact.email"])),
+        TAINTED
+    );
+    assert_eq!(
+        lineage.of("card"),
+        derived(&["contact", "address"], &["$mergeObjects"])
+    );
+    assert_eq!(
+        clearance(&lineage.of("card"), &clear_on(&["contact", "address"])),
+        TAINTED
+    );
+}

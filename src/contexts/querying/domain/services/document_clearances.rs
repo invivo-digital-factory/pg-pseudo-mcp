@@ -66,7 +66,7 @@ pub fn document_clearances(
                     },
                 ));
             }
-            let traced = lineage.of_segments(path);
+            let traced = lineage.own_of_segments(path);
             let judged = match command {
                 DocumentCommand::Find => find_clearance(path, &traced, policy, source),
                 DocumentCommand::Aggregate => output_clearance(path, &traced, policy),
@@ -170,7 +170,7 @@ mod unit {
     };
     use crate::contexts::querying::domain::services::mongo_lineage::document_lineage;
     use crate::contexts::querying::domain::types::{
-        AggregateRequest, FindRequest, QueryLimits, Translations,
+        AggregateRequest, FindRequest, MongoFieldPattern, QueryLimits, Translations,
     };
 
     fn segments(path: &[&str]) -> Vec<String> {
@@ -266,6 +266,163 @@ mod unit {
                     proven_clear: false
                 }
             )]
+        );
+    }
+
+    fn clear_on(paths: &[&str]) -> ColumnPolicy {
+        let mut policy = ColumnPolicy::default();
+        for path in paths {
+            policy.insert_field(
+                MongoFieldPattern {
+                    database: Some("shop".into()),
+                    collection: Some("customers".into()),
+                    path: path.to_string(),
+                },
+                PolicyDecision::Clear,
+            );
+        }
+        policy
+    }
+
+    fn found(projection: Option<serde_json::Value>) -> DocumentLineage {
+        let guarded = inspect_find(&FindRequest {
+            database: Some("shop".into()),
+            collection: "customers".into(),
+            projection,
+            ..FindRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        document_lineage(&guarded, "shop")
+    }
+
+    fn aggregated(pipeline: Vec<serde_json::Value>) -> DocumentLineage {
+        let guarded = inspect_aggregate(&AggregateRequest {
+            database: Some("shop".into()),
+            collection: "customers".into(),
+            pipeline,
+            ..AggregateRequest::default()
+        })
+        .expect("allowed")
+        .finish(&Translations::default(), &QueryLimits::default());
+        document_lineage(&guarded, "shop")
+    }
+
+    fn judged_under(
+        policy: &ColumnPolicy,
+        lineage: &DocumentLineage,
+        command: DocumentCommand,
+        paths: &[&str],
+    ) -> Vec<(Vec<String>, DocumentClearance)> {
+        let observed = paths
+            .iter()
+            .map(|path| path.split('.').map(str::to_string).collect())
+            .collect();
+        document_clearances(&observed, lineage, policy, ("shop", "customers"), command)
+    }
+
+    #[test]
+    fn un_document_que_la_requete_ne_fait_que_traverser_est_juge_comme_sans_projection() {
+        let policy = clear_on(&["attributes.level.label", "attributes.supplier.label"]);
+        let paths = [
+            "attributes",
+            "attributes.level",
+            "attributes.level.label",
+            "attributes.supplier",
+            "attributes.supplier.label",
+            "attributes.supplier.contact",
+        ];
+        let inclusion = json!({
+            "attributes.level.label": 1,
+            "attributes.supplier.label": 1,
+            "attributes.supplier.contact": 1
+        });
+        for (command, traversed, whole) in [
+            (
+                DocumentCommand::Find,
+                found(Some(inclusion.clone())),
+                found(None),
+            ),
+            (
+                DocumentCommand::Find,
+                found(Some(json!({"attributes.secret": 0}))),
+                found(None),
+            ),
+            (
+                DocumentCommand::Aggregate,
+                aggregated(vec![json!({"$project": inclusion.clone()})]),
+                aggregated(Vec::new()),
+            ),
+            (
+                DocumentCommand::Aggregate,
+                aggregated(vec![
+                    json!({"$set": {"attributes.main_category": "$category"}}),
+                ]),
+                aggregated(Vec::new()),
+            ),
+        ] {
+            let expected = judged_under(&policy, &whole, command, &paths);
+            assert_eq!(
+                expected,
+                vec![
+                    (
+                        segments(&["attributes", "level", "label"]),
+                        DocumentClearance::Clear
+                    ),
+                    (
+                        segments(&["attributes", "supplier", "label"]),
+                        DocumentClearance::Clear
+                    ),
+                ]
+            );
+            assert_eq!(
+                judged_under(&policy, &traversed, command, &paths),
+                expected,
+                "{command:?}"
+            );
+        }
+
+        let set = aggregated(vec![
+            json!({"$set": {"attributes.main_category": "$category"}}),
+        ]);
+        assert_eq!(
+            judged_under(
+                &policy,
+                &set,
+                DocumentCommand::Aggregate,
+                &["attributes.main_category"]
+            ),
+            vec![(
+                segments(&["attributes", "main_category"]),
+                DocumentClearance::NamedAs("category".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn un_document_dont_le_contenu_est_calcule_reste_derive_et_souille() {
+        let policy = clear_on(&["contact", "address", "contact.email", "name"]);
+        let lineage = aggregated(vec![
+            json!({"$project": {"contact": {"email": 1, "label": "$name"}, "card": {"$mergeObjects": ["$contact", "$address"]}}}),
+            json!({"$set": {"card.extra": 1}}),
+        ]);
+        let tainted = DocumentClearance::Derived {
+            proven_clear: false,
+        };
+        assert_eq!(
+            judged_under(
+                &policy,
+                &lineage,
+                DocumentCommand::Aggregate,
+                &["card", "contact"]
+            ),
+            vec![
+                (segments(&["card"]), tainted),
+                (
+                    segments(&["contact"]),
+                    DocumentClearance::Derived { proven_clear: true }
+                ),
+            ]
         );
     }
 }
