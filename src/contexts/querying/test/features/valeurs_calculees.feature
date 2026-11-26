@@ -113,7 +113,8 @@ Fonctionnalité: Valeurs calculées et lignée
         | SELECT * FROM customers                                                                       | 1        | inconnue   |
 
   Règle: MongoDB : un champ recopié ou renommé garde la classification de sa source
-    Projection, clé de regroupement, $first, $push, $unwind, $lookup ou $replaceRoot sur un chemin :
+    Projection, clé de regroupement, $first, $push, $unwind, $lookup ou $replaceRoot sur un chemin, ou un élément choisi dans un tableau
+    par $arrayElemAt, $first ou $last :
     le champ de sortie est jugé comme le champ d'origine dans sa collection d'origine. Un document intermédiaire qu'une projection d'inclusion
     ne fait que traverser vient lui aussi de son chemin d'origine : chacun de ses champs est jugé pour lui-même.
 
@@ -153,6 +154,10 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$sortByCount": "$status"}]                                                                                  | _id          | status        | shop.customers |
         | [{"$project": {"attributes.level.label": 1, "attributes.size.label": 1}}]                                     | attributes   | attributes    | shop.customers |
         | [{"$project": {"attributes.level.label": 1, "attributes.size.label": 1}}]                                     | attributes.level | attributes.level | shop.customers |
+        | [{"$project": {"level": {"$arrayElemAt": ["$levels.label", 0]}}}]                                             | level        | levels.label  | shop.customers |
+        | [{"$project": {"mail": {"$first": "$contacts.email"}}}]                                                        | mail         | contacts.email | shop.customers |
+        | [{"$project": {"mail": {"$last": ["$contacts.email"]}}}]                                                       | mail         | contacts.email | shop.customers |
+        | [{"$project": {"main": {"$arrayElemAt": ["$levels", -1]}}}]                                                    | main.label   | levels.label  | shop.customers |
 
   Règle: MongoDB : un champ calculé n'est en clair que si tout ce qu'il lit est déclaré clear et chaque opérateur préserve le clair
     Ici status et amount sont déclarés clear pour shop.customers. Préservent le clair : $concat, $toLower, $toUpper, $toString, $trim, $cond, $ifNull,
@@ -186,6 +191,8 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$unwind": {"path": "$orders", "includeArrayIndex": "position"}}]                            | position | prouvé en clair   |
         | [{"$project": {"at": "$$NOW"}}]                                                                | at       | prouvé en clair   |
         | [{"$set": {"card": {"$mergeObjects": ["$status", "$amount"]}}}, {"$set": {"card.extra": 1}}]   | card     | teinté            |
+        | [{"$project": {"user": {"$arrayElemAt": [{"$split": ["$email", "@"]}, 0]}}}]                   | user     | teinté            |
+        | [{"$project": {"user": {"$first": {"$split": ["$email", "@"]}}}}]                              | user     | teinté            |
 
   Règle: MongoDB : ce que la lignée ne suit pas est inconnu, donc teinté
     $$ROOT et les variables, $objectToArray, les noms de champ calculés, $facet, $unionWith et les étapes non suivies donnent un champ dérivé.

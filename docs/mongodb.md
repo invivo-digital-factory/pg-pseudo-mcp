@@ -111,7 +111,7 @@ Each value is judged by its field path in dot notation without array indices (`i
 
 ## Derived fields and lineage
 
-In `aggregate` results, and for a `find` projection, a field that passes through or is renamed (`{"a": 1}`, `{"b": "$a"}`, `$group` keys, `$first`, `$last`, `$push` and `$addToSet` of a path, `$unwind`, `$lookup` results, `$replaceRoot` on a path) keeps the classification of its source path in its source collection: policy, dictionary on the source name, hints.
+In `aggregate` results, and for a `find` projection, a field that passes through or is renamed (`{"a": 1}`, `{"b": "$a"}`, `$group` keys, `$first`, `$last`, `$push` and `$addToSet` of a path, `$unwind`, `$lookup` results, `$replaceRoot` on a path, an element picked from an array path by `$arrayElemAt`, `$first` or `$last`) keeps the classification of its source path in its source collection: policy, dictionary on the source name, hints.
 
 A sub-document the query only passes through is not judged as a computed value: the parents of a nested inclusion (`{"a.b.c": 1}`), a sub-document trimmed by an exclusion (`{"a.b": 0}`) or extended by `$set` and `$addFields` on a nested path keep the classification of their source path, and each field below them is judged on its own, as without the projection. A sub-document whose content is computed (`$mergeObjects`, an object built from other paths) stays derived, keys included.
 
