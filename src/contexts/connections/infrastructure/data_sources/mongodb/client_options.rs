@@ -2,11 +2,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use mongodb::options::{
-    ClientOptions, ConnectionString, Credential, HostInfo, ReadPreference, SelectionCriteria,
-    ServerAddress, ServerMonitoringMode, Socks5Proxy, Tls, TlsOptions,
+    ClientOptions, ConnectionString, Credential, HostInfo, ReadPreference, ReadPreferenceOptions,
+    SelectionCriteria, ServerAddress, ServerMonitoringMode, Socks5Proxy, Tls, TlsOptions,
 };
 
-use crate::contexts::connections::domain::types::{MongoConnectParams, MongoTransport, Secret};
+use crate::contexts::connections::domain::types::{
+    MongoConnectParams, MongoReadPreference, MongoTransport, ReadPreferenceMode, Secret,
+};
 use crate::contexts::connections::infrastructure::data_sources::socks::ProxyCredentials;
 
 pub const SELECTION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -58,9 +60,7 @@ pub async fn client_options(
         .source(AUTH_SOURCE.to_string())
         .build();
     options.credential = Some(login);
-    options.selection_criteria = Some(SelectionCriteria::ReadPreference(
-        ReadPreference::SecondaryPreferred { options: None },
-    ));
+    options.selection_criteria = Some(selection_criteria(&params.read_preference));
     options.max_pool_size = Some(MAX_POOL_SIZE);
     options.max_idle_time = Some(MAX_IDLE_TIME);
     options.server_monitoring_mode = Some(ServerMonitoringMode::Poll);
@@ -80,6 +80,22 @@ pub async fn client_options(
     Ok(options)
 }
 
+pub fn selection_criteria(read_preference: &MongoReadPreference) -> SelectionCriteria {
+    let options = (!read_preference.tags.is_empty()).then(|| {
+        let tag_set = read_preference.tags.iter().cloned().collect();
+        ReadPreferenceOptions::builder()
+            .tag_sets(vec![tag_set])
+            .build()
+    });
+    SelectionCriteria::ReadPreference(match read_preference.mode {
+        ReadPreferenceMode::Primary => ReadPreference::Primary,
+        ReadPreferenceMode::PrimaryPreferred => ReadPreference::PrimaryPreferred { options },
+        ReadPreferenceMode::Secondary => ReadPreference::Secondary { options },
+        ReadPreferenceMode::SecondaryPreferred => ReadPreference::SecondaryPreferred { options },
+        ReadPreferenceMode::Nearest => ReadPreference::Nearest { options },
+    })
+}
+
 #[cfg(test)]
 mod unit {
     use mongodb::options::{
@@ -91,6 +107,7 @@ mod unit {
 
     fn seed(host: &str, tls: bool) -> MongoConnectParams {
         MongoConnectParams {
+            read_preference: MongoReadPreference::default(),
             transport: MongoTransport::Seed {
                 host: host.into(),
                 port: 1024,
@@ -170,6 +187,56 @@ mod unit {
             ))
         );
         assert_eq!(options.socks5_proxy, None);
+    }
+
+    #[tokio::test]
+    async fn la_preference_de_lecture_de_la_connexion_est_posee_sur_le_client() {
+        let mut params = seed("pl-0.atlas.scarif.test", false);
+        params.read_preference = MongoReadPreference {
+            mode: ReadPreferenceMode::Secondary,
+            tags: vec![("nodeType".into(), "ANALYTICS".into())],
+        };
+        let options = options_for(&params).await;
+        let Some(SelectionCriteria::ReadPreference(ReadPreference::Secondary {
+            options: Some(read_options),
+        })) = options.selection_criteria
+        else {
+            panic!("{:?}", options.selection_criteria);
+        };
+        let tag_sets = read_options.tag_sets.expect("tag sets");
+        assert_eq!(tag_sets.len(), 1);
+        assert_eq!(
+            tag_sets[0].get("nodeType").map(String::as_str),
+            Some("ANALYTICS")
+        );
+    }
+
+    #[test]
+    fn chaque_mode_donne_la_preference_du_pilote_sans_options_quand_il_n_a_pas_d_etiquette() {
+        for (mode, expected) in [
+            (ReadPreferenceMode::Primary, ReadPreference::Primary),
+            (
+                ReadPreferenceMode::PrimaryPreferred,
+                ReadPreference::PrimaryPreferred { options: None },
+            ),
+            (
+                ReadPreferenceMode::Secondary,
+                ReadPreference::Secondary { options: None },
+            ),
+            (
+                ReadPreferenceMode::SecondaryPreferred,
+                ReadPreference::SecondaryPreferred { options: None },
+            ),
+            (
+                ReadPreferenceMode::Nearest,
+                ReadPreference::Nearest { options: None },
+            ),
+        ] {
+            assert_eq!(
+                selection_criteria(&MongoReadPreference::of(mode)),
+                SelectionCriteria::ReadPreference(expected)
+            );
+        }
     }
 
     #[tokio::test]

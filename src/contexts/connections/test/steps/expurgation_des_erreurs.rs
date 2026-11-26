@@ -1,8 +1,8 @@
 use cucumber::{given, then, when};
 use scarif_database_mcp::contexts::connections::domain::errors::SessionError;
 use scarif_database_mcp::contexts::connections::domain::types::{
-    ConnectOptions, Hop, HostKeyPolicy, MongoConnectParams, MongoTransport, SshAuth, SshHop,
-    SslMode, Tunnel, TunnelAuth,
+    ConnectOptions, Hop, HostKeyPolicy, MongoConnectParams, MongoReadPreference, MongoTransport,
+    SshAuth, SshHop, SslMode, Tunnel, TunnelAuth,
 };
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::socks::{
     ProxyCredentials, TargetPolicy,
@@ -110,6 +110,7 @@ async fn mongo_failure(world: &mut ConnectionsWorld, message: String) {
     let identity = identity(world).clone();
     let host = text(&identity, "host");
     let params = MongoConnectParams {
+        read_preference: MongoReadPreference::default(),
         transport: MongoTransport::Srv { host: host.clone() },
         replica_set: None,
         database: None,

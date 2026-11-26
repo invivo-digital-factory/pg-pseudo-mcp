@@ -135,10 +135,12 @@ Fonctionnalité: Déclarer une connexion PostgreSQL dans le fichier
       Et la raison de la connexion "app" contient "`<clé>` is only valid when `engine` is"
 
       Exemples:
-        | clé         | valeur |
-        | srv         | true   |
-        | tls         | true   |
-        | replica_set | "rs0"  |
+        | clé                  | valeur      |
+        | srv                  | true        |
+        | tls                  | true        |
+        | replica_set          | "rs0"       |
+        | read_preference      | "secondary" |
+        | read_preference_tags | ["a:b"]     |
 
   Règle: password_command est exigée par auth = "command" et interdite avec les autres modes
 

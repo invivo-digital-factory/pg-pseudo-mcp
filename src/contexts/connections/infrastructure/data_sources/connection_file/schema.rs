@@ -4,20 +4,28 @@ use toml::{Table, Value};
 
 use crate::contexts::connections::domain::constants::{ENGINE_MONGODB, ENGINE_POSTGRESQL};
 use crate::contexts::connections::domain::types::{
-    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoSettings, MongoTransport,
-    SslMode,
+    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoReadPreference,
+    MongoSettings, MongoTransport, ReadPreferenceMode, SslMode,
 };
 
 const DEFAULT_POSTGRES_PORT: u16 = 5432;
 const DEFAULT_MONGODB_PORT: u16 = 27017;
 const DEFAULT_DATABASE: &str = "postgres";
-const MONGODB_ONLY_KEYS: [&str; 3] = ["srv", "tls", "replica_set"];
-const KNOWN_KEYS: [&str; 14] = [
+const MONGODB_ONLY_KEYS: [&str; 5] = [
+    "srv",
+    "tls",
+    "replica_set",
+    "read_preference",
+    "read_preference_tags",
+];
+const KNOWN_KEYS: [&str; 16] = [
     "name",
     "engine",
     "srv",
     "tls",
     "replica_set",
+    "read_preference",
+    "read_preference_tags",
     "host",
     "port",
     "database",
@@ -292,7 +300,53 @@ fn mongo_settings_of(
         database: optional_text(table, "database")?,
         replica_set: optional_text(table, "replica_set")?,
         transport,
+        read_preference: read_preference_of(table)?,
     })
+}
+
+fn read_preference_of(table: &Table) -> Result<Option<MongoReadPreference>, String> {
+    let mode = match optional_text(table, "read_preference")? {
+        None => None,
+        Some(name) => Some(ReadPreferenceMode::from_name(&name).ok_or_else(|| {
+            format!(
+                "`read_preference` must be one of {}",
+                ReadPreferenceMode::NAMES.join(", ")
+            )
+        })?),
+    };
+    let tags = match table.get("read_preference_tags") {
+        None => None,
+        Some(Value::Array(items)) => Some(
+            items
+                .iter()
+                .map(|item| item.as_str().and_then(tag_of))
+                .collect::<Option<Vec<_>>>()
+                .filter(|tags| !tags.is_empty())
+                .ok_or(
+                    "`read_preference_tags` must be a non-empty list of \"key:value\" strings",
+                )?,
+        ),
+        Some(_) => {
+            return Err(
+                "`read_preference_tags` must be a non-empty list of \"key:value\" strings"
+                    .to_string(),
+            );
+        }
+    };
+    match (mode, tags) {
+        (None, None) => Ok(None),
+        (Some(mode), None) => Ok(Some(MongoReadPreference::of(mode))),
+        (None | Some(ReadPreferenceMode::Primary), Some(_)) => {
+            Err("`read_preference_tags` needs a `read_preference` other than primary".to_string())
+        }
+        (Some(mode), Some(tags)) => Ok(Some(MongoReadPreference { mode, tags })),
+    }
+}
+
+fn tag_of(text: &str) -> Option<(String, String)> {
+    let (key, value) = text.split_once(':')?;
+    let (key, value) = (key.trim(), value.trim());
+    (!key.is_empty() && !value.is_empty()).then(|| (key.to_string(), value.to_string()))
 }
 
 fn optional_flag(table: &Table, key: &str) -> Result<Option<bool>, String> {
@@ -482,6 +536,7 @@ password_command = ["/bin/echo", "x"]
                 transport: MongoTransport::Srv {
                     host: "pl-0.atlas.scarif.test".to_string()
                 },
+                read_preference: None,
             })
         );
     }
@@ -518,6 +573,7 @@ password_command = ["/bin/echo", "x"]
                     port: 1024,
                     tls: false
                 },
+                read_preference: None,
             })
         );
         assert_eq!(definition.ssh_alias.as_deref(), Some("bastion"));
@@ -560,9 +616,94 @@ password_command = ["/bin/echo", "x"]
         }
     }
 
+    fn read_preference_of_entry(extra: &str) -> Result<Option<MongoReadPreference>, String> {
+        let EngineSettings::Mongodb(settings) = only_definition(&mongo_with(extra))?.settings
+        else {
+            panic!("expected mongodb settings");
+        };
+        Ok(settings.read_preference)
+    }
+
+    #[test]
+    fn sans_read_preference_la_connexion_garde_la_preference_par_defaut() {
+        assert_eq!(read_preference_of_entry("").unwrap(), None);
+    }
+
+    #[test]
+    fn chaque_mode_de_read_preference_est_lu() {
+        for name in ReadPreferenceMode::NAMES {
+            let read = read_preference_of_entry(&format!("read_preference = \"{name}\""))
+                .unwrap()
+                .expect(name);
+            assert_eq!(read.mode.as_str(), name);
+            assert!(read.tags.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn les_etiquettes_de_read_preference_sont_lues_en_paires_cle_valeur() {
+        let read = read_preference_of_entry(
+            "read_preference = \"secondary\"\nread_preference_tags = [\"nodeType:ANALYTICS\", \"region: EU \"]",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(read.mode, ReadPreferenceMode::Secondary);
+        assert_eq!(
+            read.tags,
+            vec![
+                ("nodeType".to_string(), "ANALYTICS".to_string()),
+                ("region".to_string(), "EU".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn une_read_preference_invalide_nomme_la_cle_fautive() {
+        for (extra, field) in [
+            (
+                "read_preference = \"Secondary\"",
+                "`read_preference` must be one of",
+            ),
+            ("read_preference = 1", "`read_preference`"),
+            (
+                "read_preference = \"secondary\"\nread_preference_tags = []",
+                "`read_preference_tags`",
+            ),
+            (
+                "read_preference = \"secondary\"\nread_preference_tags = [\"nodeType\"]",
+                "`read_preference_tags`",
+            ),
+            (
+                "read_preference = \"secondary\"\nread_preference_tags = [\":x\"]",
+                "`read_preference_tags`",
+            ),
+            (
+                "read_preference = \"secondary\"\nread_preference_tags = \"a:b\"",
+                "`read_preference_tags`",
+            ),
+            (
+                "read_preference_tags = [\"a:b\"]",
+                "`read_preference_tags` needs a `read_preference` other than primary",
+            ),
+            (
+                "read_preference = \"primary\"\nread_preference_tags = [\"a:b\"]",
+                "`read_preference_tags` needs a `read_preference` other than primary",
+            ),
+        ] {
+            let reason = read_preference_of_entry(extra).unwrap_err();
+            assert!(reason.contains(field), "{extra}: {reason}");
+        }
+    }
+
     #[test]
     fn une_entree_postgresql_refuse_srv_tls_et_replica_set() {
-        for extra in ["srv = true", "tls = true", "replica_set = \"rs0\""] {
+        for extra in [
+            "srv = true",
+            "tls = true",
+            "replica_set = \"rs0\"",
+            "read_preference = \"secondary\"",
+            "read_preference_tags = [\"a:b\"]",
+        ] {
             let key = extra.split(' ').next().unwrap();
             let reason = only_definition(&entry_with(extra)).unwrap_err();
             assert!(reason.contains(&format!("`{key}`")), "{extra}: {reason}");

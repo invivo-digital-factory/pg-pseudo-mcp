@@ -484,6 +484,7 @@ impl DocumentSessionPool for MongoSessionPool {
 
 #[cfg(test)]
 mod unit {
+    use crate::contexts::connections::domain::types::MongoReadPreference;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
 
@@ -514,6 +515,7 @@ mod unit {
                     status: ConnectionStatus::Available,
                     params: None,
                     mongo: Some(MongoConnectParams {
+                        read_preference: MongoReadPreference::default(),
                         transport: MongoTransport::Seed {
                             host: "pl-0.atlas.scarif.test".into(),
                             port: 1024,

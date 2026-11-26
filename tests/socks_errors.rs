@@ -5,7 +5,7 @@ use std::time::Duration;
 use scarif_database_mcp::composition::logging::log_layer;
 use scarif_database_mcp::contexts::connections::domain::errors::{ConnectionError, SessionError};
 use scarif_database_mcp::contexts::connections::domain::types::{
-    ExecutionLimits, FindRequest, MongoConnectParams, MongoTransport, Secret,
+    ExecutionLimits, FindRequest, MongoConnectParams, MongoReadPreference, MongoTransport, Secret,
 };
 use scarif_database_mcp::contexts::connections::infrastructure::data_sources::mongodb::{
     CHANNELS_PER_MEMBER, MongoSession, ProxyEndpoint, client_options,
@@ -65,6 +65,7 @@ impl ChannelOpener for RefusingOpener {
 
 fn params() -> MongoConnectParams {
     MongoConnectParams {
+        read_preference: MongoReadPreference::default(),
         transport: MongoTransport::Seed {
             host: MEMBER.into(),
             port: MEMBER_PORT,

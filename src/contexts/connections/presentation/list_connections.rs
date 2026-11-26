@@ -90,7 +90,8 @@ fn describe(entry: &ConnectionEntry) -> Value {
 mod unit {
     use super::*;
     use crate::contexts::connections::domain::types::{
-        ConnectionSource, HostKeyPolicy, MongoConnectParams, MongoTransport, SshAuth, SshHop,
+        ConnectionSource, HostKeyPolicy, MongoConnectParams, MongoReadPreference, MongoTransport,
+        SshAuth, SshHop,
     };
 
     fn mongo_entry(host_key: HostKeyPolicy) -> ConnectionEntry {
@@ -107,6 +108,7 @@ mod unit {
             status: ConnectionStatus::Available,
             params: None,
             mongo: Some(MongoConnectParams {
+                read_preference: MongoReadPreference::default(),
                 transport: MongoTransport::Srv {
                     host: "pl-0.atlas.scarif.test".to_string(),
                 },

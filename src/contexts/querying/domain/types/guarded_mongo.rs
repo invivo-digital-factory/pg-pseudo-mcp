@@ -38,15 +38,9 @@ pub struct GuardedAggregate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MongoReadPreference {
-    SecondaryPreferred,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MongoExecution {
     pub max_time_ms: u64,
     pub allow_disk_use: bool,
-    pub read_preference: MongoReadPreference,
     pub batch_size: u32,
     pub max_documents: usize,
     pub comment: &'static str,

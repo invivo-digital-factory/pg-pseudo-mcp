@@ -101,6 +101,20 @@ fn identity_lines(definition: &ConnectionDefinition) -> String {
             if let Some(database) = &settings.database {
                 text.push_str(&format!("database = {}\n", quoted(database)));
             }
+            if let Some(read_preference) = &settings.read_preference {
+                text.push_str(&format!(
+                    "read_preference = {}\n",
+                    quoted(read_preference.mode.as_str())
+                ));
+                if !read_preference.tags.is_empty() {
+                    let tags: Vec<String> = read_preference
+                        .tags
+                        .iter()
+                        .map(|(key, value)| quoted(&format!("{key}:{value}")))
+                        .collect();
+                    text.push_str(&format!("read_preference_tags = [{}]\n", tags.join(", ")));
+                }
+            }
             text.push_str(&format!("user = {user}\ntype = {kind}\n"));
             text
         }
@@ -136,7 +150,8 @@ mod integration {
 
     use super::*;
     use crate::contexts::connections::domain::types::{
-        ConnectionType, MongoSettings, MongoTransport, SslMode,
+        ConnectionType, MongoReadPreference, MongoSettings, MongoTransport, ReadPreferenceMode,
+        SslMode,
     };
     use crate::contexts::connections::infrastructure::data_sources::connection_file::parse_file;
 
@@ -207,6 +222,13 @@ mod integration {
                         port: 1024,
                         tls: false,
                     },
+                    read_preference: Some(MongoReadPreference {
+                        mode: ReadPreferenceMode::Secondary,
+                        tags: vec![
+                            ("nodeType".to_string(), "ANALYTICS".to_string()),
+                            ("region".to_string(), "eu:west".to_string()),
+                        ],
+                    }),
                 },
             ),
             mongo_definition(
@@ -217,6 +239,18 @@ mod integration {
                     transport: MongoTransport::Srv {
                         host: "pl-0.atlas.scarif.test".to_string(),
                     },
+                    read_preference: None,
+                },
+            ),
+            mongo_definition(
+                "nearest",
+                MongoSettings {
+                    database: None,
+                    replica_set: None,
+                    transport: MongoTransport::Srv {
+                        host: "pl-0.atlas.scarif.test".to_string(),
+                    },
+                    read_preference: Some(MongoReadPreference::of(ReadPreferenceMode::Nearest)),
                 },
             ),
         ];

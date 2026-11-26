@@ -142,6 +142,7 @@ impl<'a> FileEvaluator<'a> {
             user: definition.user.clone(),
             password_command: argv.clone(),
             ssh_hops,
+            read_preference: settings.read_preference.clone().unwrap_or_default(),
         })
     }
 

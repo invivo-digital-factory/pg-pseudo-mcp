@@ -22,12 +22,18 @@ const METADATA_MAX_TIME: Duration = Duration::from_secs(5);
 
 pub struct MongoSession {
     client: Client,
+    read_preference: SelectionCriteria,
 }
 
 impl MongoSession {
     pub fn open(options: ClientOptions) -> Result<Self, MongoFailure> {
+        let read_preference = options
+            .selection_criteria
+            .clone()
+            .unwrap_or(SelectionCriteria::ReadPreference(ReadPreference::Primary));
         Ok(Self {
             client: Client::with_options(options)?,
+            read_preference,
         })
     }
 
@@ -49,7 +55,7 @@ impl MongoSession {
             .batch_size(u32::try_from(fetched).unwrap_or(u32::MAX))
             .max_time(statement_time(limits))
             .allow_disk_use(false)
-            .selection_criteria(secondary_preferred())
+            .selection_criteria(self.read_preference.clone())
             .comment(Bson::String(COMMENT.to_string()));
         if let Some(projection) = &request.projection {
             find = find.projection(document_from_extended_json(projection, "projection")?);
@@ -91,7 +97,7 @@ impl MongoSession {
             .batch_size(u32::try_from(fetched).unwrap_or(u32::MAX))
             .max_time(statement_time(limits))
             .allow_disk_use(false)
-            .selection_criteria(secondary_preferred())
+            .selection_criteria(self.read_preference.clone())
             .comment(Bson::String(COMMENT.to_string()));
         if let Some(variables) = &request.let_vars {
             aggregate = aggregate.let_vars(document_from_extended_json(variables, "let")?);
@@ -186,7 +192,7 @@ impl MongoSession {
             .aggregate(sample_pipeline())
             .max_time(SAMPLE_MAX_TIME)
             .allow_disk_use(false)
-            .selection_criteria(secondary_preferred())
+            .selection_criteria(self.read_preference.clone())
             .comment(Bson::String(COMMENT.to_string()))
             .await?
             .try_collect()
@@ -206,7 +212,7 @@ impl MongoSession {
         self.collection(database, collection)
             .estimated_document_count()
             .max_time(METADATA_MAX_TIME)
-            .selection_criteria(secondary_preferred())
+            .selection_criteria(self.read_preference.clone())
             .await
             .ok()
     }
@@ -224,10 +230,6 @@ fn fetched(limits: ExecutionLimits) -> u64 {
 
 fn statement_time(limits: ExecutionLimits) -> Duration {
     Duration::from_millis(limits.timeout_ms.clamp(1, MAX_STATEMENT_TIMEOUT_MS))
-}
-
-fn secondary_preferred() -> SelectionCriteria {
-    SelectionCriteria::ReadPreference(ReadPreference::SecondaryPreferred { options: None })
 }
 
 fn hint_of(value: &serde_json::Value) -> Result<Hint, MongoFailure> {

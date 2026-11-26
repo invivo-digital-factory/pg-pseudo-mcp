@@ -17,6 +17,7 @@ mod import_report;
 mod mongo_policy_entries;
 mod password_source;
 mod query_output;
+mod read_preference;
 mod sampled_field;
 mod secret;
 mod uuid_subtype;
@@ -50,6 +51,7 @@ pub use import_report::{
 pub use mongo_policy_entries::MongoPolicyEntries;
 pub use password_source::PasswordSource;
 pub use query_output::{ColumnMeta, ColumnSource, QueryOutput};
+pub use read_preference::{MongoReadPreference, ReadPreferenceMode};
 pub use sampled_field::SampledField;
 pub use secret::Secret;
 pub use uuid_subtype::UuidSubtype;

@@ -6,6 +6,7 @@ Contents:
 
 - [Password in the macOS Keychain](#password-in-the-macos-keychain)
 - [Atlas private link through an SSH bastion](#atlas-private-link-through-an-ssh-bastion)
+- [Read preference](#read-preference)
 - [Tools on a MongoDB connection](#tools-on-a-mongodb-connection)
 - [Read-only guard](#read-only-guard)
 - [Pseudonyms in filters](#pseudonyms-in-filters)
@@ -36,11 +37,13 @@ ssh_alias = "corp-bastion"
 | `port` | Only with `srv = false` (default 27017) |
 | `tls` | `true` (default); `false` only with `srv = false`, for local or test sets |
 | `replica_set` | Name of the replica set, optional |
+| `read_preference` | Which member serves the reads: `primary`, `primaryPreferred`, `secondary`, `secondaryPreferred` (default) or `nearest`, see [Read preference](#read-preference) |
+| `read_preference_tags` | Optional list of `"key:value"` strings, one tag set the member must carry; only with a `read_preference` other than `primary` |
 | `database` | Optional default database; without it, the tools need the `database` argument |
 | `auth` | Must be `command`; the user authenticates with its password against the `admin` database |
 | `name`, `user`, `type`, `ssh_alias` | As for PostgreSQL |
 
-`sslmode` (use `tls`), `auth = "pgpass"` or `"azure"`, a `port` with `srv = true` and `tls = false` with `srv = true` make a MongoDB entry unavailable with a reason that names the key; `srv`, `tls` and `replica_set` do the same on a PostgreSQL entry. Listing never runs the password command nor opens the tunnel, so a connection listed `available` can still fail at its first call (wrong password, unreachable cluster).
+`sslmode` (use `tls`), `auth = "pgpass"` or `"azure"`, a `port` with `srv = true` and `tls = false` with `srv = true` make a MongoDB entry unavailable with a reason that names the key; an unknown `read_preference`, a malformed tag or `read_preference_tags` without a `read_preference` other than `primary` do the same; `srv`, `tls`, `replica_set`, `read_preference` and `read_preference_tags` do the same on a PostgreSQL entry. Listing never runs the password command nor opens the tunnel, so a connection listed `available` can still fail at its first call (wrong password, unreachable cluster).
 
 ## Password in the macOS Keychain
 
@@ -62,6 +65,17 @@ The members of a private-link cluster have host names that only resolve inside i
 - Without `ssh_alias`, the driver connects to the members directly.
 - Driver errors reach the agent without host names, the user name or the front's credentials.
 
+## Read preference
+
+`read_preference` decides which member of the replica set serves `find`, `aggregate`, the sampling of `describe_table` and `search_schema`, and the estimated counts. Without it, reads go to a secondary when one is up and to the primary otherwise (`secondaryPreferred`). On a production cluster, `secondary` keeps every read off the primary, at the cost of failing when no secondary is reachable; `read_preference_tags` narrows the reads to the members that carry every tag, for example the analytics nodes of an Atlas cluster:
+
+```toml
+read_preference = "secondary"
+read_preference_tags = ["nodeType:ANALYTICS"]
+```
+
+Secondaries are reached the same way as the primary: the driver monitors every member the replica set announces, and through an `ssh_alias` each one goes through the same SOCKS5 front and bastion, which admit any member under the parent domain. Listing collections and indexes always runs on the primary, as the MongoDB driver specifies for these commands; they read metadata only.
+
 ## Tools on a MongoDB connection
 
 - `list_connections` shows `"engine": "mongodb"`.
@@ -81,7 +95,7 @@ Agent requests only ever run as `find` or `aggregate`; the server's own listing,
 - **Constant arguments**: the target type of `$convert`, the unit, timezone and format of the date operators, and the pattern and options of `$regexMatch`, `$regexFind` and `$regexFindAll` must be constants, not field paths or expressions.
 - **Namespaces**: the `admin`, `local` and `config` databases and the `system.*` collections are refused, also as a connection's default database; `$lookup`, `$graphLookup` and `$unionWith` may only name a collection of the same database, as a string.
 - **Size**: a request holds at most 64 KB of JSON, 50 stages in all (sub-pipelines of `$lookup`, `$unionWith` and `$facet` included), 32 levels of nesting and 1,000 elements per array.
-- **Execution**: `maxTimeMS` is `timeout_ms`, `allowDiskUse` is off, reads prefer secondaries, and at most `max_rows + 1` documents are read: a larger `find` limit is lowered with a `limit_clamped` warning, and a `$limit` is appended to every pipeline.
+- **Execution**: `maxTimeMS` is `timeout_ms`, `allowDiskUse` is off, reads follow the connection's [read preference](#read-preference), and at most `max_rows + 1` documents are read: a larger `find` limit is lowered with a `limit_clamped` warning, and a `$limit` is appended to every pipeline.
 
 A refusal names the rule that blocked it and never echoes a value from the request.
 

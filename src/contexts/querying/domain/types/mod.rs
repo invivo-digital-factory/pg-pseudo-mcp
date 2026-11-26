@@ -78,7 +78,7 @@ pub use field_source::FieldSource;
 pub use find_request::FindRequest;
 pub use guarded::Guarded;
 pub use guarded_mongo::{
-    GuardedAggregate, GuardedFind, GuardedMongo, MongoCommand, MongoExecution, MongoReadPreference,
+    GuardedAggregate, GuardedFind, GuardedMongo, MongoCommand, MongoExecution,
 };
 pub use lineage::Lineage;
 pub use list_databases::{DatabaseListing, ListDatabasesRequest};

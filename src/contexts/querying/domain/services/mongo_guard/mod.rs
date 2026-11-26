@@ -12,7 +12,7 @@ use crate::contexts::querying::domain::constants::mongo_policy::{
 use crate::contexts::querying::domain::errors::Refusal;
 use crate::contexts::querying::domain::types::{
     AggregateRequest, ClampWarning, FindRequest, GuardedAggregate, GuardedFind, GuardedMongo,
-    MongoCommand, MongoExecution, MongoReadPreference, QueryLimits, Translations,
+    MongoCommand, MongoExecution, QueryLimits, Translations,
 };
 
 pub struct InspectedMongo {
@@ -142,7 +142,6 @@ impl InspectedMongo {
             execution: MongoExecution {
                 max_time_ms: limits.timeout_ms,
                 allow_disk_use: false,
-                read_preference: MongoReadPreference::SecondaryPreferred,
                 batch_size: u32::try_from(max_documents).unwrap_or(u32::MAX),
                 max_documents,
                 comment: QUERY_COMMENT,

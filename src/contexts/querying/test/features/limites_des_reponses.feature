@@ -85,7 +85,7 @@ Fonctionnalité: Limites des réponses
   Règle: MongoDB : la lecture est bornée avant de partir vers le serveur
     Chaque pipeline reçoit un $limit de max_rows + 1 documents et un find lit au plus max_rows + 1 documents : le document de plus dit si la réponse est coupée.
     Une limite de find au-dessus de max_rows est ramenée à max_rows avec un avertissement,
-    et l'exécution a un délai, n'écrit pas sur disque et lit de préférence un secondaire.
+    et l'exécution a un délai et n'écrit pas sur disque ; le membre lu suit la préférence de lecture de la connexion.
 
     Contexte:
       Étant donné l'agent connecté à une base MongoDB
@@ -110,7 +110,7 @@ Fonctionnalité: Limites des réponses
 
     Scénario: L'exécution reprend le délai demandé
       Quand l'agent lance une agrégation avec un délai de 7000 ms
-      Alors l'exécution est bornée à 7000 ms, sans écriture sur disque, sur un secondaire de préférence
+      Alors l'exécution est bornée à 7000 ms, sans écriture sur disque
 
   @integration
   Règle: MongoDB : un document trop long est coupé et se lit par tranches

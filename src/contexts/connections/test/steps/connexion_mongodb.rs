@@ -45,6 +45,30 @@ async fn mongo_replica_set(world: &mut ConnectionsWorld, name: String, replica_s
 }
 
 #[then(
+    regex = r#"^la connexion MongoDB "([^"]+)" lit avec la préférence "([^"]+)" sans étiquette$"#
+)]
+async fn mongo_read_preference(world: &mut ConnectionsWorld, name: String, mode: String) {
+    let read_preference = mongo(world, &name).read_preference;
+    assert_eq!(read_preference.mode.as_str(), mode);
+    assert!(read_preference.tags.is_empty(), "{read_preference:?}");
+}
+
+#[then(
+    regex = r#"^la connexion MongoDB "([^"]+)" lit avec la préférence "([^"]+)" et l'étiquette "([^"]+)" = "([^"]+)"$"#
+)]
+async fn mongo_tagged_read_preference(
+    world: &mut ConnectionsWorld,
+    name: String,
+    mode: String,
+    key: String,
+    value: String,
+) {
+    let read_preference = mongo(world, &name).read_preference;
+    assert_eq!(read_preference.mode.as_str(), mode);
+    assert_eq!(read_preference.tags, vec![(key, value)]);
+}
+
+#[then(
     regex = r#"^la connexion MongoDB "([^"]+)" passe par le bastion "([^"]+)" en tant que "([^"]+)"$"#
 )]
 async fn mongo_bastion(world: &mut ConnectionsWorld, name: String, endpoint: String, user: String) {

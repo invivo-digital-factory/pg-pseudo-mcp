@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use super::connection_definition::MongoTransport;
 use super::password_source::PasswordSource;
+use super::read_preference::MongoReadPreference;
 use super::secret::Secret;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +138,7 @@ pub struct MongoConnectParams {
     pub user: String,
     pub password_command: Vec<String>,
     pub ssh_hops: Option<Vec<SshHop>>,
+    pub read_preference: MongoReadPreference,
 }
 
 impl fmt::Debug for MongoConnectParams {
@@ -148,6 +150,7 @@ impl fmt::Debug for MongoConnectParams {
             .field("user", &self.user)
             .field("password_command", &"<command>")
             .field("ssh_hops", &self.ssh_hops)
+            .field("read_preference", &self.read_preference)
             .finish()
     }
 }

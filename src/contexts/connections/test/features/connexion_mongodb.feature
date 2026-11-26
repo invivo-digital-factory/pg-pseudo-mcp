@@ -67,6 +67,61 @@ Fonctionnalité: Déclarer une connexion MongoDB dans le fichier
       Et la connexion MongoDB "orders-local" vise le membre "mongo-0.example.com" sur le port 1024 sans TLS
       Et la connexion MongoDB "orders-local" déclare le jeu de réplicas "rs0"
 
+  Règle: La préférence de lecture choisit le membre du replica set qui sert chaque lecture
+    Sans read_preference, chaque lecture va de préférence à un secondaire, et au primaire s'il n'y en a aucun.
+    read_preference_tags restreint les lectures aux membres qui portent toutes ces étiquettes, avec un mode autre que primary.
+    Les secondaires sont joints comme le primaire, par le même front SOCKS5 et le même bastion.
+
+    Scénario: Sans read_preference, la lecture préfère un secondaire
+      Étant donné le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "orders-prod"
+        engine = "mongodb"
+        host = "cluster0.example.com"
+        user = "alice"
+        type = "prod"
+        auth = "command"
+        password_command = ["/bin/echo", "s3cret"]
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion "orders-prod" est listée comme disponible
+      Et la connexion MongoDB "orders-prod" lit avec la préférence "secondaryPreferred" sans étiquette
+
+    Scénario: Les lectures vont aux secondaires étiquetés pour l'analyse
+      Étant donné le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "orders-prod"
+        engine = "mongodb"
+        host = "cluster0.example.com"
+        user = "alice"
+        type = "prod"
+        auth = "command"
+        password_command = ["/bin/echo", "s3cret"]
+        read_preference = "secondary"
+        read_preference_tags = ["nodeType:ANALYTICS"]
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion "orders-prod" est listée comme disponible
+      Et la connexion MongoDB "orders-prod" lit avec la préférence "secondary" et l'étiquette "nodeType" = "ANALYTICS"
+
+    Scénario: Le primaire peut être imposé
+      Étant donné le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "orders-prod"
+        engine = "mongodb"
+        host = "cluster0.example.com"
+        user = "alice"
+        type = "prod"
+        auth = "command"
+        password_command = ["/bin/echo", "s3cret"]
+        read_preference = "primary"
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion MongoDB "orders-prod" lit avec la préférence "primary" sans étiquette
+
   Règle: Une clé incompatible avec MongoDB ou avec la résolution SRV rend l'entrée indisponible en la nommant
 
     Plan du Scénario: La ligne « <ligne> » est refusée sur une entrée MongoDB
@@ -98,6 +153,12 @@ Fonctionnalité: Déclarer une connexion MongoDB dans le fichier
         | replica_set = ""    | `replica_set` must be a non-empty string                |
         | replica_set = 3     | `replica_set` must be a non-empty string                |
         | database = ""       | `database` must be a non-empty string                   |
+
+      Exemples: Préférence de lecture invalide
+        | ligne                                         | raison                                                                 |
+        | read_preference = "Secondary"                 | `read_preference` must be one of primary, primaryPreferred, secondary  |
+        | read_preference_tags = ["nodeType:ANALYTICS"] | `read_preference_tags` needs a `read_preference` other than primary    |
+        | read_preference_tags = ["nodeType"]          | `read_preference_tags` must be a non-empty list of "key:value" strings |
 
       @ae11
       Exemples: Modes d'authentification autres que command

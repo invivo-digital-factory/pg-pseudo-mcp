@@ -26,7 +26,7 @@ use crate::contexts::connections::domain::repositories::ConnectionCatalog;
 use crate::contexts::connections::domain::types::{
     AggregateRequest, CollectionKind, ConnectionEntry, ConnectionSource, ConnectionStatus,
     Discovery, DocumentNode, ExecutionLimits, FindRequest, Hop, HostKeyPolicy, MongoConnectParams,
-    MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
+    MongoReadPreference, MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
 };
 use crate::contexts::connections::infrastructure::data_sources::mongodb::{
     CHANNELS_PER_MEMBER, MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
@@ -117,6 +117,7 @@ fn bastion_hop(known_hosts: &Path) -> SshHop {
 
 fn params((user, password): (&str, &str), port: u16, known_hosts: &Path) -> MongoConnectParams {
     MongoConnectParams {
+        read_preference: MongoReadPreference::default(),
         transport: MongoTransport::Seed {
             host: MEMBER_HOST.to_string(),
             port,
