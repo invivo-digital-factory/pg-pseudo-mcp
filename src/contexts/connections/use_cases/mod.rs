@@ -1,3 +1,4 @@
+mod explain_documents;
 mod explain_statement;
 mod import_dbeaver_connections;
 mod list_connections;
@@ -12,6 +13,7 @@ mod run_find;
 mod run_read_only_statement;
 mod sample_fields;
 
+pub use explain_documents::ExplainDocuments;
 pub use explain_statement::ExplainStatement;
 pub use import_dbeaver_connections::ImportDbeaverConnections;
 pub use list_connections::ListConnections;

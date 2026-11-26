@@ -811,6 +811,8 @@ const DRIVER_SOURCES: &str = "infrastructure/data_sources/mongodb";
 
 const POOL_FILE: &str = "infrastructure/repositories/mongo_session_pool.rs";
 
+const EXPLAIN_FILE: &str = "explain.rs";
+
 const DRIVER_WRITES_AND_COMMANDS: &str = r"\.(?:run_command|run_cursor_command|run_raw_command|insert_one|insert_many|update_one|update_many|replace_one|delete_one|delete_many|find_one_and_\w+|bulk_write|drop|drop_index(?:es)?|create_collection|create_index(?:es)?|rename|watch|gridfs_bucket|start_session|count_documents|distinct|find_one|create_search_index(?:es)?|drop_search_index|update_search_index|warm_connection_pool|shutdown)\b";
 
 #[test]
@@ -833,6 +835,17 @@ fn les_sources_mongodb_n_appellent_que_les_actions_de_lecture_du_pilote() {
             .find_iter(production)
             .map(|found| found.as_str())
             .collect();
+        if file.ends_with(EXPLAIN_FILE) {
+            assert_eq!(found, vec![".run_command"], "{}", file.display());
+            assert!(
+                production.contains(
+                    r#".run_command(doc! {"explain": command, "verbosity": QUERY_PLANNER})"#
+                ) && production.contains(r#"QUERY_PLANNER: &str = "queryPlanner""#),
+                "{} may only run explain with the queryPlanner verbosity",
+                file.display()
+            );
+            continue;
+        }
         assert!(found.is_empty(), "{} calls {found:?}", file.display());
         seen.extend(
             reads

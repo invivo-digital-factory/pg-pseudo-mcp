@@ -1,9 +1,11 @@
 use std::future::Future;
 
 use crate::contexts::querying::domain::errors::DatabaseFailure;
+use serde_json::Value;
+
 use crate::contexts::querying::domain::types::{
     CollectionDetails, CollectionEntry, DocumentOutput, ExecutionLimits, FieldSample,
-    GuardedAggregate, GuardedFind,
+    GuardedAggregate, GuardedFind, HeavyQueryThresholds,
 };
 
 pub trait ReadOnlyDocumentStore: Send + Sync {
@@ -29,6 +31,36 @@ pub trait ReadOnlyDocumentStore: Send + Sync {
         aggregate: &GuardedAggregate,
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<DocumentOutput, DatabaseFailure>> + Send;
+
+    fn explain_find(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+        find: &GuardedFind,
+        limits: ExecutionLimits,
+    ) -> impl Future<Output = Result<Value, DatabaseFailure>> + Send;
+
+    fn explain_aggregate(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+        aggregate: &GuardedAggregate,
+        limits: ExecutionLimits,
+    ) -> impl Future<Output = Result<Value, DatabaseFailure>> + Send;
+
+    fn estimated_count(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+    ) -> impl Future<Output = Result<Option<u64>, DatabaseFailure>> + Send;
+
+    fn heavy_query_thresholds(
+        &self,
+        connection: &str,
+    ) -> impl Future<Output = Option<HeavyQueryThresholds>> + Send;
 
     fn databases(
         &self,

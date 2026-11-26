@@ -1,7 +1,9 @@
 use std::future::Future;
 
 use crate::contexts::querying::domain::errors::DatabaseFailure;
-use crate::contexts::querying::domain::types::{DatabaseListing, ExecutionLimits, QueryOutput};
+use crate::contexts::querying::domain::types::{
+    DatabaseListing, ExecutionLimits, HeavyQueryThresholds, QueryOutput,
+};
 
 pub trait ReadOnlyDatabase: Send + Sync {
     fn run(
@@ -40,6 +42,11 @@ pub trait ReadOnlyDatabase: Send + Sync {
         &self,
         connection: &str,
     ) -> impl Future<Output = Result<DatabaseListing, DatabaseFailure>> + Send;
+
+    fn heavy_query_thresholds(
+        &self,
+        connection: &str,
+    ) -> impl Future<Output = Option<HeavyQueryThresholds>> + Send;
 
     fn enum_labels(
         &self,

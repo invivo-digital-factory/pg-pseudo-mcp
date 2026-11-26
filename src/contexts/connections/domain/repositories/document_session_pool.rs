@@ -21,6 +21,27 @@ pub trait DocumentSessionPool: Send + Sync {
         limits: ExecutionLimits,
     ) -> impl Future<Output = Result<DocumentOutput, ConnectionError>> + Send;
 
+    fn explain_find(
+        &self,
+        connection: &str,
+        request: &FindRequest,
+        limits: ExecutionLimits,
+    ) -> impl Future<Output = Result<serde_json::Value, ConnectionError>> + Send;
+
+    fn explain_aggregate(
+        &self,
+        connection: &str,
+        request: &AggregateRequest,
+        limits: ExecutionLimits,
+    ) -> impl Future<Output = Result<serde_json::Value, ConnectionError>> + Send;
+
+    fn estimated_count(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        collection: &str,
+    ) -> impl Future<Output = Result<Option<u64>, ConnectionError>> + Send;
+
     fn database_names(
         &self,
         connection: &str,

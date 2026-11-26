@@ -7,6 +7,7 @@ use mongodb::{Client, Collection, Cursor};
 
 use super::catalog::{collection_kind, index_keys, validator_fields};
 use super::decode::decode_document;
+use super::explain::query_plan;
 use super::extended_json::{bson_from_extended_json, document_from_extended_json};
 use super::failure::MongoFailure;
 use super::sample::{SAMPLE_MAX_TIME, sample_pipeline, sampled_fields};
@@ -103,6 +104,99 @@ impl MongoSession {
             aggregate = aggregate.let_vars(document_from_extended_json(variables, "let")?);
         }
         bounded(aggregate.await?, limits.max_rows).await
+    }
+
+    pub async fn explain_find(
+        &self,
+        database: &str,
+        request: &FindRequest,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, MongoFailure> {
+        let fetched = fetched(limits);
+        let limit = request
+            .limit
+            .filter(|limit| *limit > 0)
+            .map_or(fetched, |limit| limit.min(fetched));
+        let mut command = doc! {
+            "find": request.collection.as_str(),
+            "filter": document_from_extended_json(&request.filter, "filter")?,
+            "limit": i64::try_from(limit).unwrap_or(i64::MAX),
+        };
+        if let Some(projection) = &request.projection {
+            command.insert(
+                "projection",
+                document_from_extended_json(projection, "projection")?,
+            );
+        }
+        if let Some(sort) = &request.sort {
+            command.insert("sort", document_from_extended_json(sort, "sort")?);
+        }
+        if let Some(skip) = request.skip {
+            command.insert("skip", i64::try_from(skip).unwrap_or(i64::MAX));
+        }
+        if let Some(hint) = &request.hint {
+            command.insert("hint", bson_from_extended_json(hint, "hint")?);
+        }
+        if let Some(collation) = &request.collation {
+            command.insert(
+                "collation",
+                document_from_extended_json(collation, "collation")?,
+            );
+        }
+        self.explain(database, command, limits).await
+    }
+
+    pub async fn explain_aggregate(
+        &self,
+        database: &str,
+        request: &AggregateRequest,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, MongoFailure> {
+        let mut pipeline = request
+            .pipeline
+            .iter()
+            .enumerate()
+            .map(|(index, stage)| {
+                document_from_extended_json(stage, &format!("pipeline stage {}", index + 1))
+                    .map(Bson::Document)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        pipeline.push(Bson::Document(
+            doc! {"$limit": i64::try_from(fetched(limits)).unwrap_or(i64::MAX)},
+        ));
+        let mut command = doc! {
+            "aggregate": request.collection.as_str(),
+            "pipeline": pipeline,
+            "cursor": {},
+            "allowDiskUse": false,
+        };
+        if let Some(variables) = &request.let_vars {
+            command.insert("let", document_from_extended_json(variables, "let")?);
+        }
+        self.explain(database, command, limits).await
+    }
+
+    pub async fn document_count(&self, database: &str, collection: &str) -> Option<u64> {
+        self.estimated_count(database, collection, CollectionKind::Collection)
+            .await
+    }
+
+    async fn explain(
+        &self,
+        database: &str,
+        mut command: Document,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, MongoFailure> {
+        let max_time = i64::try_from(statement_time(limits).as_millis()).unwrap_or(i64::MAX);
+        command.insert("maxTimeMS", max_time);
+        command.insert("comment", COMMENT);
+        query_plan(
+            &self.client,
+            database,
+            command,
+            self.read_preference.clone(),
+        )
+        .await
     }
 
     pub async fn database_names(&self) -> Result<Vec<String>, MongoFailure> {

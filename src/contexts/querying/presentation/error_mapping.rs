@@ -1,5 +1,7 @@
 use super::tool_error::{ErrorCategory, ToolError};
+use crate::contexts::querying::domain::constants::heavy_query::CONFIRMATION_HINT;
 use crate::contexts::querying::domain::errors::QueryingError;
+use crate::contexts::querying::domain::types::HeavyQueryEstimate;
 
 pub fn tool_error(error: QueryingError) -> ToolError {
     match error {
@@ -135,6 +137,37 @@ pub fn tool_error(error: QueryingError) -> ToolError {
             )
             .with_hint(hint)
         }
+        QueryingError::HeavyQuery(estimate) => heavy_query(&estimate),
+    }
+}
+
+fn heavy_query(estimate: &HeavyQueryEstimate) -> ToolError {
+    let mut reasons = Vec::new();
+    if let (Some(cost), Some(limit)) = (estimate.total_cost, estimate.cost_limit)
+        && cost > limit as f64
+    {
+        reasons.push(format!(
+            "estimated cost {cost:.0} is above the limit of {limit}"
+        ));
+    }
+    for scan in &estimate.full_scans {
+        reasons.push(format!(
+            "{} reads about {} rows of {}, above the limit of {}",
+            scan.node, scan.estimated_rows, scan.relation, estimate.scan_limit
+        ));
+    }
+    let error = ToolError::new(
+        ErrorCategory::RequiresConfirmation,
+        "heavy_query_requires_confirmation",
+        format!(
+            "this request is estimated heavy for a prod connection and was not run: {}",
+            reasons.join("; ")
+        ),
+    )
+    .with_hint(CONFIRMATION_HINT);
+    match serde_json::to_value(estimate) {
+        Ok(value) => error.with_estimate(value),
+        Err(_) => error,
     }
 }
 
@@ -162,6 +195,50 @@ mod unit {
         assert_eq!(json["category"], "mongodb_error");
         assert_eq!(json["code_name"], "ConversionFailure");
         assert!(json.get("sqlstate").is_none(), "{json}");
+    }
+
+    #[test]
+    fn une_requete_lourde_porte_son_estimation_et_demande_l_accord_du_developpeur() {
+        use crate::contexts::querying::domain::types::FullScan;
+
+        let error = tool_error(QueryingError::HeavyQuery(HeavyQueryEstimate {
+            total_cost: Some(250_000.4),
+            cost_limit: Some(100_000),
+            scan_limit: 1_000_000,
+            full_scans: vec![FullScan {
+                node: "Seq Scan",
+                relation: "public.orders".into(),
+                estimated_rows: 5_000_000,
+            }],
+        }));
+        let json = serde_json::to_value(&error).unwrap();
+        assert_eq!(json["code"], "heavy_query_requires_confirmation");
+        assert_eq!(json["category"], "requires_confirmation");
+        assert_eq!(json["retryable"], false);
+        assert_eq!(json["estimate"]["total_cost"], 250_000.4);
+        assert_eq!(
+            json["estimate"]["full_scans"][0]["relation"],
+            "public.orders"
+        );
+        assert_eq!(
+            json["estimate"]["full_scans"][0]["estimated_rows"],
+            5_000_000
+        );
+        let message = json["message"].as_str().unwrap();
+        assert!(
+            message.contains("estimated cost 250000 is above the limit of 100000"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Seq Scan reads about 5000000 rows of public.orders"),
+            "{message}"
+        );
+        assert!(
+            json["hint"]
+                .as_str()
+                .unwrap()
+                .contains("confirm_heavy: true")
+        );
     }
 
     #[test]

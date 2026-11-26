@@ -26,6 +26,7 @@ pub mod field_source;
 pub mod find_request;
 pub mod guarded;
 pub mod guarded_mongo;
+pub mod heavy_query;
 pub mod lineage;
 pub mod list_databases;
 pub mod list_tables;
@@ -79,6 +80,9 @@ pub use find_request::FindRequest;
 pub use guarded::Guarded;
 pub use guarded_mongo::{
     GuardedAggregate, GuardedFind, GuardedMongo, MongoCommand, MongoExecution,
+};
+pub use heavy_query::{
+    CollectionScan, FullScan, HeavyQueryEstimate, HeavyQueryThresholds, PlanScan, PlanSummary,
 };
 pub use lineage::Lineage;
 pub use list_databases::{DatabaseListing, ListDatabasesRequest};

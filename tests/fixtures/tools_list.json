@@ -5,7 +5,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Run one read-only aggregation pipeline on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. Writes ($out, $merge), server-side JavaScript and admin stages are refused; fields computed by the pipeline are pseudonymized unless their lineage is proven clear. Same limits as find.",
+      "description": "Run one read-only aggregation pipeline on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. Writes ($out, $merge), server-side JavaScript and admin stages are refused; fields computed by the pipeline are pseudonymized unless their lineage is proven clear. Same limits as find. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -21,6 +21,13 @@
           "collection": {
             "description": "Collection or view the pipeline starts from, as returned by list_tables",
             "type": "string"
+          },
+          "confirm_heavy": {
+            "description": "Run the request even if it is estimated heavy on a prod connection. Set it only after the developer explicitly approved the estimate returned by heavy_query_requires_confirmation; never on your own initiative",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "connection": {
             "description": "Connection name as returned by list_connections (engine mongodb)",
@@ -149,7 +156,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Run one find on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. filter, projection and sort are Extended JSON objects; only read query operators are accepted. Defaults: 50 documents, 16 KB, 10 s; maxima 500 documents, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text values are cut at 500 characters (read the rest with cell_offset) and arrays at 100 items.",
+      "description": "Run one find on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. filter, projection and sort are Extended JSON objects; only read query operators are accepted. Defaults: 50 documents, 16 KB, 10 s; maxima 500 documents, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text values are cut at 500 characters (read the rest with cell_offset) and arrays at 100 items. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -168,6 +175,13 @@
           "collection": {
             "description": "Collection or view name, as returned by list_tables",
             "type": "string"
+          },
+          "confirm_heavy": {
+            "description": "Run the request even if it is estimated heavy on a prod connection. Set it only after the developer explicitly approved the estimate returned by heavy_query_requires_confirmation; never on your own initiative",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "connection": {
             "description": "Connection name as returned by list_connections (engine mongodb)",
@@ -344,7 +358,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values.",
+      "description": "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -354,6 +368,13 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "confirm_heavy": {
+            "description": "Run the request even if it is estimated heavy on a prod connection. Set it only after the developer explicitly approved the estimate returned by heavy_query_requires_confirmation; never on your own initiative",
+            "type": [
+              "boolean",
               "null"
             ]
           },

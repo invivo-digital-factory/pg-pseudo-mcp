@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::contexts::querying::domain::constants::heavy_query::CHECK_SKIPPED;
 use crate::contexts::querying::domain::constants::mongo_policy::{
     ARRAY_HINT, BYTES_HINT, DECODED_BUDGET_FACTOR, FIELDS_HINT, KEYSET_HINT,
     MAX_RETURNED_ARRAY_ITEMS,
@@ -14,10 +16,14 @@ use crate::contexts::querying::domain::services::document_clearances::{
 };
 use crate::contexts::querying::domain::services::document_requests::scrubbed;
 use crate::contexts::querying::domain::services::ejson_render::render;
+use crate::contexts::querying::domain::services::heavy_query::{
+    collection_scans, mongo_verdict, needs_count,
+};
 use crate::contexts::querying::domain::services::mongo_lineage::document_lineage;
 use crate::contexts::querying::domain::types::{
     ClampWarning, ColumnPolicy, DocumentOutput, DocumentsResponse, ExecutionLimits, GuardedMongo,
-    MongoCommand, QueryLimits, TruncatedBy, Truncation, Warning,
+    HeavyQueryEstimate, HeavyQueryThresholds, MongoCommand, QueryLimits, TruncatedBy, Truncation,
+    Warning,
 };
 
 pub struct Execution<'a, S: ReadOnlyDocumentStore> {
@@ -30,15 +36,34 @@ pub struct Execution<'a, S: ReadOnlyDocumentStore> {
     pub limits: QueryLimits,
     pub clamps: Vec<ClampWarning>,
     pub cell_offset: Option<u64>,
+    pub confirm_heavy: bool,
     pub started: Instant,
 }
 
+enum HeavyCheck {
+    Light,
+    Heavy(HeavyQueryEstimate),
+    Skipped,
+}
+
 impl<S: ReadOnlyDocumentStore> Execution<'_, S> {
-    pub async fn run(self, guarded: GuardedMongo) -> Result<DocumentsResponse, QueryingError> {
+    pub async fn run(self, mut guarded: GuardedMongo) -> Result<DocumentsResponse, QueryingError> {
         let execution = ExecutionLimits {
             max_rows: self.limits.max_rows,
             timeout_ms: self.limits.timeout_ms,
         };
+        if !self.confirm_heavy
+            && let Some(thresholds) = self.store.heavy_query_thresholds(self.connection).await
+        {
+            match self.heavy_check(&guarded, execution, thresholds).await {
+                HeavyCheck::Heavy(estimate) => return Err(QueryingError::HeavyQuery(estimate)),
+                HeavyCheck::Skipped => guarded.warnings.push(Warning::new(
+                    CHECK_SKIPPED,
+                    "the heavy-query estimate could not be made for this request on a prod connection; it ran without it",
+                )),
+                HeavyCheck::Light => {}
+            }
+        }
         let outcome = match &guarded.command {
             MongoCommand::Find(find) => {
                 self.store
@@ -72,6 +97,59 @@ impl<S: ReadOnlyDocumentStore> Execution<'_, S> {
             )
         })?;
         Ok(self.respond(guarded, output))
+    }
+
+    async fn heavy_check(
+        &self,
+        guarded: &GuardedMongo,
+        execution: ExecutionLimits,
+        thresholds: HeavyQueryThresholds,
+    ) -> HeavyCheck {
+        let explained = match &guarded.command {
+            MongoCommand::Find(find) => {
+                self.store
+                    .explain_find(
+                        self.connection,
+                        self.database,
+                        &guarded.collection,
+                        find,
+                        execution,
+                    )
+                    .await
+            }
+            MongoCommand::Aggregate(aggregate) => {
+                self.store
+                    .explain_aggregate(
+                        self.connection,
+                        self.database,
+                        &guarded.collection,
+                        aggregate,
+                        execution,
+                    )
+                    .await
+            }
+        };
+        let Ok(explained) = explained else {
+            return HeavyCheck::Skipped;
+        };
+        let scans = collection_scans(&explained);
+        let mut counts = HashMap::new();
+        for scan in scans.iter().filter(|scan| needs_count(scan)) {
+            if counts.contains_key(&scan.collection) {
+                continue;
+            }
+            if let Ok(Some(count)) = self
+                .store
+                .estimated_count(self.connection, self.database, &scan.collection)
+                .await
+            {
+                counts.insert(scan.collection.clone(), count);
+            }
+        }
+        match mongo_verdict(&scans, &counts, thresholds) {
+            Some(estimate) => HeavyCheck::Heavy(estimate),
+            None => HeavyCheck::Light,
+        }
     }
 
     fn respond(self, guarded: GuardedMongo, output: DocumentOutput) -> DocumentsResponse {

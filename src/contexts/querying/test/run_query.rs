@@ -15,6 +15,160 @@ use crate::contexts::querying::domain::types::{
 use crate::contexts::querying::domain::types::{ExplainRequest, QueryRequest};
 use crate::contexts::querying::use_cases::{ExplainQuery, RunQuery};
 
+mod heavy_query_on_prod {
+    use serde_json::{Value, json};
+
+    use super::*;
+    use crate::contexts::querying::domain::types::HeavyQueryThresholds;
+
+    const COST_EXPLAIN: &str = "EXPLAIN (VERBOSE, FORMAT JSON) ";
+
+    fn full_scan_plan() -> Value {
+        json!([{"Plan": {
+            "Node Type": "Seq Scan",
+            "Relation Name": "orders",
+            "Schema": "public",
+            "Total Cost": 90_000.0,
+            "Plan Rows": 5_000_000.0,
+            "Filter": "(orders.customer_id = 42)"
+        }}])
+    }
+
+    fn index_plan() -> Value {
+        json!([{"Plan": {
+            "Node Type": "Index Scan",
+            "Relation Name": "orders",
+            "Schema": "public",
+            "Total Cost": 8.4,
+            "Plan Rows": 1.0
+        }}])
+    }
+
+    fn use_case(database: &Arc<FakeDatabase>) -> RunQuery<FakeDatabase> {
+        RunQuery::new(
+            Arc::clone(database),
+            ports(FakeTranslator::default(), Arc::default()),
+        )
+    }
+
+    #[tokio::test]
+    async fn une_requete_lourde_sur_prod_est_refusee_sans_etre_executee() {
+        let database = FakeDatabase::on_prod(
+            empty_output(),
+            full_scan_plan(),
+            HeavyQueryThresholds::default(),
+        );
+        let error = use_case(&database)
+            .execute(request("SELECT id FROM orders WHERE customer_id = 42"))
+            .await
+            .unwrap_err();
+        let QueryingError::HeavyQuery(estimate) = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(estimate.full_scans[0].relation, "public.orders");
+        assert_eq!(estimate.full_scans[0].estimated_rows, 5_000_000);
+        let statements = database.statements();
+        assert!(statements[0].starts_with(COST_EXPLAIN), "{statements:?}");
+        assert!(
+            statements
+                .iter()
+                .all(|sql| sql.starts_with(COST_EXPLAIN) || sql.contains("pg_catalog.pg_class")),
+            "{statements:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_heavy_execute_la_requete_sans_estimation() {
+        let database = FakeDatabase::on_prod(
+            empty_output(),
+            full_scan_plan(),
+            HeavyQueryThresholds::default(),
+        );
+        let confirmed = QueryRequest {
+            confirm_heavy: true,
+            ..request("SELECT id FROM orders WHERE customer_id = 42")
+        };
+        use_case(&database).execute(confirmed).await.unwrap();
+        let statements = database.statements();
+        assert!(
+            statements.iter().all(|sql| !sql.starts_with("EXPLAIN")),
+            "{statements:?}"
+        );
+        assert_eq!(statements.len(), 1, "{statements:?}");
+    }
+
+    #[tokio::test]
+    async fn une_requete_legere_sur_prod_est_estimee_puis_executee() {
+        let database = FakeDatabase::on_prod(
+            empty_output(),
+            index_plan(),
+            HeavyQueryThresholds::default(),
+        );
+        use_case(&database)
+            .execute(request("SELECT id FROM orders WHERE id = 7"))
+            .await
+            .unwrap();
+        let statements = database.statements();
+        assert_eq!(statements.len(), 2, "{statements:?}");
+        assert!(statements[0].starts_with(COST_EXPLAIN), "{statements:?}");
+        assert_eq!(statements[1], "SELECT id FROM orders WHERE id = 7");
+    }
+
+    #[tokio::test]
+    async fn hors_prod_aucune_estimation_ne_precede_la_requete() {
+        let database = FakeDatabase::returning(empty_output());
+        use_case(&database)
+            .execute(request("SELECT id FROM orders WHERE customer_id = 42"))
+            .await
+            .unwrap();
+        assert_eq!(
+            database.statements(),
+            vec!["SELECT id FROM orders WHERE customer_id = 42".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn un_explain_demande_par_l_agent_n_est_pas_estime_a_nouveau() {
+        let database = FakeDatabase::on_prod(
+            empty_output(),
+            full_scan_plan(),
+            HeavyQueryThresholds::default(),
+        );
+        use_case(&database)
+            .execute(request("EXPLAIN SELECT id FROM orders"))
+            .await
+            .unwrap();
+        let statements = database.statements();
+        assert_eq!(statements.len(), 1, "{statements:?}");
+        assert!(!statements[0].starts_with(COST_EXPLAIN), "{statements:?}");
+    }
+
+    #[tokio::test]
+    async fn l_estimation_porte_sur_la_requete_ou_les_pseudonymes_sont_traduits() {
+        let database = FakeDatabase::on_prod(
+            empty_output(),
+            full_scan_plan(),
+            HeavyQueryThresholds::default(),
+        );
+        let use_case = RunQuery::new(
+            Arc::clone(&database),
+            ports(
+                FakeTranslator::default().with("noemie.vasseur@example.net", "jane@corp.test"),
+                Arc::default(),
+            ),
+        );
+        let error = use_case
+            .execute(request(
+                "SELECT id FROM customers WHERE email = 'noemie.vasseur@example.net'",
+            ))
+            .await
+            .unwrap_err();
+        let shown = format!("{error:?}");
+        assert!(!shown.contains("jane@corp.test"), "{shown}");
+        assert!(database.statements()[0].contains("jane@corp.test"));
+    }
+}
+
 fn request(sql: &str) -> QueryRequest {
     QueryRequest {
         connection: "Shop".into(),

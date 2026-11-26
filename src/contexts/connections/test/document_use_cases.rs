@@ -55,6 +55,36 @@ impl DocumentSessionPool for RecordingPool {
         Ok(empty_output())
     }
 
+    async fn explain_find(
+        &self,
+        _: &str,
+        _: &FindRequest,
+        _: ExecutionLimits,
+    ) -> Result<Value, ConnectionError> {
+        self.record();
+        Ok(json!({}))
+    }
+
+    async fn explain_aggregate(
+        &self,
+        _: &str,
+        _: &AggregateRequest,
+        _: ExecutionLimits,
+    ) -> Result<Value, ConnectionError> {
+        self.record();
+        Ok(json!({}))
+    }
+
+    async fn estimated_count(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+    ) -> Result<Option<u64>, ConnectionError> {
+        self.record();
+        Ok(None)
+    }
+
     async fn database_names(&self, _: &str) -> Result<DatabaseNames, ConnectionError> {
         self.record();
         Ok(DatabaseNames {

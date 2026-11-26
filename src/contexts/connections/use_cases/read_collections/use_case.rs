@@ -21,6 +21,17 @@ impl<P: DocumentSessionPool> ReadCollections<P> {
         self.pool.collections(connection, database).await
     }
 
+    pub async fn estimated_count(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        collection: &str,
+    ) -> Result<Option<u64>, ConnectionError> {
+        self.pool
+            .estimated_count(connection, database, collection)
+            .await
+    }
+
     pub async fn describe(
         &self,
         connection: &str,

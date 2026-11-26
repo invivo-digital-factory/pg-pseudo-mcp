@@ -1,5 +1,5 @@
 use super::{DatabaseFailure, Refusal};
-use crate::contexts::querying::domain::types::DbMessage;
+use crate::contexts::querying::domain::types::{DbMessage, HeavyQueryEstimate};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScrubbedText {
@@ -57,6 +57,8 @@ pub enum QueryingError {
         requested: String,
         suggestions: Vec<String>,
     },
+    #[error("the request is estimated heavy on a prod connection")]
+    HeavyQuery(HeavyQueryEstimate),
 }
 
 impl QueryingError {

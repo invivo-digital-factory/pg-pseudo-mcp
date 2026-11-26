@@ -202,6 +202,24 @@ impl QueryingWorld {
         self.open_contexts(&config);
     }
 
+    pub fn connect_to_test_database_on_prod(&mut self, extra: &str) {
+        let target = database_target();
+        let connections = self._data.path().join("connections.toml");
+        std::fs::write(
+            &connections,
+            format!(
+                "[[connection]]\nname = \"{CONNECTION}\"\nhost = \"{}\"\nport = {}\ndatabase = \"{}\"\nuser = \"{}\"\nsslmode = \"disable\"\ntype = \"prod\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"{}\"]\n{extra}\n",
+                target.host, target.port, target.database, target.user, target.password
+            ),
+        )
+        .expect("connection file");
+        let config = AppConfig {
+            connections_file: Some(connections),
+            ..self.config()
+        };
+        self.open_contexts(&config);
+    }
+
     pub fn connect_to_unreachable_database(&mut self) {
         write_workspace(self._dbeaver.path(), &offline_target(), true, None);
         let config = self.config();
@@ -222,6 +240,14 @@ impl QueryingWorld {
     }
 
     pub fn connect_to_test_mongodb_as(&mut self, user: &MongoUser) {
+        self.connect_to_test_mongodb_with(user, "type = \"test\"");
+    }
+
+    pub fn connect_to_test_mongodb_on_prod(&mut self, extra: &str) {
+        self.connect_to_test_mongodb_with(&MONGO_READER, &format!("type = \"prod\"\n{extra}"));
+    }
+
+    fn connect_to_test_mongodb_with(&mut self, user: &MongoUser, kind: &str) {
         let root = self._data.path();
         let ssh_config = root.join("ssh_config_mongodb");
         std::fs::write(
@@ -252,7 +278,7 @@ impl QueryingWorld {
         std::fs::write(
             &connections,
             format!(
-                "[[connection]]\nname = \"{MONGO_CONNECTION}\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\n{database}user = \"{}\"\ntype = \"test\"\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"{}\"]\nssh_alias = \"bastion-test\"\n",
+                "[[connection]]\nname = \"{MONGO_CONNECTION}\"\nengine = \"mongodb\"\nhost = \"pl-0.atlas.scarif.test\"\nsrv = false\nport = 1024\ntls = false\nreplica_set = \"rs0\"\n{database}user = \"{}\"\n{kind}\nauth = \"command\"\npassword_command = [\"/bin/echo\", \"{}\"]\nssh_alias = \"bastion-test\"\n",
                 user.name, user.password
             ),
         )

@@ -1,6 +1,7 @@
 mod catalog;
 mod client_options;
 mod decode;
+mod explain;
 mod extended_json;
 mod failure;
 mod sample;

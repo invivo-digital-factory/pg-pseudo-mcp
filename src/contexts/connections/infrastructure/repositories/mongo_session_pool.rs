@@ -355,6 +355,63 @@ impl MongoRead for AggregateRead<'_> {
     }
 }
 
+struct ExplainFindRead<'r> {
+    request: &'r FindRequest,
+    limits: ExecutionLimits,
+}
+
+impl MongoRead for ExplainFindRead<'_> {
+    type Output = serde_json::Value;
+
+    fn deadline(&self) -> Duration {
+        statement_deadline(self.limits)
+    }
+
+    async fn read(&self, open: &mut OpenMongo) -> Result<serde_json::Value, MongoFailure> {
+        let database = open.database(self.request.database.as_deref())?;
+        open.session
+            .explain_find(&database, self.request, self.limits)
+            .await
+    }
+}
+
+struct ExplainAggregateRead<'r> {
+    request: &'r AggregateRequest,
+    limits: ExecutionLimits,
+}
+
+impl MongoRead for ExplainAggregateRead<'_> {
+    type Output = serde_json::Value;
+
+    fn deadline(&self) -> Duration {
+        statement_deadline(self.limits)
+    }
+
+    async fn read(&self, open: &mut OpenMongo) -> Result<serde_json::Value, MongoFailure> {
+        let database = open.database(self.request.database.as_deref())?;
+        open.session
+            .explain_aggregate(&database, self.request, self.limits)
+            .await
+    }
+}
+
+struct CountRead<'r> {
+    database: Option<&'r str>,
+    collection: &'r str,
+}
+
+impl MongoRead for CountRead<'_> {
+    type Output = Option<u64>;
+
+    async fn read(&self, open: &mut OpenMongo) -> Result<Option<u64>, MongoFailure> {
+        let database = open.database(self.database)?;
+        Ok(open
+            .session
+            .document_count(&database, self.collection)
+            .await)
+    }
+}
+
 struct DatabaseNamesRead;
 
 impl MongoRead for DatabaseNamesRead {
@@ -435,6 +492,42 @@ impl DocumentSessionPool for MongoSessionPool {
     ) -> Result<DocumentOutput, ConnectionError> {
         self.run(connection, AggregateRead { request, limits })
             .await
+    }
+
+    async fn explain_find(
+        &self,
+        connection: &str,
+        request: &FindRequest,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, ConnectionError> {
+        self.run(connection, ExplainFindRead { request, limits })
+            .await
+    }
+
+    async fn explain_aggregate(
+        &self,
+        connection: &str,
+        request: &AggregateRequest,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, ConnectionError> {
+        self.run(connection, ExplainAggregateRead { request, limits })
+            .await
+    }
+
+    async fn estimated_count(
+        &self,
+        connection: &str,
+        database: Option<&str>,
+        collection: &str,
+    ) -> Result<Option<u64>, ConnectionError> {
+        self.run(
+            connection,
+            CountRead {
+                database,
+                collection,
+            },
+        )
+        .await
     }
 
     async fn database_names(&self, connection: &str) -> Result<DatabaseNames, ConnectionError> {

@@ -21,7 +21,7 @@ use crate::contexts::connections::infrastructure::repositories::{
 };
 use crate::contexts::connections::presentation::ImportDbeaverHandler;
 use crate::contexts::connections::use_cases::{
-    ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases,
+    ExplainDocuments, ExplainStatement, ImportDbeaverConnections, ListConnections, ListDatabases,
     ListDocumentDatabases, ReadCatalog, ReadCollections, ReadColumnPolicyFiles, ReadEnumLabels,
     RunAggregate, RunFind, RunReadOnlyStatement, SampleFields,
 };
@@ -38,6 +38,7 @@ pub struct ConnectionsContext {
     pub read_column_policy_files: ReadColumnPolicyFiles,
     pub run_find: RunFind<MongoSessionPool>,
     pub run_aggregate: RunAggregate<MongoSessionPool>,
+    pub explain_documents: ExplainDocuments<MongoSessionPool>,
     pub list_document_databases: ListDocumentDatabases<MongoSessionPool>,
     pub read_collections: ReadCollections<MongoSessionPool>,
     pub sample_fields: SampleFields<MongoSessionPool>,
@@ -139,6 +140,7 @@ impl ConnectionsContext {
             )),
             run_find: RunFind::new(documents.clone()),
             run_aggregate: RunAggregate::new(documents.clone()),
+            explain_documents: ExplainDocuments::new(documents.clone()),
             list_document_databases: ListDocumentDatabases::new(documents.clone()),
             read_collections: ReadCollections::new(documents.clone()),
             sample_fields: SampleFields::new(documents),
