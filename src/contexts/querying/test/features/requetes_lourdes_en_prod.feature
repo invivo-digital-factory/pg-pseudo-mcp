@@ -28,7 +28,7 @@ Fonctionnalité: Requêtes lourdes sur une connexion de production
       Alors la requête réussit
 
     Scénario: L'estimation ne cite jamais la valeur réelle d'un filtre
-      Quand l'agent exécute la requête "SELECT id FROM customers, big_numbers WHERE customers.email = 'ylwenna.kervadec@canary-mail.fr'"
+      Quand l'agent exécute la requête "SELECT big_numbers.id FROM customers, big_numbers WHERE customers.email = 'ylwenna.kervadec@canary-mail.fr'"
       Alors l'outil est refusé avec le code "heavy_query_requires_confirmation"
       Et la réponse ne contient aucune valeur canari
 
