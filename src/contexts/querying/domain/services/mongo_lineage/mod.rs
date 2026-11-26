@@ -28,8 +28,8 @@ impl DocumentLineage {
         matches!(&self.root, Shape::Value(lineage) if !matches!(lineage, FieldLineage::Source(_)))
     }
 
-    pub fn of_segments(&self, segments: &[String]) -> FieldLineage {
-        self.root.at(segments).lineage()
+    pub fn own_of_segments(&self, segments: &[String]) -> FieldLineage {
+        self.root.at(segments).own_lineage()
     }
 }
 

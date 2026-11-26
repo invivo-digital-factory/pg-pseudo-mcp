@@ -114,7 +114,8 @@ Fonctionnalité: Valeurs calculées et lignée
 
   Règle: MongoDB : un champ recopié ou renommé garde la classification de sa source
     Projection, clé de regroupement, $first, $push, $unwind, $lookup ou $replaceRoot sur un chemin :
-    le champ de sortie est jugé comme le champ d'origine dans sa collection d'origine.
+    le champ de sortie est jugé comme le champ d'origine dans sa collection d'origine. Un document intermédiaire qu'une projection d'inclusion
+    ne fait que traverser vient lui aussi de son chemin d'origine : chacun de ses champs est jugé pour lui-même.
 
     Contexte:
       Étant donné la politique de colonnes partagée suivante :
@@ -150,6 +151,8 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$replaceWith": "$contact"}]                                                                                 | email        | contact.email | shop.customers |
         | [{"$match": {"status": "PAID"}}, {"$sort": {"createdAt": -1}}, {"$limit": 5}]                                  | contact.email | contact.email | shop.customers |
         | [{"$sortByCount": "$status"}]                                                                                  | _id          | status        | shop.customers |
+        | [{"$project": {"attributes.level.label": 1, "attributes.size.label": 1}}]                                     | attributes   | attributes    | shop.customers |
+        | [{"$project": {"attributes.level.label": 1, "attributes.size.label": 1}}]                                     | attributes.level | attributes.level | shop.customers |
 
   Règle: MongoDB : un champ calculé n'est en clair que si tout ce qu'il lit est déclaré clear et chaque opérateur préserve le clair
     Ici status et amount sont déclarés clear pour shop.customers. Préservent le clair : $concat, $toLower, $toUpper, $toString, $trim, $cond, $ifNull,
@@ -182,6 +185,7 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$count": "n"}]                                                                              | n        | prouvé en clair   |
         | [{"$unwind": {"path": "$orders", "includeArrayIndex": "position"}}]                            | position | prouvé en clair   |
         | [{"$project": {"at": "$$NOW"}}]                                                                | at       | prouvé en clair   |
+        | [{"$set": {"card": {"$mergeObjects": ["$status", "$amount"]}}}, {"$set": {"card.extra": 1}}]   | card     | teinté            |
 
   Règle: MongoDB : ce que la lignée ne suit pas est inconnu, donc teinté
     $$ROOT et les variables, $objectToArray, les noms de champ calculés, $facet, $unionWith et les étapes non suivies donnent un champ dérivé.

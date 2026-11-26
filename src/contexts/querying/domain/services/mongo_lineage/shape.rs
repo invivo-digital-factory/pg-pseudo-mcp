@@ -91,12 +91,27 @@ impl Shape {
                     operators: Vec::new(),
                 },
             },
-            Self::Document { .. } => {
-                let mut derivation = Derivation::default();
-                self.contribute(&mut derivation);
-                derivation.finish()
+            Self::Document { fields, rest: None } => {
+                traversed(fields).map_or_else(|| self.derived(), FieldLineage::Source)
             }
+            Self::Document { .. } => self.derived(),
         }
+    }
+
+    pub fn own_lineage(&self) -> FieldLineage {
+        match self {
+            Self::Document {
+                rest: Some(FieldLineage::Source(source)),
+                ..
+            } => FieldLineage::Source(source.clone()),
+            _ => self.lineage(),
+        }
+    }
+
+    fn derived(&self) -> FieldLineage {
+        let mut derivation = Derivation::default();
+        self.contribute(&mut derivation);
+        derivation.finish()
     }
 
     pub fn contribute(&self, derivation: &mut Derivation) {
@@ -151,6 +166,33 @@ impl Derivation {
             }
         }
     }
+}
+
+fn traversed(fields: &BTreeMap<String, Shape>) -> Option<FieldSource> {
+    let mut parents = fields.iter().map(|(key, shape)| match shape.lineage() {
+        FieldLineage::Source(source) => parent(&source, key),
+        _ => None,
+    });
+    let first = parents.next()??;
+    parents
+        .all(|other| other.as_ref() == Some(&first))
+        .then_some(first)
+}
+
+fn parent(source: &FieldSource, key: &str) -> Option<FieldSource> {
+    let path = if source.path == key {
+        String::new()
+    } else {
+        source
+            .path
+            .strip_suffix(key)?
+            .strip_suffix('.')?
+            .to_string()
+    };
+    Some(FieldSource {
+        path,
+        ..source.clone()
+    })
 }
 
 fn push_new<T: Clone + PartialEq>(items: &mut Vec<T>, item: &T) {
