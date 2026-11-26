@@ -30,6 +30,10 @@ pub struct QueryArgs {
         description = "Database of the same server to use instead of the connection's default database; names come from list_databases"
     )]
     pub database: Option<String>,
+    #[schemars(
+        description = "Run the request even if it is estimated heavy on a prod connection. Set it only after the developer explicitly approved the estimate returned by heavy_query_requires_confirmation; never on your own initiative"
+    )]
+    pub confirm_heavy: Option<bool>,
 }
 
 pub async fn query<D: ReadOnlyDatabase>(use_case: &RunQuery<D>, args: QueryArgs) -> CallToolResult {
@@ -41,6 +45,7 @@ pub async fn query<D: ReadOnlyDatabase>(use_case: &RunQuery<D>, args: QueryArgs)
         max_bytes: args.max_bytes,
         timeout_ms: args.timeout_ms,
         cell_offset: args.cell_offset,
+        confirm_heavy: args.confirm_heavy.unwrap_or(false),
     };
     match use_case.execute(request).await {
         Ok(response) => json_result(&response),

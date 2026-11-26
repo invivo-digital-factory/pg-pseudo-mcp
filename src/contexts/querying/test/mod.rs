@@ -4,6 +4,7 @@ mod column_policy_mongodb;
 mod column_policy_mongodb_wildcard;
 mod fakes;
 mod guard;
+mod heavy_query;
 mod list_databases;
 mod mongo_guard;
 mod mongo_lineage;

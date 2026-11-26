@@ -1,6 +1,6 @@
 use cucumber::{then, when};
 use scarif_database_mcp::contexts::querying::domain::types::{
-    AggregateRequest, FindRequest, MongoCommand, MongoReadPreference,
+    AggregateRequest, FindRequest, MongoCommand,
 };
 use scarif_database_mcp::contexts::querying::presentation::{AggregateArgs, FindArgs, QueryArgs};
 use serde_json::{Value, json};
@@ -178,17 +178,11 @@ async fn find_reads_at_most(world: &mut QueryingWorld, limit: u64) {
     assert_eq!(command.limit, limit);
 }
 
-#[then(
-    regex = r"^l'exécution est bornée à (\d+) ms, sans écriture sur disque, sur un secondaire de préférence$"
-)]
+#[then(regex = r"^l'exécution est bornée à (\d+) ms, sans écriture sur disque$")]
 async fn execution_is_bounded(world: &mut QueryingWorld, timeout: u64) {
     let guarded = world.mongo_answer().outcome.clone().expect("accepted");
     assert_eq!(guarded.execution.max_time_ms, timeout);
     assert!(!guarded.execution.allow_disk_use);
-    assert_eq!(
-        guarded.execution.read_preference,
-        MongoReadPreference::SecondaryPreferred
-    );
 }
 
 #[then(regex = r"^la demande n'est pas ramenée$")]

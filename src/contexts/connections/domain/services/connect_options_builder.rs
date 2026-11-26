@@ -79,6 +79,7 @@ fn hop_options(hop: &SshHop, configured_known_hosts: Option<&Path>) -> Hop {
 
 #[cfg(test)]
 mod unit {
+    use crate::contexts::connections::domain::types::MongoReadPreference;
     use std::path::PathBuf;
 
     use super::*;
@@ -88,6 +89,7 @@ mod unit {
 
     fn mongo(transport: MongoTransport, ssh_hops: Option<Vec<SshHop>>) -> MongoConnectParams {
         MongoConnectParams {
+            read_preference: MongoReadPreference::default(),
             transport,
             replica_set: None,
             database: None,

@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::types::HeavyQueryLimits;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,7 +27,7 @@ use crate::contexts::connections::domain::repositories::ConnectionCatalog;
 use crate::contexts::connections::domain::types::{
     AggregateRequest, CollectionKind, ConnectionEntry, ConnectionSource, ConnectionStatus,
     Discovery, DocumentNode, ExecutionLimits, FindRequest, Hop, HostKeyPolicy, MongoConnectParams,
-    MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
+    MongoReadPreference, MongoTransport, Secret, SshAuth, SshHop, Tunnel, TunnelAuth, UuidSubtype,
 };
 use crate::contexts::connections::infrastructure::data_sources::mongodb::{
     CHANNELS_PER_MEMBER, MongoSession, ProxyEndpoint, SELECTION_TIMEOUT, client_options,
@@ -73,6 +74,7 @@ impl ConnectionCatalog for FixedCatalog {
                 project: "General".into(),
                 engine: "mongodb".into(),
                 connection_type: "test".into(),
+                heavy_query: HeavyQueryLimits::default(),
                 database: self.0.database.clone(),
                 status: ConnectionStatus::Available,
                 params: None,
@@ -117,6 +119,7 @@ fn bastion_hop(known_hosts: &Path) -> SshHop {
 
 fn params((user, password): (&str, &str), port: u16, known_hosts: &Path) -> MongoConnectParams {
     MongoConnectParams {
+        read_preference: MongoReadPreference::default(),
         transport: MongoTransport::Seed {
             host: MEMBER_HOST.to_string(),
             port,
@@ -808,6 +811,8 @@ const DRIVER_SOURCES: &str = "infrastructure/data_sources/mongodb";
 
 const POOL_FILE: &str = "infrastructure/repositories/mongo_session_pool.rs";
 
+const EXPLAIN_FILE: &str = "explain.rs";
+
 const DRIVER_WRITES_AND_COMMANDS: &str = r"\.(?:run_command|run_cursor_command|run_raw_command|insert_one|insert_many|update_one|update_many|replace_one|delete_one|delete_many|find_one_and_\w+|bulk_write|drop|drop_index(?:es)?|create_collection|create_index(?:es)?|rename|watch|gridfs_bucket|start_session|count_documents|distinct|find_one|create_search_index(?:es)?|drop_search_index|update_search_index|warm_connection_pool|shutdown)\b";
 
 #[test]
@@ -830,6 +835,17 @@ fn les_sources_mongodb_n_appellent_que_les_actions_de_lecture_du_pilote() {
             .find_iter(production)
             .map(|found| found.as_str())
             .collect();
+        if file.ends_with(EXPLAIN_FILE) {
+            assert_eq!(found, vec![".run_command"], "{}", file.display());
+            assert!(
+                production.contains(
+                    r#".run_command(doc! {"explain": command, "verbosity": QUERY_PLANNER})"#
+                ) && production.contains(r#"QUERY_PLANNER: &str = "queryPlanner""#),
+                "{} may only run explain with the queryPlanner verbosity",
+                file.display()
+            );
+            continue;
+        }
         assert!(found.is_empty(), "{} calls {found:?}", file.display());
         seen.extend(
             reads

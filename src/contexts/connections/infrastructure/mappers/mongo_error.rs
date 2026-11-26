@@ -229,6 +229,7 @@ pub fn redacted_connect_failure(
 
 #[cfg(test)]
 mod unit {
+    use crate::contexts::connections::domain::types::MongoReadPreference;
     use mongodb::error::{CommandError, Error};
 
     use super::*;
@@ -238,6 +239,7 @@ mod unit {
 
     fn params() -> MongoConnectParams {
         MongoConnectParams {
+            read_preference: MongoReadPreference::default(),
             transport: MongoTransport::Seed {
                 host: MEMBER.into(),
                 port: 1024,

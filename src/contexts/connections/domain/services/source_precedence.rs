@@ -34,6 +34,7 @@ pub fn layer_sources(file: Discovery, dbeaver: Option<Discovery>, empty_hint: &s
 mod unit {
     use super::*;
     use crate::contexts::connections::domain::services::disambiguate;
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
     use crate::contexts::connections::domain::types::{
         ConnectionEntry, ConnectionSource, ConnectionStatus,
     };
@@ -53,6 +54,7 @@ mod unit {
             project: "General".to_string(),
             engine: "postgresql".to_string(),
             connection_type: "dev".to_string(),
+            heavy_query: HeavyQueryLimits::default(),
             database: None,
             status,
             params: None,

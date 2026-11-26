@@ -135,10 +135,51 @@ Fonctionnalité: Déclarer une connexion PostgreSQL dans le fichier
       Et la raison de la connexion "app" contient "`<clé>` is only valid when `engine` is"
 
       Exemples:
-        | clé         | valeur |
-        | srv         | true   |
-        | tls         | true   |
-        | replica_set | "rs0"  |
+        | clé                  | valeur      |
+        | srv                  | true        |
+        | tls                  | true        |
+        | replica_set          | "rs0"       |
+        | read_preference      | "secondary" |
+        | read_preference_tags | ["a:b"]     |
+
+  Règle: Les seuils de requête lourde se règlent sur une connexion prod seulement
+
+    Scénario: Une connexion prod déclare ses propres seuils
+      Étant donné le fichier de connexions suivant :
+        """
+        [[connection]]
+        name = "shop-prod"
+        host = "db.example.com"
+        user = "alice"
+        type = "prod"
+        auth = "command"
+        password_command = ["/bin/echo", "s3cret"]
+        heavy_cost_limit = 50000
+        heavy_scan_limit = 200000
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion "shop-prod" est listée comme disponible
+
+    Plan du Scénario: La ligne « <ligne> » rend l'entrée indisponible
+      Étant donné le fichier de connexions qui déclare l'entrée suivante, où la ligne « <ligne> » remplace celle de même clé :
+        """
+        [[connection]]
+        name = "shop"
+        host = "db.example.com"
+        user = "alice"
+        type = "prod"
+        auth = "pgpass"
+        heavy_scan_limit = 200000
+        """
+      Quand l'agent liste les connexions
+      Alors la connexion "shop" est listée comme indisponible
+      Et la raison de la connexion "shop" contient "<raison>"
+
+      Exemples:
+        | ligne                  | raison                                                 |
+        | heavy_cost_limit = 0   | `heavy_cost_limit` must be a positive whole number     |
+        | heavy_scan_limit = "1" | `heavy_scan_limit` must be a positive whole number     |
+        | type = "test"          | `heavy_scan_limit` is only valid when `type` is "prod" |
 
   Règle: password_command est exigée par auth = "command" et interdite avec les autres modes
 

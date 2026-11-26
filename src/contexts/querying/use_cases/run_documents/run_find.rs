@@ -62,6 +62,7 @@ impl<S: ReadOnlyDocumentStore> RunFind<S> {
             limits,
             clamps,
             cell_offset: request.cell_offset,
+            confirm_heavy: request.confirm_heavy,
             started,
         }
         .run(guarded)

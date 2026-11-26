@@ -26,6 +26,8 @@ pub const SERVER_NAME: &str = "scarif";
 pub const INSTRUCTIONS: &str = "\
 scarif gives read-only access to the PostgreSQL and MongoDB databases of the developer's own connection file, and to the PostgreSQL databases of DBeaver as a fallback.
 Workflow: list_connections, then search_schema or list_tables, then describe_table, then query for PostgreSQL or find and aggregate for MongoDB.
+On a connection of type prod, before a series of queries, state the queries you plan to run and wait once for the developer's OK; a single lookup the developer asked for explicitly needs no extra confirmation.
+On a prod connection, query, find and aggregate refuse a request estimated heavy with heavy_query_requires_confirmation and its estimate: show the estimate to the developer, and repeat the call with confirm_heavy: true only after they approve it.
 A connection points at one database; list_databases shows the databases of its server, and the database argument of query, explain, find, aggregate, search_schema, list_tables and describe_table selects another one.
 Every personal value in results, errors and plans is a pseudonym: never treat it as real, never look it up elsewhere.
 A result lists the pseudonymized columns with their kind and the reason (detected, dictionary, default, derived, policy).
@@ -117,7 +119,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values.",
+        description = "Run one read-only SQL statement and get rows with every personal value pseudonymized. Defaults: 50 rows, 16 KB, 10 s; maxima 500 rows, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text cells are cut at 500 characters; read the rest with cell_offset. Sorting, ranges, LIKE, length and hashing act on real values. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn query(&self, Parameters(args): Parameters<QueryArgs>) -> CallToolResult {
@@ -133,7 +135,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "Run one find on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. filter, projection and sort are Extended JSON objects; only read query operators are accepted. Defaults: 50 documents, 16 KB, 10 s; maxima 500 documents, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text values are cut at 500 characters (read the rest with cell_offset) and arrays at 100 items.",
+        description = "Run one find on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. filter, projection and sort are Extended JSON objects; only read query operators are accepted. Defaults: 50 documents, 16 KB, 10 s; maxima 500 documents, 64 KB, 60 s (max_rows, max_bytes, timeout_ms). Text values are cut at 500 characters (read the rest with cell_offset) and arrays at 100 items. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find(&self, Parameters(args): Parameters<FindArgs>) -> CallToolResult {
@@ -141,7 +143,7 @@ impl ScarifServer {
     }
 
     #[tool(
-        description = "Run one read-only aggregation pipeline on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. Writes ($out, $merge), server-side JavaScript and admin stages are refused; fields computed by the pipeline are pseudonymized unless their lineage is proven clear. Same limits as find.",
+        description = "Run one read-only aggregation pipeline on a MongoDB collection and get documents as relaxed Extended JSON with every personal value pseudonymized. Writes ($out, $merge), server-side JavaScript and admin stages are refused; fields computed by the pipeline are pseudonymized unless their lineage is proven clear. Same limits as find. On a prod connection, a request estimated heavy is refused with heavy_query_requires_confirmation and its estimate; set confirm_heavy only after the developer explicitly approved it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn aggregate(&self, Parameters(args): Parameters<AggregateArgs>) -> CallToolResult {
@@ -185,5 +187,42 @@ pub async fn serve() -> ExitCode {
             tracing::error!(%error, "MCP server stopped with an error");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod unit {
+    use super::INSTRUCTIONS;
+
+    #[test]
+    fn les_instructions_demandent_l_accord_du_developpeur_avant_une_serie_de_requetes_en_prod() {
+        let rule = INSTRUCTIONS
+            .lines()
+            .find(|line| line.starts_with("On a connection of type prod"))
+            .expect("a rule for prod connections");
+        assert!(rule.contains("state the queries you plan to run"), "{rule}");
+        assert!(rule.contains("wait once for the developer's OK"), "{rule}");
+        assert!(
+            rule.contains(
+                "a single lookup the developer asked for explicitly needs no extra confirmation"
+            ),
+            "{rule}"
+        );
+    }
+
+    #[test]
+    fn les_instructions_ne_laissent_passer_une_requete_lourde_qu_apres_l_accord_du_developpeur() {
+        let rule = INSTRUCTIONS
+            .lines()
+            .find(|line| line.contains("heavy_query_requires_confirmation"))
+            .expect("a rule for heavy queries");
+        assert!(
+            rule.contains("show the estimate to the developer"),
+            "{rule}"
+        );
+        assert!(
+            rule.contains("confirm_heavy: true only after they approve it"),
+            "{rule}"
+        );
     }
 }

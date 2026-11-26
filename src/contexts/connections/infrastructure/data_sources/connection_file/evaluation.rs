@@ -5,8 +5,8 @@ use crate::contexts::connections::domain::repositories::AzureSignInTokenProvider
 use crate::contexts::connections::domain::services::is_azure_postgres_host;
 use crate::contexts::connections::domain::types::{
     AuthMode, ConnectParams, ConnectionDefinition, ConnectionEntry, ConnectionSource,
-    ConnectionStatus, EngineSettings, MongoConnectParams, MongoSettings, PasswordSource, SslMode,
-    TunnelParams,
+    ConnectionStatus, EngineSettings, HeavyQueryLimits, MongoConnectParams, MongoSettings,
+    PasswordSource, SslMode, TunnelParams,
 };
 use crate::contexts::connections::infrastructure::data_sources::openssh::OpenSshResolver;
 use crate::contexts::connections::infrastructure::data_sources::password_resolution::{
@@ -18,6 +18,7 @@ const AZURE_HOST_REASON: &str = "auth = \"azure\" needs an Azure PostgreSQL host
 
 struct Evaluation {
     connection_type: String,
+    heavy_query: HeavyQueryLimits,
     database: Option<String>,
     status: ConnectionStatus,
     params: Option<ConnectParams>,
@@ -50,6 +51,7 @@ impl<'a> FileEvaluator<'a> {
         let evaluation = match &raw.definition {
             Err(reason) => Evaluation {
                 connection_type: "unknown".to_string(),
+                heavy_query: HeavyQueryLimits::default(),
                 database: None,
                 status: ConnectionStatus::Unavailable {
                     reason: reason.clone(),
@@ -68,6 +70,7 @@ impl<'a> FileEvaluator<'a> {
             project: "file".to_string(),
             engine: raw.engine.to_string(),
             connection_type: evaluation.connection_type,
+            heavy_query: evaluation.heavy_query,
             database: evaluation.database,
             status: evaluation.status,
             params: evaluation.params,
@@ -114,6 +117,7 @@ impl<'a> FileEvaluator<'a> {
         };
         Evaluation {
             connection_type: definition.connection_type.as_str().to_string(),
+            heavy_query: definition.heavy_query,
             database,
             status,
             params,
@@ -142,6 +146,7 @@ impl<'a> FileEvaluator<'a> {
             user: definition.user.clone(),
             password_command: argv.clone(),
             ssh_hops,
+            read_preference: settings.read_preference.clone().unwrap_or_default(),
         })
     }
 

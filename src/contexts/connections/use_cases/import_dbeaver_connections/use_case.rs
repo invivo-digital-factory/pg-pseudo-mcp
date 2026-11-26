@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::types::HeavyQueryLimits;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -109,6 +110,7 @@ impl ImportDbeaverConnections {
             connection_type,
             auth: auth.clone(),
             ssh_alias: alias.as_ref().map(|(alias, _)| alias.clone()),
+            heavy_query: HeavyQueryLimits::default(),
         };
         let summary = ImportedConnection {
             name: definition.name.clone(),

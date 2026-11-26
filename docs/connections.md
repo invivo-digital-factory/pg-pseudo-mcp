@@ -9,6 +9,7 @@ Contents:
 - [Precedence and DBeaver](#precedence-and-dbeaver)
 - [Moving off DBeaver](#moving-off-dbeaver)
 - [Choosing the database](#choosing-the-database)
+- [Production connections](#production-connections)
 - [Azure Database for PostgreSQL](#azure-database-for-postgresql)
 - [Environment variables](#environment-variables)
 
@@ -53,9 +54,11 @@ ssh_alias = "corp-jump-ledger"
 | `engine` | `postgresql` (default) or `mongodb`, see [MongoDB](mongodb.md) for the keys of a MongoDB entry |
 | `host`, `port` (5432), `database` (`postgres`), `user` | The database, as seen from the SSH host when `ssh_alias` is set; `database` is the connection's default database |
 | `sslmode` | `disable`, `allow`, `prefer` (default), `require`, `verify-ca` or `verify-full` |
-| `type` | `dev`, `test` or `prod` |
+| `type` | `dev`, `test` or `prod`; `prod` turns on the safeguards of [Production connections](#production-connections) |
 | `auth` | How the password is obtained, see below |
 | `ssh_alias` | A `Host` alias of `~/.ssh/config` |
+| `heavy_cost_limit` | Only with `type = "prod"` and PostgreSQL: plan cost above which a query needs your approval (default 100000) |
+| `heavy_scan_limit` | Only with `type = "prod"`: rows a full scan may read before the request needs your approval (default 1000000) |
 | `read_dbeaver` | Top-level; `false` turns the DBeaver source off entirely (default `true`) |
 
 Edits to the file are picked up at the next tool call. A key that holds a secret (`password`, `token`, `passphrase`, any key containing `password` except `password_command`), an unknown key or an invalid value makes that entry unavailable, with a reason that names the field; two entries with the same name are both unavailable. A file that exists but cannot be parsed or read, or that has an invalid `read_dbeaver` value, a `connection` key that is not an array of tables (`connection = "x"`, `connection = [1]`) or an unknown or secret-shaped top-level key, is reported in the `list_connections` hint (with its line and column for a syntax error, never its content), and the DBeaver connections stay listed but unavailable, with a reason naming the connection file, until it is fixed: a broken file cannot silently re-expose connections it was meant to shadow or turn off. A well-formed `[[connection]]` array with one invalid entry is different: only that entry is unavailable, with its reason, and DBeaver follows `read_dbeaver`. With a readable `read_dbeaver = false`, DBeaver stays off. A missing default file is silent; a missing file named by `SCARIF_CONNECTIONS_FILE` is reported with its path.
@@ -96,6 +99,20 @@ writes the file once from DBeaver's PostgreSQL connections, without any password
 ## Choosing the database
 
 A connection points at one database, often `postgres`, while the application databases live on the same server. `query`, `explain`, `search_schema`, `list_tables` and `describe_table` accept an optional `database` argument; its names come from `list_databases`. It keeps the host, port, SSH tunnel, credentials, Azure token handling and `sslmode` of the connection and only changes the database name, including the one matched in `~/.pgpass`. Sessions are kept per connection and database: the default database plus at most four others per connection, the least recently used one being closed with its tunnel. Without the argument the connection's own database is used. The read-only guard and the pseudonymization are the same for every database. Database names are returned as they are, since they are the value of the argument. A database that does not exist is reported with the server message and SQLSTATE `3D000`.
+
+## Production connections
+
+On a connection with `type = "prod"`:
+
+- **Series of queries.** The server instructions ask the agent to state the queries it plans and wait once for your OK before running a series of them. A single lookup you asked for explicitly needs no extra confirmation. This rule is followed by the agent, not enforced by the server.
+- **Heavy requests.** `query`, `find` and `aggregate` estimate the request before running it, and refuse a heavy one with the code `heavy_query_requires_confirmation`. The error carries an `estimate` (plan cost, limits, and each offending full scan with its node, relation and estimated rows; never a value of the request) and a hint telling the agent to show it to you and to repeat the call with `confirm_heavy: true` only after you approve. Connections of another type are never estimated and pay no extra round-trip.
+
+| Engine | Estimate | Heavy when |
+|---|---|---|
+| PostgreSQL | A plain `EXPLAIN (VERBOSE, FORMAT JSON)` of the same statement, in the same read-only transaction setup as `query`, plus the `reltuples` estimate of each sequentially scanned table | The plan's total cost is above `heavy_cost_limit`, or a `Seq Scan` reads more rows than `heavy_scan_limit`; a scan under a `LIMIT` counts the share of the table the planner expects it to read |
+| MongoDB | `explain` with the `queryPlanner` verbosity of the same `find` or pipeline, plus the estimated document count of each scanned collection | The winning plan holds a `COLLSCAN` of a collection with more documents than `heavy_scan_limit`, unless the scan has no filter and a limit stops it |
+
+The estimate relies on the planner statistics and never runs the request. An `EXPLAIN` written by the agent itself is not estimated again. A MongoDB request that cannot be explained runs without the estimate and carries the warning `heavy_query_check_skipped`. `confirm_heavy` is an argument the agent sets: to require a human approval, have your MCP client ask you before any call that sets it.
 
 ## Azure Database for PostgreSQL
 

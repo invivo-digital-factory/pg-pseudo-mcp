@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::database_failure_mapping::database_failure;
 use super::document_mapping::{collection_kind, stored_node};
+use super::heavy_query_thresholds::heavy_query_thresholds;
 use super::result_set_mapping::execution_limits;
 use crate::contexts::connections::domain::types::{
     AggregateRequest, ConnectionStatus, DocumentOutput as StoredOutput, FindRequest,
@@ -11,7 +12,7 @@ use crate::contexts::querying::domain::errors::DatabaseFailure;
 use crate::contexts::querying::domain::repositories::ReadOnlyDocumentStore;
 use crate::contexts::querying::domain::types::{
     CollectionDetails, CollectionEntry, DocumentOutput, ExecutionLimits, FieldSample,
-    GuardedAggregate, GuardedFind,
+    GuardedAggregate, GuardedFind, HeavyQueryThresholds,
 };
 
 pub struct ReadOnlyDocumentStoreAdapter {
@@ -21,6 +22,33 @@ pub struct ReadOnlyDocumentStoreAdapter {
 impl ReadOnlyDocumentStoreAdapter {
     pub fn new(connections: Arc<ConnectionsContext>) -> Self {
         Self { connections }
+    }
+}
+
+fn stored_find(database: &str, collection: &str, find: &GuardedFind) -> FindRequest {
+    FindRequest {
+        database: Some(database.to_string()),
+        collection: collection.to_string(),
+        filter: find.filter.clone(),
+        projection: find.projection.clone(),
+        sort: find.sort.clone(),
+        skip: find.skip,
+        limit: Some(find.limit),
+        hint: find.hint.clone(),
+        collation: find.collation.clone(),
+    }
+}
+
+fn stored_aggregate(
+    database: &str,
+    collection: &str,
+    aggregate: &GuardedAggregate,
+) -> AggregateRequest {
+    AggregateRequest {
+        database: Some(database.to_string()),
+        collection: collection.to_string(),
+        pipeline: aggregate.pipeline.clone(),
+        let_vars: aggregate.let_vars.clone(),
     }
 }
 
@@ -76,17 +104,7 @@ impl ReadOnlyDocumentStore for ReadOnlyDocumentStoreAdapter {
         find: &GuardedFind,
         limits: ExecutionLimits,
     ) -> Result<DocumentOutput, DatabaseFailure> {
-        let request = FindRequest {
-            database: Some(database.to_string()),
-            collection: collection.to_string(),
-            filter: find.filter.clone(),
-            projection: find.projection.clone(),
-            sort: find.sort.clone(),
-            skip: find.skip,
-            limit: Some(find.limit),
-            hint: find.hint.clone(),
-            collation: find.collation.clone(),
-        };
+        let request = stored_find(database, collection, find);
         self.connections
             .run_find
             .execute(connection, &request, execution_limits(limits))
@@ -103,18 +121,68 @@ impl ReadOnlyDocumentStore for ReadOnlyDocumentStoreAdapter {
         aggregate: &GuardedAggregate,
         limits: ExecutionLimits,
     ) -> Result<DocumentOutput, DatabaseFailure> {
-        let request = AggregateRequest {
-            database: Some(database.to_string()),
-            collection: collection.to_string(),
-            pipeline: aggregate.pipeline.clone(),
-            let_vars: aggregate.let_vars.clone(),
-        };
+        let request = stored_aggregate(database, collection, aggregate);
         self.connections
             .run_aggregate
             .execute(connection, &request, execution_limits(limits))
             .await
             .map(document_output)
             .map_err(database_failure)
+    }
+
+    async fn explain_find(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+        find: &GuardedFind,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, DatabaseFailure> {
+        self.connections
+            .explain_documents
+            .find(
+                connection,
+                &stored_find(database, collection, find),
+                execution_limits(limits),
+            )
+            .await
+            .map_err(database_failure)
+    }
+
+    async fn explain_aggregate(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+        aggregate: &GuardedAggregate,
+        limits: ExecutionLimits,
+    ) -> Result<serde_json::Value, DatabaseFailure> {
+        self.connections
+            .explain_documents
+            .aggregate(
+                connection,
+                &stored_aggregate(database, collection, aggregate),
+                execution_limits(limits),
+            )
+            .await
+            .map_err(database_failure)
+    }
+
+    async fn estimated_count(
+        &self,
+        connection: &str,
+        database: &str,
+        collection: &str,
+    ) -> Result<Option<u64>, DatabaseFailure> {
+        self.connections
+            .read_collections
+            .estimated_count(connection, Some(database), collection)
+            .await
+            .map_err(database_failure)
+    }
+
+    async fn heavy_query_thresholds(&self, connection: &str) -> Option<HeavyQueryThresholds> {
+        heavy_query_thresholds(&self.connections, connection).await
     }
 
     async fn databases(&self, connection: &str) -> Result<Vec<String>, DatabaseFailure> {

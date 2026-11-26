@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::contexts::querying::domain::constants::{limits, mongo_policy};
+use crate::contexts::querying::domain::constants::{heavy_query, limits, mongo_policy};
 
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
@@ -16,6 +16,7 @@ pub struct ServerInfo {
     pub acts_on_real_values: &'static [&'static str],
     pub known_limits: &'static [&'static str],
     pub mongodb: MongoInfo,
+    pub prod_guard: ProdGuardInfo,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<InfoWarning>,
 }
@@ -34,6 +35,17 @@ pub struct MongoInfo {
     pub max_returned_array_items: usize,
     pub pseudonym_translation: &'static str,
     pub acts_on_real_values: &'static [&'static str],
+    pub known_limits: &'static [&'static str],
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProdGuardInfo {
+    pub applies_to: &'static str,
+    pub confirmation: &'static str,
+    pub heavy_query: &'static str,
+    pub default_cost_limit: u64,
+    pub default_scan_limit: u64,
+    pub connection_keys: &'static [&'static str],
     pub known_limits: &'static [&'static str],
 }
 
@@ -80,6 +92,7 @@ pub fn server_info(
         acts_on_real_values: ACTS_ON_REAL_VALUES,
         known_limits: KNOWN_LIMITS,
         mongodb: mongo_info(),
+        prod_guard: prod_guard_info(),
         warnings: column_policy_warnings
             .into_iter()
             .map(|message| InfoWarning {
@@ -90,6 +103,26 @@ pub fn server_info(
             .collect(),
     }
 }
+
+fn prod_guard_info() -> ProdGuardInfo {
+    ProdGuardInfo {
+        applies_to: "connections whose type is prod",
+        confirmation: "before a series of queries, state the planned queries and wait once for the developer's OK; a single lookup the developer asked for needs none",
+        heavy_query: "query, find and aggregate are estimated first and refused with heavy_query_requires_confirmation when the PostgreSQL plan cost is above the cost limit or a full scan reads more rows than the scan limit; repeat with confirm_heavy: true only after the developer approved",
+        default_cost_limit: heavy_query::DEFAULT_COST_LIMIT,
+        default_scan_limit: heavy_query::DEFAULT_SCAN_LIMIT,
+        connection_keys: &["heavy_cost_limit", "heavy_scan_limit"],
+        known_limits: PROD_GUARD_KNOWN_LIMITS,
+    }
+}
+
+pub const PROD_GUARD_KNOWN_LIMITS: &[&str] = &[
+    "the estimate comes from the planner statistics, never from running the request; stale statistics give a wrong estimate",
+    "a PostgreSQL full scan stopped by a LIMIT is judged by the planner's own estimate of how much of the table it reads",
+    "MongoDB gives no plan cost: only a collection scan of a collection larger than the scan limit is refused, unless it has no filter and a limit stops it",
+    "a MongoDB request that cannot be explained runs without the estimate and carries the warning heavy_query_check_skipped",
+    "only connections declared with the type prod are guarded",
+];
 
 fn mongo_info() -> MongoInfo {
     MongoInfo {
@@ -129,6 +162,7 @@ pub const MONGO_KNOWN_LIMITS: &[&str] = &[
     "describe_table reads a random sample of up to 100 documents; rare fields may be missing",
     "a field computed by a pipeline is in clear only when every field it reads is declared clear in the column policy",
     "object keys that contain a dot are never matched by the column policy",
+    "on a prod connection, a request that cannot be explained runs without the heavy-query estimate, with the warning heavy_query_check_skipped",
 ];
 
 pub const REVERSIBLE_KINDS: &[&str] = &[
@@ -183,6 +217,27 @@ mod unit {
         assert_eq!(info.defaults.max_rows, limits::DEFAULT_MAX_ROWS);
         assert_eq!(info.maxima.max_rows, limits::MAX_ROWS_CEILING);
         assert_eq!(info.maxima.max_bytes, limits::MAX_BYTES_CEILING);
+    }
+
+    #[test]
+    fn les_infos_serveur_annoncent_le_garde_fou_de_prod_et_ses_seuils_par_defaut() {
+        let info = serde_json::to_value(server_info(Vec::new(), Vec::new())).unwrap();
+        assert_eq!(info["prod_guard"]["default_cost_limit"], 100_000);
+        assert_eq!(info["prod_guard"]["default_scan_limit"], 1_000_000);
+        assert_eq!(
+            info["prod_guard"]["connection_keys"],
+            serde_json::json!(["heavy_cost_limit", "heavy_scan_limit"])
+        );
+        assert!(
+            info["mongodb"]["known_limits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|limit| limit
+                    .as_str()
+                    .unwrap()
+                    .contains("heavy_query_check_skipped"))
+        );
     }
 
     #[test]

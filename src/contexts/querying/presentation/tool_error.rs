@@ -13,6 +13,7 @@ pub enum ErrorCategory {
     UnknownConnection,
     UnknownTable,
     ConnectionUnavailable,
+    RequiresConfirmation,
     WithheldFailClosed,
     Internal,
 }
@@ -29,6 +30,8 @@ pub struct ToolError {
     pub sqlstate: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<serde_json::Value>,
 }
 
 impl ToolError {
@@ -45,6 +48,7 @@ impl ToolError {
             retryable: false,
             sqlstate: None,
             code_name: None,
+            estimate: None,
         }
     }
 
@@ -65,6 +69,11 @@ impl ToolError {
 
     pub fn with_code_name(mut self, code_name: impl Into<String>) -> Self {
         self.code_name = Some(code_name.into());
+        self
+    }
+
+    pub fn with_estimate(mut self, estimate: serde_json::Value) -> Self {
+        self.estimate = Some(estimate);
         self
     }
 

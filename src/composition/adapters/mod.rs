@@ -4,6 +4,7 @@ mod connection_engines;
 mod database_failure_mapping;
 mod document_anonymizer;
 mod document_mapping;
+mod heavy_query_thresholds;
 mod personal_column_dictionary;
 mod pseudonym_translator;
 mod read_only_database;

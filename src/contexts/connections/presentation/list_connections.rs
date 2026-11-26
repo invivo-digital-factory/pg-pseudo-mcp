@@ -89,8 +89,10 @@ fn describe(entry: &ConnectionEntry) -> Value {
 #[cfg(test)]
 mod unit {
     use super::*;
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
     use crate::contexts::connections::domain::types::{
-        ConnectionSource, HostKeyPolicy, MongoConnectParams, MongoTransport, SshAuth, SshHop,
+        ConnectionSource, HostKeyPolicy, MongoConnectParams, MongoReadPreference, MongoTransport,
+        SshAuth, SshHop,
     };
 
     fn mongo_entry(host_key: HostKeyPolicy) -> ConnectionEntry {
@@ -103,10 +105,12 @@ mod unit {
             project: "file".to_string(),
             engine: "mongodb".to_string(),
             connection_type: "dev".to_string(),
+            heavy_query: HeavyQueryLimits::default(),
             database: None,
             status: ConnectionStatus::Available,
             params: None,
             mongo: Some(MongoConnectParams {
+                read_preference: MongoReadPreference::default(),
                 transport: MongoTransport::Srv {
                     host: "pl-0.atlas.scarif.test".to_string(),
                 },

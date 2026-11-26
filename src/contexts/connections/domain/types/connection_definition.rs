@@ -1,4 +1,6 @@
 use super::connection_profile::SslMode;
+use super::heavy_query_limits::HeavyQueryLimits;
+use super::read_preference::MongoReadPreference;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionType {
@@ -44,6 +46,7 @@ pub struct MongoSettings {
     pub database: Option<String>,
     pub replica_set: Option<String>,
     pub transport: MongoTransport,
+    pub read_preference: Option<MongoReadPreference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,4 +68,5 @@ pub struct ConnectionDefinition {
     pub connection_type: ConnectionType,
     pub auth: AuthMode,
     pub ssh_alias: Option<String>,
+    pub heavy_query: HeavyQueryLimits,
 }

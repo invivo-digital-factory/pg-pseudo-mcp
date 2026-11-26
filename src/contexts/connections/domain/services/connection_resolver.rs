@@ -69,10 +69,13 @@ fn find_entry<'a>(
 #[cfg(test)]
 mod unit {
     use super::*;
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
+    use crate::contexts::connections::domain::types::MongoReadPreference;
     use crate::contexts::connections::domain::types::{ConnectionSource, MongoTransport};
 
     fn mongo_params() -> MongoConnectParams {
         MongoConnectParams {
+            read_preference: MongoReadPreference::default(),
             transport: MongoTransport::Seed {
                 host: "pl-0.atlas.scarif.test".into(),
                 port: 1024,
@@ -104,6 +107,7 @@ mod unit {
                 "postgresql".into()
             },
             connection_type: "dev".into(),
+            heavy_query: HeavyQueryLimits::default(),
             database: None,
             status,
             params: None,

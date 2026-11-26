@@ -249,6 +249,7 @@ impl SessionPool for PostgresSessionPool {
 
 #[cfg(test)]
 mod integration {
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
     use std::path::Path;
     use std::str::FromStr;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -366,6 +367,7 @@ mod integration {
                     project: "General".into(),
                     engine: "postgresql".into(),
                     connection_type: "dev".into(),
+                    heavy_query: HeavyQueryLimits::default(),
                     database: Some(params.database.clone()),
                     status: ConnectionStatus::Available,
                     params: Some(params),

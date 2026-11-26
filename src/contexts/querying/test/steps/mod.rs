@@ -7,6 +7,7 @@ mod limites_des_reponses;
 mod plan_d_execution;
 mod politique_de_champs_mongodb;
 mod politique_de_colonnes;
+mod requetes_lourdes_en_prod;
 mod shared;
 mod suivi_par_pseudonyme;
 pub mod support;

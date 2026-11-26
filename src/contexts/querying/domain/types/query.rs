@@ -14,6 +14,7 @@ pub struct QueryRequest {
     pub max_bytes: Option<u64>,
     pub timeout_ms: Option<u64>,
     pub cell_offset: Option<u64>,
+    pub confirm_heavy: bool,
 }
 
 #[derive(Debug, Serialize)]

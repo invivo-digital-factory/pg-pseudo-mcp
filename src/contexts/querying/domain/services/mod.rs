@@ -11,6 +11,7 @@ pub mod document_bounds;
 pub mod document_clearances;
 pub mod document_requests;
 pub mod ejson_render;
+pub mod heavy_query;
 pub mod lineage;
 pub mod literal_collector;
 pub mod literal_rewriter;

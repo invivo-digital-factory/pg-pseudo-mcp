@@ -101,6 +101,20 @@ fn identity_lines(definition: &ConnectionDefinition) -> String {
             if let Some(database) = &settings.database {
                 text.push_str(&format!("database = {}\n", quoted(database)));
             }
+            if let Some(read_preference) = &settings.read_preference {
+                text.push_str(&format!(
+                    "read_preference = {}\n",
+                    quoted(read_preference.mode.as_str())
+                ));
+                if !read_preference.tags.is_empty() {
+                    let tags: Vec<String> = read_preference
+                        .tags
+                        .iter()
+                        .map(|(key, value)| quoted(&format!("{key}:{value}")))
+                        .collect();
+                    text.push_str(&format!("read_preference_tags = [{}]\n", tags.join(", ")));
+                }
+            }
             text.push_str(&format!("user = {user}\ntype = {kind}\n"));
             text
         }
@@ -125,6 +139,12 @@ fn render(definitions: &[ConnectionDefinition]) -> String {
         if let Some(alias) = &definition.ssh_alias {
             text.push_str(&format!("ssh_alias = {}\n", quoted(alias)));
         }
+        if let Some(cost) = definition.heavy_query.cost {
+            text.push_str(&format!("heavy_cost_limit = {cost}\n"));
+        }
+        if let Some(scan_rows) = definition.heavy_query.scan_rows {
+            text.push_str(&format!("heavy_scan_limit = {scan_rows}\n"));
+        }
         text.push('\n');
     }
     text
@@ -136,7 +156,8 @@ mod integration {
 
     use super::*;
     use crate::contexts::connections::domain::types::{
-        ConnectionType, MongoSettings, MongoTransport, SslMode,
+        ConnectionType, HeavyQueryLimits, MongoReadPreference, MongoSettings, MongoTransport,
+        ReadPreferenceMode, SslMode,
     };
     use crate::contexts::connections::infrastructure::data_sources::connection_file::parse_file;
 
@@ -153,6 +174,7 @@ mod integration {
             connection_type: ConnectionType::Test,
             auth,
             ssh_alias: alias.map(str::to_string),
+            heavy_query: HeavyQueryLimits::default(),
         }
     }
 
@@ -164,6 +186,7 @@ mod integration {
             connection_type: ConnectionType::Dev,
             auth: AuthMode::Command(vec!["/bin/echo".into(), "x".into()]),
             ssh_alias: Some("bastion".to_string()),
+            heavy_query: HeavyQueryLimits::default(),
         }
     }
 
@@ -207,6 +230,13 @@ mod integration {
                         port: 1024,
                         tls: false,
                     },
+                    read_preference: Some(MongoReadPreference {
+                        mode: ReadPreferenceMode::Secondary,
+                        tags: vec![
+                            ("nodeType".to_string(), "ANALYTICS".to_string()),
+                            ("region".to_string(), "eu:west".to_string()),
+                        ],
+                    }),
                 },
             ),
             mongo_definition(
@@ -217,9 +247,54 @@ mod integration {
                     transport: MongoTransport::Srv {
                         host: "pl-0.atlas.scarif.test".to_string(),
                     },
+                    read_preference: None,
+                },
+            ),
+            mongo_definition(
+                "nearest",
+                MongoSettings {
+                    database: None,
+                    replica_set: None,
+                    transport: MongoTransport::Srv {
+                        host: "pl-0.atlas.scarif.test".to_string(),
+                    },
+                    read_preference: Some(MongoReadPreference::of(ReadPreferenceMode::Nearest)),
                 },
             ),
         ];
+        let path = writer_in(dir.path()).write(&definitions, false).unwrap();
+        let parsed = parse_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let read: Vec<ConnectionDefinition> = parsed
+            .entries
+            .into_iter()
+            .map(|entry| entry.definition.unwrap())
+            .collect();
+        assert_eq!(read, definitions);
+    }
+
+    #[test]
+    fn les_seuils_de_requete_lourde_font_l_aller_retour_par_le_fichier_ecrit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut postgres = definition("shop-prod", AuthMode::Pgpass, None);
+        postgres.connection_type = ConnectionType::Prod;
+        postgres.heavy_query = HeavyQueryLimits {
+            cost: Some(50_000),
+            scan_rows: Some(200_000),
+        };
+        let mut mongo = mongo_definition(
+            "orders-prod",
+            MongoSettings {
+                database: None,
+                replica_set: None,
+                transport: MongoTransport::Srv {
+                    host: "pl-0.atlas.scarif.test".to_string(),
+                },
+                read_preference: None,
+            },
+        );
+        mongo.connection_type = ConnectionType::Prod;
+        mongo.heavy_query.scan_rows = Some(10);
+        let definitions = vec![postgres, mongo];
         let path = writer_in(dir.path()).write(&definitions, false).unwrap();
         let parsed = parse_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let read: Vec<ConnectionDefinition> = parsed

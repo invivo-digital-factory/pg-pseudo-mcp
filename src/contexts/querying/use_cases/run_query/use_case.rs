@@ -16,10 +16,13 @@ use crate::contexts::querying::domain::services::clear_lineage::{
 use crate::contexts::querying::domain::services::column_policy::{
     combine_lineage, policy_clearances, result_hints,
 };
+use crate::contexts::querying::domain::services::heavy_query::{
+    explain_for_cost, pg_verdict, relation_rows, relation_rows_sql, summarize_pg_plan,
+};
 use crate::contexts::querying::domain::services::result_bounds::bound_rows;
 use crate::contexts::querying::domain::services::statement_guard::inspect;
 use crate::contexts::querying::domain::types::{
-    Clearance, ColumnMeta, ColumnOut, ColumnPolicy, ExecutionLimits, Guarded, NoticeOut,
+    Cell, Clearance, ColumnMeta, ColumnOut, ColumnPolicy, ExecutionLimits, Guarded, NoticeOut,
     PersonalNames, QueryLimits, QueryRequest, QueryResponse, RelationCatalog, Translations,
     TruncatedBy, Truncation, Warning,
 };
@@ -57,6 +60,10 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
         let (limits, clamps) =
             QueryLimits::from_request(request.max_rows, request.max_bytes, request.timeout_ms);
         let cell_offset = usize::try_from(request.cell_offset.unwrap_or(0)).unwrap_or(usize::MAX);
+        if !request.confirm_heavy && !guarded.is_explain {
+            self.refuse_heavy(ports, &request, &guarded, &limits)
+                .await?;
+        }
         let output = self
             .database
             .run(
@@ -156,6 +163,68 @@ impl<D: ReadOnlyDatabase> RunQuery<D> {
             notices,
             elapsed_ms: started.elapsed().as_millis(),
         })
+    }
+
+    async fn refuse_heavy(
+        &self,
+        ports: &AnonymizationPorts,
+        request: &QueryRequest,
+        guarded: &Guarded,
+        limits: &QueryLimits,
+    ) -> Result<(), QueryingError> {
+        let Some(thresholds) = self
+            .database
+            .heavy_query_thresholds(&request.connection)
+            .await
+        else {
+            return Ok(());
+        };
+        let execution = ExecutionLimits {
+            max_rows: 1,
+            timeout_ms: limits.timeout_ms,
+        };
+        let plan = self
+            .database
+            .explain(
+                &request.connection,
+                request.database.as_deref(),
+                &explain_for_cost(&guarded.sql),
+                execution,
+            )
+            .await
+            .map_err(|failure| self.scrubbed(ports, failure, limits, &guarded.injected))?;
+        let Some(summary) =
+            plan.rows
+                .first()
+                .and_then(|row| row.first())
+                .and_then(|cell| match cell {
+                    Cell::Json(value) => summarize_pg_plan(value),
+                    _ => None,
+                })
+        else {
+            return Ok(());
+        };
+        let rows = match relation_rows_sql(&summary) {
+            Some(sql) => self
+                .database
+                .read_catalog(
+                    &request.connection,
+                    request.database.as_deref(),
+                    &sql,
+                    ExecutionLimits {
+                        max_rows: summary.scans.len(),
+                        timeout_ms: limits.timeout_ms,
+                    },
+                )
+                .await
+                .map(|output| relation_rows(&output))
+                .unwrap_or_default(),
+            None => Default::default(),
+        };
+        match pg_verdict(&summary, &rows, thresholds) {
+            Some(estimate) => Err(QueryingError::HeavyQuery(estimate)),
+            None => Ok(()),
+        }
     }
 
     fn column_policy(&self) -> ColumnPolicy {

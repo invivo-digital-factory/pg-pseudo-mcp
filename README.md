@@ -93,12 +93,12 @@ All tools are read-only (`readOnlyHint: true`) and can be allowlisted.
 | `aggregate` | One read-only aggregation pipeline on a MongoDB collection, with the same result shape as `find`. |
 | `server_info` | Live limits, reversible and non-reversible kinds, known limitations, and the MongoDB allowlist. |
 
-`query` and `explain` read PostgreSQL connections only, `find` and `aggregate` MongoDB connections only; each refuses the other engine with a reason naming the right tool. `list_databases`, `search_schema`, `list_tables` and `describe_table` work on both, see [Tools on a MongoDB connection](docs/mongodb.md#tools-on-a-mongodb-connection).
+`query` and `explain` read PostgreSQL connections only, `find` and `aggregate` MongoDB connections only; each refuses the other engine with a reason naming the right tool. On a connection of type `prod`, a request estimated heavy is refused until you approve it, see [Production connections](docs/connections.md#production-connections). `list_databases`, `search_schema`, `list_tables` and `describe_table` work on both, see [Tools on a MongoDB connection](docs/mongodb.md#tools-on-a-mongodb-connection).
 
 ## Documentation
 
-- [Connections](docs/connections.md): connection file, authentication, SSH tunnels, DBeaver, Azure, environment variables.
-- [MongoDB](docs/mongodb.md): MongoDB entries, private link, tools, read-only guard, documents and lineage.
+- [Connections](docs/connections.md): connection file, authentication, SSH tunnels, DBeaver, production connections, Azure, environment variables.
+- [MongoDB](docs/mongodb.md): MongoDB entries, private link, read preference, tools, read-only guard, documents and lineage.
 - [Pseudonymization](docs/pseudonymization.md): how values are pseudonymized, column and field policy, resetting pseudonyms.
 - [Security](docs/security.md): read-only guarantee, threat model and limits, Claude Code deny rules.
 - [Development](docs/development.md): tests, contexts and business scenarios, third-party data.

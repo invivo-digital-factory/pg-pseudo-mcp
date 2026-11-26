@@ -13,8 +13,8 @@ use crate::contexts::querying::domain::services::mongo_guard::{
     InspectedMongo, inspect_aggregate, inspect_find,
 };
 use crate::contexts::querying::domain::types::{
-    AggregateRequest, FindRequest, GuardedMongo, MongoCommand, MongoReadPreference,
-    PseudonymLookup, QueryLimits, Translations,
+    AggregateRequest, FindRequest, GuardedMongo, MongoCommand, PseudonymLookup, QueryLimits,
+    Translations,
 };
 
 const PSEUDONYM: &str = "noemie.vasseur@example.net";
@@ -889,10 +889,6 @@ mod unit {
         assert_eq!(pipeline_of(&guarded), json!([{"$limit": 51}]));
         assert_eq!(guarded.execution.max_time_ms, 7_000);
         assert!(!guarded.execution.allow_disk_use);
-        assert_eq!(
-            guarded.execution.read_preference,
-            MongoReadPreference::SecondaryPreferred
-        );
         assert_eq!(guarded.execution.batch_size, 51);
         assert_eq!(guarded.execution.max_documents, 51);
         assert_eq!(guarded.execution.comment, "scarif");

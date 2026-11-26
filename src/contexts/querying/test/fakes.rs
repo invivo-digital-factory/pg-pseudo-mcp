@@ -11,7 +11,8 @@ use crate::contexts::querying::domain::repositories::{
 use crate::contexts::querying::domain::types::DatabaseListing;
 use crate::contexts::querying::domain::types::{
     AnonymizedRows, Cell, Clearance, ColumnClassification, ColumnFlag, ColumnMeta,
-    ColumnPolicyLoad, DbMessage, ExecutionLimits, Lineage, PseudonymLookup, QueryOutput,
+    ColumnPolicyLoad, DbMessage, ExecutionLimits, HeavyQueryThresholds, Lineage, PseudonymLookup,
+    QueryOutput,
 };
 
 pub struct FakeDatabase {
@@ -20,6 +21,8 @@ pub struct FakeDatabase {
     enum_labels: Result<Vec<String>, DatabaseFailure>,
     catalog: Result<QueryOutput, DatabaseFailure>,
     statements: Mutex<Vec<String>>,
+    thresholds: Option<HeavyQueryThresholds>,
+    plan: Option<QueryOutput>,
 }
 
 impl FakeDatabase {
@@ -30,6 +33,8 @@ impl FakeDatabase {
             enum_labels: Ok(Vec::new()),
             catalog: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
+            thresholds: None,
+            plan: None,
         })
     }
 
@@ -43,6 +48,8 @@ impl FakeDatabase {
             enum_labels,
             catalog: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
+            thresholds: None,
+            plan: None,
         })
     }
 
@@ -53,6 +60,8 @@ impl FakeDatabase {
             enum_labels: Ok(Vec::new()),
             catalog: Ok(catalog),
             statements: Mutex::new(Vec::new()),
+            thresholds: None,
+            plan: None,
         })
     }
 
@@ -63,6 +72,8 @@ impl FakeDatabase {
             enum_labels: Err(failure.clone()),
             catalog: Err(failure),
             statements: Mutex::new(Vec::new()),
+            thresholds: None,
+            plan: None,
         })
     }
 
@@ -73,6 +84,29 @@ impl FakeDatabase {
             enum_labels: Ok(Vec::new()),
             catalog: Err(DatabaseFailure::MissingParams),
             statements: Mutex::new(Vec::new()),
+            thresholds: None,
+            plan: None,
+        })
+    }
+
+    pub fn on_prod(
+        output: QueryOutput,
+        plan: Value,
+        thresholds: HeavyQueryThresholds,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            response: Ok(output),
+            listing: Err(DatabaseFailure::MissingParams),
+            enum_labels: Ok(Vec::new()),
+            catalog: Err(DatabaseFailure::MissingParams),
+            statements: Mutex::new(Vec::new()),
+            thresholds: Some(thresholds),
+            plan: Some(QueryOutput {
+                columns: Vec::new(),
+                rows: vec![vec![Cell::Json(plan)]],
+                more_rows: false,
+                notices: Vec::new(),
+            }),
         })
     }
 
@@ -104,7 +138,11 @@ impl ReadOnlyDatabase for FakeDatabase {
         explain_sql: &str,
         _limits: ExecutionLimits,
     ) -> Result<QueryOutput, DatabaseFailure> {
-        self.answer(explain_sql)
+        let answer = self.answer(explain_sql);
+        match &self.plan {
+            Some(plan) => Ok(plan.clone()),
+            None => answer,
+        }
     }
 
     async fn read_catalog(
@@ -129,6 +167,10 @@ impl ReadOnlyDatabase for FakeDatabase {
 
     async fn list_databases(&self, _connection: &str) -> Result<DatabaseListing, DatabaseFailure> {
         self.listing.clone()
+    }
+
+    async fn heavy_query_thresholds(&self, _connection: &str) -> Option<HeavyQueryThresholds> {
+        self.thresholds
     }
 
     async fn enum_labels(

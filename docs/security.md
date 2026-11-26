@@ -4,7 +4,7 @@ What the server guarantees, what it does not, and the Claude Code deny rules tha
 
 ## Read-only guarantee
 
-Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLAIN` without `ANALYZE`. Writable CTEs, `SELECT INTO`, row locks, session changes, server functions (`pg_terminate_backend`, `set_config`, `nextval`, `pg_sleep`, `dblink`, large objects, file access...) and catalog relations other than structural ones are refused with the rule that blocked them. Each call runs in a `READ ONLY` transaction with a statement timeout, then rolls back. For defence in depth, point DBeaver at a role that can only `SELECT`. MongoDB requests go through their own [read-only guard](mongodb.md#read-only-guard).
+Every statement must be a single `SELECT`, `WITH ... SELECT`, `VALUES` or `EXPLAIN` without `ANALYZE`. Writable CTEs, `SELECT INTO`, row locks, session changes, server functions (`pg_terminate_backend`, `set_config`, `nextval`, `pg_sleep`, `dblink`, large objects, file access...) and catalog relations other than structural ones are refused with the rule that blocked them. Each call runs in a `READ ONLY` transaction with a statement timeout, then rolls back. On a connection of type `prod`, a request estimated heavy is refused until the developer approves it, see [Production connections](connections.md#production-connections); the estimate is a safeguard against load, not a security boundary. For defence in depth, point DBeaver at a role that can only `SELECT`. MongoDB requests go through their own [read-only guard](mongodb.md#read-only-guard).
 
 ## Threat model and known limits
 

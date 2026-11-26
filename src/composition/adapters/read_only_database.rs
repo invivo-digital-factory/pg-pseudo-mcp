@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use super::database_failure_mapping::database_failure;
+use super::heavy_query_thresholds::heavy_query_thresholds;
 use super::result_set_mapping::{database_listing, execution_limits, query_output};
 use crate::contexts::connections::injector::ConnectionsContext;
 use crate::contexts::querying::domain::errors::DatabaseFailure;
 use crate::contexts::querying::domain::repositories::ReadOnlyDatabase;
-use crate::contexts::querying::domain::types::{DatabaseListing, ExecutionLimits, QueryOutput};
+use crate::contexts::querying::domain::types::{
+    DatabaseListing, ExecutionLimits, HeavyQueryThresholds, QueryOutput,
+};
 
 pub struct ReadOnlyDatabaseAdapter {
     connections: Arc<ConnectionsContext>,
@@ -85,6 +88,10 @@ impl ReadOnlyDatabase for ReadOnlyDatabaseAdapter {
             .await
             .map(database_listing)
             .map_err(database_failure)
+    }
+
+    async fn heavy_query_thresholds(&self, connection: &str) -> Option<HeavyQueryThresholds> {
+        heavy_query_thresholds(&self.connections, connection).await
     }
 
     async fn enum_labels(
