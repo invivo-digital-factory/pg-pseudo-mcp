@@ -92,6 +92,7 @@ pub const CLEAR_MONGO_OPERATORS: &[&str] = &[
     "$max",
 ];
 pub const PASS_THROUGH_ACCUMULATORS: &[&str] = &["$first", "$last", "$push", "$addToSet"];
+pub const ELEMENT_OPERATORS: &[&str] = &["$arrayElemAt", "$first", "$last"];
 pub const FIELD_NAME_OPERATORS: &[&str] = &[
     "$objectToArray",
     "$arrayToObject",

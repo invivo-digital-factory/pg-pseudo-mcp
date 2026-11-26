@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use super::shape::{Derivation, Shape};
 use crate::contexts::querying::domain::constants::clear_lineage::{
-    CONSTANT_VARIABLES, FIELD_NAME_OPERATORS,
+    CONSTANT_VARIABLES, ELEMENT_OPERATORS, FIELD_NAME_OPERATORS,
 };
 use crate::contexts::querying::domain::constants::mongo_policy::EXTENDED_JSON_TYPES;
 
@@ -92,7 +92,22 @@ fn operator(name: &str, argument: &Value, document: &Shape) -> Shape {
         Shape::constant()
     } else if FIELD_NAME_OPERATORS.contains(&name) {
         Shape::unknown()
+    } else if let Some(array) = selected_array(name, argument) {
+        evaluate(array, document)
     } else {
         derive([evaluate(argument, document)], Some(name))
+    }
+}
+
+fn selected_array<'a>(name: &str, argument: &'a Value) -> Option<&'a Value> {
+    if !ELEMENT_OPERATORS.contains(&name) {
+        return None;
+    }
+    match argument {
+        Value::Array(items) if name == "$arrayElemAt" && items.len() == 2 => items.first(),
+        Value::Array(items) if name != "$arrayElemAt" && items.len() == 1 => items.first(),
+        Value::Array(_) => None,
+        _ if name == "$arrayElemAt" => None,
+        array => Some(array),
     }
 }
