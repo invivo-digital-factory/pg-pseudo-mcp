@@ -27,7 +27,7 @@ server: Marie Dupont's orders, every personal value pseudonymized, translated_li
 Each `v*` tag publishes a release with a single binary per platform (macOS arm64 and x86_64, Linux x86_64 and arm64) and a `SHA256SUMS` file:
 
 ```bash
-version=0.5.1
+version=0.6.0
 target=aarch64-apple-darwin
 curl -fsSLO "https://github.com/invivo-digital-factory/scarif-database-mcp/releases/download/v$version/scarif-database-mcp-$target.tar.gz"
 curl -fsSLO "https://github.com/invivo-digital-factory/scarif-database-mcp/releases/download/v$version/SHA256SUMS"
