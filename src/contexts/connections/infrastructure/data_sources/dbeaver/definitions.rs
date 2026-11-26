@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::types::HeavyQueryLimits;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -117,6 +118,7 @@ fn stub(project: &str, id: &str, name: Option<String>) -> ConnectionEntry {
         project: project.to_string(),
         engine: "unknown".to_string(),
         connection_type: "unknown".to_string(),
+        heavy_query: HeavyQueryLimits::default(),
         database: None,
         status: ConnectionStatus::Available,
         params: None,

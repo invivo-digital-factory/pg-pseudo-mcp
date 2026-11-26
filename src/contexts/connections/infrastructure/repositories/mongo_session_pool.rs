@@ -484,6 +484,7 @@ impl DocumentSessionPool for MongoSessionPool {
 
 #[cfg(test)]
 mod unit {
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
     use crate::contexts::connections::domain::types::MongoReadPreference;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -511,6 +512,7 @@ mod unit {
                     project: "General".into(),
                     engine: "mongodb".into(),
                     connection_type: "test".into(),
+                    heavy_query: HeavyQueryLimits::default(),
                     database: Some("shop".into()),
                     status: ConnectionStatus::Available,
                     params: None,

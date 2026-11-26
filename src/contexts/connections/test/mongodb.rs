@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::types::HeavyQueryLimits;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -73,6 +74,7 @@ impl ConnectionCatalog for FixedCatalog {
                 project: "General".into(),
                 engine: "mongodb".into(),
                 connection_type: "test".into(),
+                heavy_query: HeavyQueryLimits::default(),
                 database: self.0.database.clone(),
                 status: ConnectionStatus::Available,
                 params: None,

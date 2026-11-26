@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::connection_profile::{ConnectParams, MongoConnectParams};
 use super::connection_source::ConnectionSource;
+use super::heavy_query_limits::HeavyQueryLimits;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -21,6 +22,7 @@ pub struct ConnectionEntry {
     pub project: String,
     pub engine: String,
     pub connection_type: String,
+    pub heavy_query: HeavyQueryLimits,
     pub database: Option<String>,
     pub status: ConnectionStatus,
     pub params: Option<ConnectParams>,

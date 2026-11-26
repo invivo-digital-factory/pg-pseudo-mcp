@@ -1,3 +1,4 @@
+use crate::contexts::connections::domain::types::HeavyQueryLimits;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -138,6 +139,7 @@ fn unreadable_entry(project: &str, file_label: &str) -> ConnectionEntry {
         project: project.to_string(),
         engine: "unknown".to_string(),
         connection_type: "unknown".to_string(),
+        heavy_query: HeavyQueryLimits::default(),
         database: None,
         status: ConnectionStatus::Unavailable {
             reason: UNREADABLE_REASON.to_string(),
@@ -204,6 +206,7 @@ fn build_entry(
         project: project.to_string(),
         engine,
         connection_type,
+        heavy_query: HeavyQueryLimits::default(),
         database,
         status,
         params,

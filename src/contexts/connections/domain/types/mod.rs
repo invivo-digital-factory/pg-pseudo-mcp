@@ -13,6 +13,7 @@ mod document_node;
 mod document_output;
 mod document_request;
 mod execution_limits;
+mod heavy_query_limits;
 mod import_report;
 mod mongo_policy_entries;
 mod password_source;
@@ -44,6 +45,7 @@ pub use document_node::DocumentNode;
 pub use document_output::DocumentOutput;
 pub use document_request::{AggregateRequest, FindRequest};
 pub use execution_limits::ExecutionLimits;
+pub use heavy_query_limits::HeavyQueryLimits;
 pub use import_report::{
     DbeaverDefinition, DbeaverRead, DbeaverTunnel, HostBlock, ImportReport, ImportedConnection,
     SkippedConnection,

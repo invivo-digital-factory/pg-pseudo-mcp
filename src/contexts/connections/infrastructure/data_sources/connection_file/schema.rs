@@ -4,8 +4,8 @@ use toml::{Table, Value};
 
 use crate::contexts::connections::domain::constants::{ENGINE_MONGODB, ENGINE_POSTGRESQL};
 use crate::contexts::connections::domain::types::{
-    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, MongoReadPreference,
-    MongoSettings, MongoTransport, ReadPreferenceMode, SslMode,
+    AuthMode, ConnectionDefinition, ConnectionType, EngineSettings, HeavyQueryLimits,
+    MongoReadPreference, MongoSettings, MongoTransport, ReadPreferenceMode, SslMode,
 };
 
 const DEFAULT_POSTGRES_PORT: u16 = 5432;
@@ -18,7 +18,7 @@ const MONGODB_ONLY_KEYS: [&str; 5] = [
     "read_preference",
     "read_preference_tags",
 ];
-const KNOWN_KEYS: [&str; 16] = [
+const KNOWN_KEYS: [&str; 18] = [
     "name",
     "engine",
     "srv",
@@ -35,6 +35,8 @@ const KNOWN_KEYS: [&str; 16] = [
     "auth",
     "ssh_alias",
     "password_command",
+    "heavy_cost_limit",
+    "heavy_scan_limit",
 ];
 const SECRET_FRAGMENTS: [&str; 5] = ["password", "passwd", "token", "passphrase", "secret"];
 
@@ -222,6 +224,7 @@ fn definition_of(table: &Table) -> Result<ConnectionDefinition, String> {
     {
         return Err("`ssh_alias` must be a host alias of ~/.ssh/config".to_string());
     }
+    let heavy_query = heavy_query_of(table, mongodb, connection_type)?;
     Ok(ConnectionDefinition {
         name,
         user,
@@ -229,7 +232,50 @@ fn definition_of(table: &Table) -> Result<ConnectionDefinition, String> {
         connection_type,
         auth,
         ssh_alias,
+        heavy_query,
     })
+}
+
+fn heavy_query_of(
+    table: &Table,
+    mongodb: bool,
+    connection_type: ConnectionType,
+) -> Result<HeavyQueryLimits, String> {
+    let limits = HeavyQueryLimits {
+        cost: positive_count(table, "heavy_cost_limit")?,
+        scan_rows: positive_count(table, "heavy_scan_limit")?,
+    };
+    if mongodb && limits.cost.is_some() {
+        return Err(
+            "`heavy_cost_limit` is only valid when `engine` is \"postgresql\"; MongoDB has no plan cost"
+                .to_string(),
+        );
+    }
+    if connection_type != ConnectionType::Prod
+        && let Some(key) = [
+            ("heavy_cost_limit", limits.cost),
+            ("heavy_scan_limit", limits.scan_rows),
+        ]
+        .iter()
+        .find_map(|(key, value)| value.map(|_| key))
+    {
+        return Err(format!(
+            "`{key}` is only valid when `type` is \"prod\"; the heavy-query guard runs on prod connections only"
+        ));
+    }
+    Ok(limits)
+}
+
+fn positive_count(table: &Table, key: &str) -> Result<Option<u64>, String> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(Value::Integer(count)) => u64::try_from(*count)
+            .ok()
+            .filter(|count| *count > 0)
+            .map(Some)
+            .ok_or_else(|| format!("`{key}` must be a positive whole number")),
+        Some(_) => Err(format!("`{key}` must be a positive whole number")),
+    }
 }
 
 fn port_of(table: &Table) -> Result<Option<u16>, String> {
@@ -730,6 +776,65 @@ password_command = ["/bin/echo", "x"]
         ] {
             let reason = only_definition(&mongo_with(extra)).unwrap_err();
             assert!(reason.contains(&format!("`{field}`")), "{extra}: {reason}");
+        }
+    }
+
+    #[test]
+    fn sans_seuil_declare_la_connexion_prod_garde_les_seuils_par_defaut() {
+        assert_eq!(
+            only_definition(VALID).unwrap().heavy_query,
+            HeavyQueryLimits::default()
+        );
+    }
+
+    #[test]
+    fn les_seuils_de_requete_lourde_sont_lus_sur_une_connexion_prod() {
+        let definition = only_definition(&entry_with(
+            "heavy_cost_limit = 50000\nheavy_scan_limit = 200000",
+        ))
+        .unwrap();
+        assert_eq!(
+            definition.heavy_query,
+            HeavyQueryLimits {
+                cost: Some(50_000),
+                scan_rows: Some(200_000)
+            }
+        );
+        let mongo = MONGO.replace("type = \"dev\"", "type = \"prod\"");
+        let definition = only_definition(&format!("{mongo}heavy_scan_limit = 10\n")).unwrap();
+        assert_eq!(definition.heavy_query.scan_rows, Some(10));
+    }
+
+    #[test]
+    fn un_seuil_invalide_ou_hors_prod_nomme_la_cle_fautive() {
+        for (contents, expected) in [
+            (
+                entry_with("heavy_cost_limit = 0"),
+                "`heavy_cost_limit` must be a positive whole number",
+            ),
+            (
+                entry_with("heavy_scan_limit = -1"),
+                "`heavy_scan_limit` must be a positive whole number",
+            ),
+            (
+                entry_with("heavy_scan_limit = \"1000\""),
+                "`heavy_scan_limit` must be a positive whole number",
+            ),
+            (
+                VALID.replace("prod", "test") + "heavy_scan_limit = 10\n",
+                "`heavy_scan_limit` is only valid when `type` is \"prod\"",
+            ),
+            (
+                VALID.replace("prod", "dev") + "heavy_cost_limit = 10\n",
+                "`heavy_cost_limit` is only valid when `type` is \"prod\"",
+            ),
+            (
+                MONGO.replace("type = \"dev\"", "type = \"prod\"") + "heavy_cost_limit = 10\n",
+                "`heavy_cost_limit` is only valid when `engine` is \"postgresql\"",
+            ),
+        ] {
+            let reason = only_definition(&contents).unwrap_err();
+            assert!(reason.contains(expected), "{contents}: {reason}");
         }
     }
 

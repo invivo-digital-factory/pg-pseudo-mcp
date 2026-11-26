@@ -69,6 +69,7 @@ fn find_entry<'a>(
 #[cfg(test)]
 mod unit {
     use super::*;
+    use crate::contexts::connections::domain::types::HeavyQueryLimits;
     use crate::contexts::connections::domain::types::MongoReadPreference;
     use crate::contexts::connections::domain::types::{ConnectionSource, MongoTransport};
 
@@ -106,6 +107,7 @@ mod unit {
                 "postgresql".into()
             },
             connection_type: "dev".into(),
+            heavy_query: HeavyQueryLimits::default(),
             database: None,
             status,
             params: None,
