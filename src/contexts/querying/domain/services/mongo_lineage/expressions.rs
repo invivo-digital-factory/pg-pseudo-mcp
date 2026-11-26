@@ -104,7 +104,11 @@ fn selected_array<'a>(name: &str, argument: &'a Value) -> Option<&'a Value> {
         return None;
     }
     match argument {
-        Value::Array(items) if name == "$arrayElemAt" && items.len() == 2 => items.first(),
+        Value::Array(items)
+            if name == "$arrayElemAt" && items.len() == 2 && items[1].is_number() =>
+        {
+            items.first()
+        }
         Value::Array(items) if name != "$arrayElemAt" && items.len() == 1 => items.first(),
         Value::Array(_) => None,
         _ if name == "$arrayElemAt" => None,

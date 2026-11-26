@@ -193,6 +193,7 @@ Fonctionnalité: Valeurs calculées et lignée
         | [{"$set": {"card": {"$mergeObjects": ["$status", "$amount"]}}}, {"$set": {"card.extra": 1}}]   | card     | teinté            |
         | [{"$project": {"user": {"$arrayElemAt": [{"$split": ["$email", "@"]}, 0]}}}]                   | user     | teinté            |
         | [{"$project": {"user": {"$first": {"$split": ["$email", "@"]}}}}]                              | user     | teinté            |
+        | [{"$project": {"pick": {"$arrayElemAt": ["$status", {"$strLenCP": "$email"}]}}}]               | pick     | teinté            |
 
   Règle: MongoDB : ce que la lignée ne suit pas est inconnu, donc teinté
     $$ROOT et les variables, $objectToArray, les noms de champ calculés, $facet, $unionWith et les étapes non suivies donnent un champ dérivé.
